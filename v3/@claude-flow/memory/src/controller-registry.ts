@@ -1430,13 +1430,24 @@ export class ControllerRegistry extends EventEmitter {
       // ----- ADR-0041: Level 2 Composites -----
 
       case 'nativeAccelerator': {
-        // B4: Shared singleton — used by A6, A5, B2, A7
+        // B4: Shared singleton — used by A6, A5, B2, A7 (ADR-0046)
+        // Uses getAccelerator() for module-level singleton with auto-initialization
         if (!this.agentdb) return null;
         try {
           const agentdbModule: any = await import('agentdb');
+          // Prefer singleton factory (handles init + caching)
+          const getAccel = agentdbModule.getAccelerator;
+          if (typeof getAccel === 'function') {
+            return await getAccel();
+          }
+          // Fallback: direct construction + manual init
           const NA = agentdbModule.NativeAccelerator;
           if (!NA) return null;
-          return new NA();
+          const accel = new NA();
+          if (typeof accel.initialize === 'function') {
+            await accel.initialize();
+          }
+          return accel;
         } catch { return null; }
       }
 
