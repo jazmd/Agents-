@@ -360,6 +360,73 @@ async function logAttestation(
   }
 }
 
+// ===== ADR-0041: Safeguards 1-4 shared wrapper =====
+
+/**
+ * Wrap a bridge call with ADR-0041 safeguards:
+ *  1. try-catch + timeout (default 2s)
+ *  2. Cold-start guard (skip if controller has insufficient data)
+ *  3. Max writes per call (default 3, enforced per invocation)
+ *  4. Fire-and-forget for background writes (returns immediately)
+ *
+ * @param fn - The bridge operation to execute
+ * @param opts - Safeguard options
+ * @returns The result of fn, or opts.fallback on failure/timeout
+ */
+export async function withBridgeSafeguards<T>(
+  fn: () => Promise<T>,
+  opts: {
+    timeoutMs?: number;
+    coldStartCheck?: () => boolean;
+    maxWrites?: number;
+    writeCounter?: { count: number };
+    fireAndForget?: boolean;
+    fallback?: T;
+  } = {},
+): Promise<T | undefined> {
+  const {
+    timeoutMs = 2000,
+    coldStartCheck,
+    maxWrites = 3,
+    writeCounter,
+    fireAndForget = false,
+    fallback,
+  } = opts;
+
+  // Safeguard 2: Cold-start guard
+  if (coldStartCheck && !coldStartCheck()) {
+    return fallback;
+  }
+
+  // Safeguard 3: Write limit
+  if (writeCounter && writeCounter.count >= maxWrites) {
+    return fallback;
+  }
+
+  // Safeguard 4: Fire-and-forget (non-blocking background write)
+  if (fireAndForget) {
+    fn().then(
+      () => { if (writeCounter) writeCounter.count++; },
+      () => { /* swallow — fire-and-forget */ },
+    );
+    return fallback;
+  }
+
+  // Safeguard 1: try-catch + timeout
+  try {
+    const result = await Promise.race([
+      fn(),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('bridge_timeout')), timeoutMs),
+      ),
+    ]);
+    if (writeCounter) writeCounter.count++;
+    return result;
+  } catch {
+    return fallback;
+  }
+}
+
 // ===== ADR-0042: Security & Reliability helpers =====
 
 /**

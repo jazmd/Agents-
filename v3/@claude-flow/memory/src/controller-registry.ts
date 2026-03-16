@@ -92,6 +92,83 @@ export interface InitLevel {
   controllers: ControllerName[];
 }
 
+// ===== ADR-0041: 7-step integration template helper =====
+
+/**
+ * Descriptor for a new controller integration. Used by {@link validateControllerIntegration}
+ * to verify all 7 steps of the ADR-0041 wiring protocol are satisfied.
+ */
+export interface ControllerIntegrationDescriptor {
+  /** Controller name (must be in AgentDBControllerName or CLIControllerName union) */
+  name: string;
+  /** Init level (0-6) where the controller should be registered */
+  level: number;
+  /** Whether isControllerEnabled() has a case for this name */
+  hasEnableCheck: boolean;
+  /** Whether createController() has a factory case for this name */
+  hasFactory: boolean;
+  /** Whether a bridge function exists in memory-bridge.ts */
+  hasBridgeFunction: boolean;
+  /** Whether an MCP tool is registered for this controller */
+  hasMcpTool: boolean;
+}
+
+/**
+ * ADR-0041 7-step integration checklist validator.
+ *
+ * Validates that a new controller follows all 7 required steps:
+ *  1. Added to ControllerName type union
+ *  2. Added to INIT_LEVELS at appropriate level
+ *  3. Added to isControllerEnabled() switch
+ *  4. Added to createController() factory
+ *  5. Bridge function(s) in memory-bridge.ts
+ *  6. MCP tool(s) in agentdb-tools.ts
+ *  7. TypeScript check passes (caller responsibility)
+ *
+ * @returns Array of missing steps (empty = all steps complete)
+ */
+export function validateControllerIntegration(
+  desc: ControllerIntegrationDescriptor,
+): string[] {
+  const missing: string[] = [];
+
+  // Step 1: Name in type union (checked via INIT_LEVELS membership as proxy)
+  const allRegistered = INIT_LEVELS.flatMap((l) => l.controllers);
+  if (!allRegistered.includes(desc.name as ControllerName)) {
+    missing.push(`Step 1: '${desc.name}' not in ControllerName type union`);
+  }
+
+  // Step 2: In INIT_LEVELS at declared level
+  const levelEntry = INIT_LEVELS.find((l) => l.level === desc.level);
+  if (!levelEntry || !levelEntry.controllers.includes(desc.name as ControllerName)) {
+    missing.push(`Step 2: '${desc.name}' not in INIT_LEVELS at level ${desc.level}`);
+  }
+
+  // Step 3: Enable check
+  if (!desc.hasEnableCheck) {
+    missing.push(`Step 3: '${desc.name}' missing isControllerEnabled() case`);
+  }
+
+  // Step 4: Factory
+  if (!desc.hasFactory) {
+    missing.push(`Step 4: '${desc.name}' missing createController() factory case`);
+  }
+
+  // Step 5: Bridge function
+  if (!desc.hasBridgeFunction) {
+    missing.push(`Step 5: '${desc.name}' missing bridge function in memory-bridge.ts`);
+  }
+
+  // Step 6: MCP tool
+  if (!desc.hasMcpTool) {
+    missing.push(`Step 6: '${desc.name}' missing MCP tool registration`);
+  }
+
+  // Step 7: tsc --noEmit (caller responsibility, cannot check at runtime)
+
+  return missing;
+}
+
 /**
  * Individual controller health status
  */
