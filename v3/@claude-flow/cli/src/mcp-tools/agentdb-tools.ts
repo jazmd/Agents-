@@ -875,6 +875,63 @@ export const agentdbBatchOptimize: MCPTool = {
   },
 };
 
+// ===== ADR-0042: agentdb_rate_limit_status =====
+
+export const agentdbRateLimitStatus: MCPTool = {
+  name: 'agentdb_rate_limit_status',
+  description: 'Get rate limiter status for all token buckets (insert, search, delete, batch)',
+  inputSchema: {
+    type: 'object',
+    properties: {},
+  },
+  handler: async () => {
+    try {
+      const bridge = await getBridge();
+      return await bridge.bridgeRateLimitStatus();
+    } catch (error) {
+      return { success: false, error: sanitizeError(error) };
+    }
+  },
+};
+
+// ===== ADR-0042: agentdb_resource_usage =====
+
+export const agentdbResourceUsage: MCPTool = {
+  name: 'agentdb_resource_usage',
+  description: 'Get resource tracker usage stats including memory ceiling and query counts',
+  inputSchema: {
+    type: 'object',
+    properties: {},
+  },
+  handler: async () => {
+    try {
+      const bridge = await getBridge();
+      return await bridge.bridgeResourceUsage();
+    } catch (error) {
+      return { success: false, error: sanitizeError(error) };
+    }
+  },
+};
+
+// ===== ADR-0042: agentdb_circuit_status =====
+
+export const agentdbCircuitStatus: MCPTool = {
+  name: 'agentdb_circuit_status',
+  description: 'Get circuit breaker status for all wrapped controllers (state, failure counts)',
+  inputSchema: {
+    type: 'object',
+    properties: {},
+  },
+  handler: async () => {
+    try {
+      const bridge = await getBridge();
+      return await bridge.bridgeCircuitStatus();
+    } catch (error) {
+      return { success: false, error: sanitizeError(error) };
+    }
+  },
+};
+
 // ===== Export all tools =====
 
 export const agentdbTools: MCPTool[] = [
@@ -899,4 +956,7 @@ export const agentdbTools: MCPTool[] = [
   agentdbBranch,
   agentdbCausalRecall,
   agentdbBatchOptimize,
+  agentdbRateLimitStatus,    // ADR-0042
+  agentdbResourceUsage,      // ADR-0042
+  agentdbCircuitStatus,      // ADR-0042
 ];
