@@ -47,6 +47,9 @@ export type AgentDBControllerName =
   | 'selfLearningRvfBackend'   // A6 - composite parent
   | 'nativeAccelerator'        // B4 - shared singleton
   | 'quantizedVectorStore'     // B9 - composite parent
+  | 'selfAttention'            // A1 - ADR-0044
+  | 'crossAttention'           // A2 - ADR-0044
+  | 'multiHeadAttention'       // A3 - ADR-0044
   | 'attentionService'         // A5
   | 'enhancedEmbeddingService' // A9
   | 'federatedLearningManager'; // A11
@@ -77,7 +80,8 @@ export type CLIControllerName =
   | 'queryOptimizer'             // B6
   | 'indexHealthMonitor'         // B3
   | 'auditLogger'               // D3
-  | 'attentionMetrics';          // D2
+  | 'attentionMetrics'           // D2
+  | 'telemetryManager';          // D1
 
 /**
  * All controller names
@@ -225,6 +229,21 @@ export interface RuntimeConfig {
 
   /** Backend instance to use (if pre-created) */
   backend?: IMemoryBackend;
+
+  /** ADR-0045: D1 TelemetryManager exporters (default: ['console']) */
+  telemetryExporters?: string[];
+  /** ADR-0045: A9 EnhancedEmbeddingService providers */
+  embeddingProviders?: string[];
+  /** ADR-0045: A9 LRU cache max entries */
+  embeddingCacheSize?: number;
+  /** ADR-0045: A9 batch concurrency limit */
+  embeddingBatchConcurrency?: number;
+  /** ADR-0045: D3 AuditLogger rotation size (e.g. '10MB') */
+  auditRotationSize?: string;
+  /** ADR-0045: D3 AuditLogger max rotation files */
+  auditRotationFiles?: number;
+  /** ADR-0045: D3 AuditLogger format (default: 'soc2') */
+  auditFormat?: string;
 }
 
 /**
@@ -248,11 +267,11 @@ interface ControllerEntry {
  */
 export const INIT_LEVELS: InitLevel[] = [
   // Level 0: Foundation — infrastructure controllers (must init first)
-  { level: 0, controllers: ['resourceTracker', 'rateLimiter', 'circuitBreakerController'] },
+  { level: 0, controllers: ['telemetryManager', 'resourceTracker', 'rateLimiter', 'circuitBreakerController'] },
   // Level 1: Core intelligence
   { level: 1, controllers: ['reasoningBank', 'hierarchicalMemory', 'learningBridge', 'solverBandit', 'tieredCache', 'metadataFilter', 'queryOptimizer'] },
   // Level 2: Graph, security, composites
-  { level: 2, controllers: ['memoryGraph', 'agentMemoryScope', 'vectorBackend', 'mutationGuard', 'gnnService', 'attentionService', 'selfLearningRvfBackend', 'nativeAccelerator', 'quantizedVectorStore'] },
+  { level: 2, controllers: ['memoryGraph', 'agentMemoryScope', 'vectorBackend', 'mutationGuard', 'gnnService', 'selfAttention', 'crossAttention', 'multiHeadAttention', 'attentionService', 'selfLearningRvfBackend', 'nativeAccelerator', 'quantizedVectorStore'] },
   // Level 3: Specialization
   { level: 3, controllers: ['skills', 'explainableRecall', 'reflexion', 'attestationLog', 'batchOperations', 'memoryConsolidation', 'enhancedEmbeddingService', 'auditLogger'] },
   // Level 4: Causal, routing, health
@@ -693,6 +712,7 @@ export class ControllerRegistry extends EventEmitter {
       case 'resourceTracker':
       case 'rateLimiter':
       case 'circuitBreakerController':
+      case 'telemetryManager':
         return true;
 
       // ADR-0041: Level 1 additions — enabled when AgentDB available
@@ -704,6 +724,9 @@ export class ControllerRegistry extends EventEmitter {
       case 'selfLearningRvfBackend':
       case 'nativeAccelerator':
       case 'quantizedVectorStore':
+      case 'selfAttention':          // A1 - ADR-0044
+      case 'crossAttention':         // A2 - ADR-0044
+      case 'multiHeadAttention':     // A3 - ADR-0044
       case 'attentionService':
         return this.agentdb !== null;
 
@@ -1320,6 +1343,66 @@ export class ControllerRegistry extends EventEmitter {
         };
       }
 
+      case 'telemetryManager': {
+        // D1: OpenTelemetry spans + counters + histograms (ADR-0045)
+        // Level 0: initializes before all other controllers to instrument init times
+        const spans: Array<{ name: string; startTime: number; endTime: number | null; attributes: Record<string, unknown> }> = [];
+        const counters: Record<string, number> = {};
+        const histograms: Record<string, number[]> = {};
+        const exporters: string[] = this.config.telemetryExporters ?? ['console'];
+
+        return {
+          startSpan(name: string, attributes?: Record<string, unknown>) {
+            const span = { name, startTime: performance.now(), endTime: null as number | null, attributes: attributes ?? {} };
+            spans.push(span);
+            return {
+              end() {
+                span.endTime = performance.now();
+                const duration = span.endTime - span.startTime;
+                if (!histograms[name]) histograms[name] = [];
+                histograms[name].push(duration);
+              },
+              setAttribute(key: string, value: unknown) { span.attributes[key] = value; },
+            };
+          },
+          increment(name: string, value = 1) {
+            counters[name] = (counters[name] ?? 0) + value;
+          },
+          recordHistogram(name: string, value: number) {
+            if (!histograms[name]) histograms[name] = [];
+            histograms[name].push(value);
+          },
+          getMetrics() {
+            const percentile = (arr: number[], p: number) => {
+              if (arr.length === 0) return 0;
+              const sorted = [...arr].sort((a, b) => a - b);
+              const idx = Math.ceil(sorted.length * p / 100) - 1;
+              return sorted[Math.max(0, idx)];
+            };
+            const histogramStats: Record<string, { count: number; p50: number; p95: number; p99: number }> = {};
+            for (const [key, values] of Object.entries(histograms)) {
+              histogramStats[key] = {
+                count: values.length,
+                p50: percentile(values, 50),
+                p95: percentile(values, 95),
+                p99: percentile(values, 99),
+              };
+            }
+            return { counters: { ...counters }, histograms: histogramStats, exporters };
+          },
+          getSpans(limit = 100) {
+            return spans.slice(-limit).map(s => ({
+              name: s.name,
+              durationMs: s.endTime !== null ? s.endTime - s.startTime : null,
+              attributes: s.attributes,
+            }));
+          },
+          getStats() {
+            return { spanCount: spans.length, counterCount: Object.keys(counters).length, histogramCount: Object.keys(histograms).length, exporters };
+          },
+        };
+      }
+
       // ----- ADR-0041: Level 1 Additions -----
 
       case 'metadataFilter': {
@@ -1394,6 +1477,46 @@ export class ControllerRegistry extends EventEmitter {
         } catch { return null; }
       }
 
+      case 'selfAttention': {
+        // A1: SelfAttentionController — pure JS, no native deps (ADR-0044)
+        if (!this.agentdb) return null;
+        try {
+          const agentdbModule: any = await import('agentdb');
+          const SA = agentdbModule.SelfAttentionController;
+          if (!SA) return null;
+          const vb = this.get('vectorBackend');
+          return new SA({ dimension: this.config.dimension || 768, vectorBackend: vb || undefined });
+        } catch { return null; }
+      }
+
+      case 'crossAttention': {
+        // A2: CrossAttentionController — pure JS, no native deps (ADR-0044)
+        if (!this.agentdb) return null;
+        try {
+          const agentdbModule: any = await import('agentdb');
+          const CA = agentdbModule.CrossAttentionController;
+          if (!CA) return null;
+          const vb = this.get('vectorBackend');
+          return new CA({ dimension: this.config.dimension || 768, vectorBackend: vb || undefined });
+        } catch { return null; }
+      }
+
+      case 'multiHeadAttention': {
+        // A3: MultiHeadAttentionController — pure JS, no native deps (ADR-0044)
+        if (!this.agentdb) return null;
+        try {
+          const agentdbModule: any = await import('agentdb');
+          const MHA = agentdbModule.MultiHeadAttentionController;
+          if (!MHA) return null;
+          const vb = this.get('vectorBackend');
+          return new MHA({
+            dimension: this.config.dimension || 768,
+            numHeads: 8,
+            vectorBackend: vb || undefined,
+          });
+        } catch { return null; }
+      }
+
       case 'attentionService': {
         // A5: AttentionService (Flash, MoE, GraphRoPE enabled by default)
         if (!this.agentdb) return null;
@@ -1414,25 +1537,34 @@ export class ControllerRegistry extends EventEmitter {
       // ----- ADR-0041: Level 3 Additions -----
 
       case 'enhancedEmbeddingService': {
-        // A9: Uses hierarchicalMemory (level 1) and vectorBackend (level 2)
+        // A9: Multi-provider embeddings with LRU cache, semaphore batch, dimension alignment (ADR-0045)
         if (!this.agentdb) return null;
         try {
           const agentdbModule: any = await import('agentdb');
           const EES = agentdbModule.EnhancedEmbeddingService;
           if (!EES) return null;
           const embedder = this.createEmbeddingService();
-          return new EES({ embedder, dimension: this.config.dimension || 768 });
+          return new EES({
+            embedder,
+            dimension: this.config.dimension || 768,
+            providers: this.config.embeddingProviders ?? ['xenova', 'openai', 'cohere'],
+            cache: { maxSize: this.config.embeddingCacheSize ?? 100_000, ttl: 3600 },
+            batch: { concurrency: this.config.embeddingBatchConcurrency ?? 10 },
+          });
         } catch { return null; }
       }
 
       case 'auditLogger': {
-        // D3: Structured audit logging
+        // D3: 18 typed security events, file rotation, SOC2/GDPR/HIPAA (ADR-0045)
         if (!this.agentdb) return null;
         try {
           const agentdbModule: any = await import('agentdb');
           const AL = agentdbModule.AuditLogger;
           if (!AL) return null;
-          return new AL(this.agentdb.database);
+          return new AL(this.agentdb.database, {
+            rotation: { maxSize: this.config.auditRotationSize ?? '10MB', maxFiles: this.config.auditRotationFiles ?? 10 },
+            format: this.config.auditFormat ?? 'soc2',
+          });
         } catch { return null; }
       }
 
