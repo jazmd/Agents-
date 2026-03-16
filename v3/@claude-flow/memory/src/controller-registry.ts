@@ -606,7 +606,8 @@ export class ControllerRegistry extends EventEmitter {
       // Validate dbPath to prevent path traversal
       const dbPath = config.dbPath || ':memory:';
       if (dbPath !== ':memory:') {
-        const resolved = require('path').resolve(dbPath);
+        const { resolve: pathResolve } = await import('path');
+        const resolved = pathResolve(dbPath);
         if (resolved.includes('..')) {
           this.emit('agentdb:unavailable', { reason: 'Invalid dbPath' });
           return;
