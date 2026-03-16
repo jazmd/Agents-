@@ -1611,14 +1611,22 @@ export class ControllerRegistry extends EventEmitter {
       }
 
       case 'attentionMetrics': {
-        // D2: Metrics collection for attention-based controllers
+        // D2: Metrics collection for A1-A3 + A5 attention controllers (ADR-0044)
         if (!this.agentdb) return null;
         try {
           const agentdbModule: any = await import('agentdb');
           const AM = agentdbModule.AttentionMetrics;
           if (!AM) return null;
           const attention = this.get('attentionService');
-          return new AM({ attentionService: attention || undefined });
+          const selfAttn = this.get('selfAttention');
+          const crossAttn = this.get('crossAttention');
+          const multiHead = this.get('multiHeadAttention');
+          return new AM({
+            attentionService: attention || undefined,
+            selfAttention: selfAttn || undefined,
+            crossAttention: crossAttn || undefined,
+            multiHeadAttention: multiHead || undefined,
+          });
         } catch { return null; }
       }
 
