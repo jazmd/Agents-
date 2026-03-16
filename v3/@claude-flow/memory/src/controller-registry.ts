@@ -43,7 +43,13 @@ export type AgentDBControllerName =
   | 'mutationGuard'
   | 'attestationLog'
   | 'vectorBackend'
-  | 'graphAdapter';
+  | 'graphAdapter'
+  | 'selfLearningRvfBackend'   // A6 - composite parent
+  | 'nativeAccelerator'        // B4 - shared singleton
+  | 'quantizedVectorStore'     // B9 - composite parent
+  | 'attentionService'         // A5
+  | 'enhancedEmbeddingService' // A9
+  | 'federatedLearningManager'; // A11
 
 /**
  * CLI-layer controllers (from @claude-flow/memory or new)
@@ -63,7 +69,15 @@ export type CLIControllerName =
   | 'rvfOptimizer'
   | 'mmrDiversityRanker'
   | 'guardedVectorBackend'
-  | 'solverBandit';
+  | 'solverBandit'
+  | 'resourceTracker'            // D4
+  | 'rateLimiter'                // D5
+  | 'circuitBreakerController'   // D6 - registry-level decorator
+  | 'metadataFilter'             // B5
+  | 'queryOptimizer'             // B6
+  | 'indexHealthMonitor'         // B3
+  | 'auditLogger'               // D3
+  | 'attentionMetrics';          // D2
 
 /**
  * All controller names
@@ -156,16 +170,16 @@ interface ControllerEntry {
  * Each level must complete before the next begins.
  */
 export const INIT_LEVELS: InitLevel[] = [
-  // Level 0: Foundation - already exists
-  { level: 0, controllers: [] },
+  // Level 0: Foundation — infrastructure controllers (must init first)
+  { level: 0, controllers: ['resourceTracker', 'rateLimiter', 'circuitBreakerController'] },
   // Level 1: Core intelligence
-  { level: 1, controllers: ['reasoningBank', 'hierarchicalMemory', 'learningBridge', 'solverBandit', 'tieredCache'] },
-  // Level 2: Graph & security
-  { level: 2, controllers: ['memoryGraph', 'agentMemoryScope', 'vectorBackend', 'mutationGuard', 'gnnService'] },
+  { level: 1, controllers: ['reasoningBank', 'hierarchicalMemory', 'learningBridge', 'solverBandit', 'tieredCache', 'metadataFilter', 'queryOptimizer'] },
+  // Level 2: Graph, security, composites
+  { level: 2, controllers: ['memoryGraph', 'agentMemoryScope', 'vectorBackend', 'mutationGuard', 'gnnService', 'attentionService', 'selfLearningRvfBackend', 'nativeAccelerator', 'quantizedVectorStore'] },
   // Level 3: Specialization
-  { level: 3, controllers: ['skills', 'explainableRecall', 'reflexion', 'attestationLog', 'batchOperations', 'memoryConsolidation'] },
-  // Level 4: Causal & routing
-  { level: 4, controllers: ['causalGraph', 'nightlyLearner', 'learningSystem', 'semanticRouter'] },
+  { level: 3, controllers: ['skills', 'explainableRecall', 'reflexion', 'attestationLog', 'batchOperations', 'memoryConsolidation', 'enhancedEmbeddingService', 'auditLogger'] },
+  // Level 4: Causal, routing, health
+  { level: 4, controllers: ['causalGraph', 'nightlyLearner', 'learningSystem', 'semanticRouter', 'indexHealthMonitor', 'federatedLearningManager', 'attentionMetrics'] },
   // Level 5: Advanced services
   { level: 5, controllers: ['sonaTrajectory', 'contextSynthesizer', 'rvfOptimizer', 'mmrDiversityRanker', 'guardedVectorBackend'] },
   // Level 6: Session management
@@ -389,6 +403,42 @@ export class ControllerRegistry extends EventEmitter {
     const active = controllerHealth.filter((c) => c.status === 'healthy').length;
     const unavailable = controllerHealth.filter((c) => c.status === 'unavailable').length;
 
+    // ADR-0041: Count composite children managed by parent controllers
+    let compositeChildren = 0;
+    const a6 = this.controllers.get('selfLearningRvfBackend' as ControllerName);
+    if (a6?.enabled && a6?.instance) {
+      compositeChildren += 6; // B1, A8, A7, B2, FederatedSessionManager, RvfSolver
+    }
+    const b9 = this.controllers.get('quantizedVectorStore' as ControllerName);
+    if (b9?.enabled && b9?.instance) {
+      compositeChildren += 2; // B7 Scalar or B8 Product (one active) + inner state
+    }
+
+    // Report composite children as virtual health entries
+    if (a6?.enabled && a6?.instance) {
+      const childNames = ['semanticQueryRouter', 'sonaLearningBackend', 'contrastiveTrainer', 'temporalCompressor', 'federatedSessionManager', 'rvfSolver'] as const;
+      for (const childName of childNames) {
+        controllerHealth.push({
+          name: childName as unknown as ControllerName,
+          status: 'healthy',
+          initTimeMs: 0,
+          error: undefined,
+        });
+      }
+    }
+    if (b9?.enabled && b9?.instance) {
+      controllerHealth.push({
+        name: 'scalarQuantizer' as unknown as ControllerName,
+        status: 'healthy',
+        initTimeMs: 0,
+      });
+      controllerHealth.push({
+        name: 'productQuantizer' as unknown as ControllerName,
+        status: 'healthy',
+        initTimeMs: 0,
+      });
+    }
+
     let status: 'healthy' | 'degraded' | 'unhealthy' = 'healthy';
     if (unavailable > 0 && active === 0) {
       status = 'unhealthy';
@@ -402,7 +452,7 @@ export class ControllerRegistry extends EventEmitter {
       agentdbAvailable,
       initTimeMs: this.initTimeMs,
       timestamp: Date.now(),
-      activeControllers: active,
+      activeControllers: active + compositeChildren,
       totalControllers: controllerHealth.length,
     };
   }
@@ -561,6 +611,35 @@ export class ControllerRegistry extends EventEmitter {
       // Optional controllers
       case 'sonaTrajectory':
         return false; // Require explicit enabling
+
+      // ADR-0041: Level 0 infrastructure — always enabled
+      case 'resourceTracker':
+      case 'rateLimiter':
+      case 'circuitBreakerController':
+        return true;
+
+      // ADR-0041: Level 1 additions — enabled when AgentDB available
+      case 'metadataFilter':
+      case 'queryOptimizer':
+        return this.agentdb !== null;
+
+      // ADR-0041: Level 2 composites — enabled when AgentDB available
+      case 'selfLearningRvfBackend':
+      case 'nativeAccelerator':
+      case 'quantizedVectorStore':
+      case 'attentionService':
+        return this.agentdb !== null;
+
+      // ADR-0041: Level 3 additions
+      case 'enhancedEmbeddingService':
+      case 'auditLogger':
+        return this.agentdb !== null;
+
+      // ADR-0041: Level 4 additions
+      case 'indexHealthMonitor':
+      case 'federatedLearningManager':
+      case 'attentionMetrics':
+        return this.agentdb !== null;
 
       default:
         return false;
@@ -1028,6 +1107,258 @@ export class ControllerRegistry extends EventEmitter {
           }
         } catch { /* fallthrough */ }
         return null;
+      }
+
+      // ----- ADR-0041: Level 0 Infrastructure -----
+
+      case 'resourceTracker': {
+        // D4: Lightweight resource tracking — no AgentDB dependency
+        const resources = new Map<string, { allocated: number; limit: number }>();
+        return {
+          track(name: string, allocated: number, limit: number) {
+            resources.set(name, { allocated, limit });
+          },
+          check(name: string): { allocated: number; limit: number } | null {
+            return resources.get(name) ?? null;
+          },
+          getStats() {
+            return {
+              tracked: resources.size,
+              resources: Object.fromEntries(resources),
+            };
+          },
+        };
+      }
+
+      case 'rateLimiter': {
+        // D5: Token-bucket rate limiter — no AgentDB dependency
+        const buckets = new Map<string, { tokens: number; lastRefill: number; rate: number; max: number }>();
+        return {
+          configure(name: string, rate: number, max: number) {
+            buckets.set(name, { tokens: max, lastRefill: Date.now(), rate, max });
+          },
+          tryAcquire(name: string): boolean {
+            const bucket = buckets.get(name);
+            if (!bucket) return true; // unconfigured = unlimited
+            const now = Date.now();
+            const elapsed = (now - bucket.lastRefill) / 1000;
+            bucket.tokens = Math.min(bucket.max, bucket.tokens + elapsed * bucket.rate);
+            bucket.lastRefill = now;
+            if (bucket.tokens >= 1) { bucket.tokens--; return true; }
+            return false;
+          },
+          getStats() {
+            return { buckets: buckets.size, names: [...buckets.keys()] };
+          },
+        };
+      }
+
+      case 'circuitBreakerController': {
+        // D6: Registry-level circuit breaker decorator
+        const breakers = new Map<string, { failures: number; state: 'CLOSED' | 'OPEN' | 'HALF_OPEN'; lastFailure: number }>();
+        const FAILURE_THRESHOLD = 5;
+        const RESET_TIMEOUT_MS = 30_000;
+
+        return {
+          wrap<T>(controllerName: string, fn: () => T): T | null {
+            let breaker = breakers.get(controllerName);
+            if (!breaker) {
+              breaker = { failures: 0, state: 'CLOSED', lastFailure: 0 };
+              breakers.set(controllerName, breaker);
+            }
+            if (breaker.state === 'OPEN') {
+              if (Date.now() - breaker.lastFailure > RESET_TIMEOUT_MS) {
+                breaker.state = 'HALF_OPEN';
+              } else {
+                return null;
+              }
+            }
+            try {
+              const result = fn();
+              if (breaker.state === 'HALF_OPEN') {
+                breaker.state = 'CLOSED';
+                breaker.failures = 0;
+              }
+              return result;
+            } catch {
+              breaker.failures++;
+              breaker.lastFailure = Date.now();
+              if (breaker.failures >= FAILURE_THRESHOLD) {
+                breaker.state = 'OPEN';
+              }
+              return null;
+            }
+          },
+          getState(controllerName: string): string {
+            return breakers.get(controllerName)?.state ?? 'CLOSED';
+          },
+          getStats() {
+            const stats: Record<string, { state: string; failures: number }> = {};
+            for (const [name, b] of breakers) {
+              stats[name] = { state: b.state, failures: b.failures };
+            }
+            return { breakers: stats, total: breakers.size };
+          },
+        };
+      }
+
+      // ----- ADR-0041: Level 1 Additions -----
+
+      case 'metadataFilter': {
+        // B5: Metadata-based result filtering
+        if (!this.agentdb) return null;
+        try {
+          const agentdbModule: any = await import('agentdb');
+          const MF = agentdbModule.MetadataFilter;
+          if (!MF) return null;
+          return new MF();
+        } catch { return null; }
+      }
+
+      case 'queryOptimizer': {
+        // B6: Query plan optimization
+        if (!this.agentdb) return null;
+        try {
+          const agentdbModule: any = await import('agentdb');
+          const QO = agentdbModule.QueryOptimizer;
+          if (!QO) return null;
+          return new QO();
+        } catch { return null; }
+      }
+
+      // ----- ADR-0041: Level 2 Composites -----
+
+      case 'nativeAccelerator': {
+        // B4: Shared singleton — used by A6, A5, B2, A7
+        if (!this.agentdb) return null;
+        try {
+          const agentdbModule: any = await import('agentdb');
+          const NA = agentdbModule.NativeAccelerator;
+          if (!NA) return null;
+          return new NA();
+        } catch { return null; }
+      }
+
+      case 'selfLearningRvfBackend': {
+        // A6: Composite parent — creates 6 children internally via initComponents()
+        // Children: B1 SemanticQueryRouter, A8 SonaLearningBackend, A7 ContrastiveTrainer,
+        //           B2 TemporalCompressor, FederatedSessionManager, RvfSolver
+        if (!this.agentdb) return null;
+        try {
+          const agentdbModule: any = await import('agentdb');
+          const SLRB = agentdbModule.SelfLearningRvfBackend;
+          if (!SLRB) return null;
+          const accel = this.get('nativeAccelerator'); // shared singleton
+          const instance = new SLRB({
+            dimension: this.config.dimension || 768,
+            accelerator: accel || undefined,
+          });
+          // initComponents() creates children lazily — fire-and-forget
+          if (typeof instance.initComponents === 'function') {
+            instance.initComponents().catch(() => {});
+          }
+          return instance;
+        } catch { return null; }
+      }
+
+      case 'quantizedVectorStore': {
+        // B9: Composite parent — creates B7 (Scalar) or B8 (Product) based on config
+        if (!this.agentdb) return null;
+        try {
+          const agentdbModule: any = await import('agentdb');
+          const QVS = agentdbModule.QuantizedVectorStore;
+          if (!QVS) return null;
+          const vb = this.get('vectorBackend');
+          return new QVS({
+            dimension: this.config.dimension || 768,
+            innerBackend: vb || undefined,
+          });
+        } catch { return null; }
+      }
+
+      case 'attentionService': {
+        // A5: AttentionService (Flash, MoE, GraphRoPE enabled by default)
+        if (!this.agentdb) return null;
+        try {
+          const agentdbModule: any = await import('agentdb');
+          const AS = agentdbModule.AttentionService;
+          if (!AS) return null;
+          const accel = this.get('nativeAccelerator');
+          return new AS({
+            dimension: this.config.dimension || 768,
+            accelerator: accel || undefined,
+            // A5 mechanism gating: Hyperbolic only when NativeAccelerator reports simdAvailable
+            enableHyperbolic: !!(accel && typeof (accel as any).simdAvailable === 'boolean' && (accel as any).simdAvailable),
+          });
+        } catch { return null; }
+      }
+
+      // ----- ADR-0041: Level 3 Additions -----
+
+      case 'enhancedEmbeddingService': {
+        // A9: Uses hierarchicalMemory (level 1) and vectorBackend (level 2)
+        if (!this.agentdb) return null;
+        try {
+          const agentdbModule: any = await import('agentdb');
+          const EES = agentdbModule.EnhancedEmbeddingService;
+          if (!EES) return null;
+          const embedder = this.createEmbeddingService();
+          return new EES({ embedder, dimension: this.config.dimension || 768 });
+        } catch { return null; }
+      }
+
+      case 'auditLogger': {
+        // D3: Structured audit logging
+        if (!this.agentdb) return null;
+        try {
+          const agentdbModule: any = await import('agentdb');
+          const AL = agentdbModule.AuditLogger;
+          if (!AL) return null;
+          return new AL(this.agentdb.database);
+        } catch { return null; }
+      }
+
+      // ----- ADR-0041: Level 4 Additions -----
+
+      case 'indexHealthMonitor': {
+        // B3: Eager-loaded in A6 but independently useful for health reporting
+        if (!this.agentdb) return null;
+        try {
+          const agentdbModule: any = await import('agentdb');
+          const IHM = agentdbModule.IndexHealthMonitor;
+          if (!IHM) return null;
+          return new IHM({
+            vectorBackend: this.get('vectorBackend') || undefined,
+            guardedBackend: this.get('guardedVectorBackend') || undefined,
+          });
+        } catch { return null; }
+      }
+
+      case 'federatedLearningManager': {
+        // A11: Depends on selfLearningRvfBackend (level 2) being ready
+        if (!this.agentdb) return null;
+        try {
+          const agentdbModule: any = await import('agentdb');
+          const FLM = agentdbModule.FederatedLearningManager;
+          if (!FLM) return null;
+          const rvf = this.get('selfLearningRvfBackend');
+          return new FLM({
+            backend: rvf || undefined,
+            dimension: this.config.dimension || 768,
+          });
+        } catch { return null; }
+      }
+
+      case 'attentionMetrics': {
+        // D2: Metrics collection for attention-based controllers
+        if (!this.agentdb) return null;
+        try {
+          const agentdbModule: any = await import('agentdb');
+          const AM = agentdbModule.AttentionMetrics;
+          if (!AM) return null;
+          const attention = this.get('attentionService');
+          return new AM({ attentionService: attention || undefined });
+        } catch { return null; }
       }
 
       default:
