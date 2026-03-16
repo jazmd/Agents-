@@ -237,13 +237,13 @@ describe('ControllerRegistry', () => {
 
     it('should include advanced services in level 5', () => {
       const level5 = INIT_LEVELS.find((l) => l.level === 5);
-      expect(level5?.controllers).toContain('graphTransformer');
       expect(level5?.controllers).toContain('sonaTrajectory');
+      expect(level5?.controllers).toContain('contextSynthesizer');
     });
 
     it('should include session management in level 6', () => {
       const level6 = INIT_LEVELS.find((l) => l.level === 6);
-      expect(level6?.controllers).toContain('federatedSession');
+      expect(level6?.controllers).toContain('graphAdapter');
     });
 
     it('should not have duplicate controller names across levels', () => {
@@ -372,9 +372,6 @@ describe('ControllerRegistry', () => {
     it('should not enable optional controllers by default', async () => {
       await registry.initialize({ backend: mockBackend });
 
-      expect(registry.isEnabled('hybridSearch')).toBe(false);
-      expect(registry.isEnabled('federatedSession')).toBe(false);
-      expect(registry.isEnabled('semanticRouter')).toBe(false);
       expect(registry.isEnabled('sonaTrajectory')).toBe(false);
     });
   });
@@ -384,7 +381,7 @@ describe('ControllerRegistry', () => {
   describe('controller access (get/isEnabled)', () => {
     it('should return null for unregistered controllers', async () => {
       await registry.initialize({ backend: mockBackend });
-      expect(registry.get('hybridSearch')).toBeNull();
+      expect(registry.get('sonaTrajectory')).toBeNull();
     });
 
     it('should return typed controller instances', async () => {

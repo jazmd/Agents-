@@ -440,7 +440,7 @@ export const memoryTools: MCPTool[] = [
         let outputResults = filteredResults;
         try {
           const bridge = await import('../memory/memory-bridge.js');
-          const mmr = await bridge.bridgeGetController('mmrDiversity');
+          const mmr = await bridge.bridgeGetController('mmrDiversityRanker');
           if (mmr && typeof (mmr as Record<string, unknown>).selectDiverse === 'function' && outputResults.length > 1) {
             const lambda = (input.mmr_lambda as number) ?? 0.5;
             const diverseResults = await Promise.race([

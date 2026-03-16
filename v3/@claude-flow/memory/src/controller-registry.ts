@@ -40,7 +40,6 @@ export type AgentDBControllerName =
   | 'learningSystem'
   | 'explainableRecall'
   | 'nightlyLearner'
-  | 'graphTransformer'
   | 'mutationGuard'
   | 'attestationLog'
   | 'vectorBackend'
@@ -54,8 +53,6 @@ export type CLIControllerName =
   | 'memoryGraph'
   | 'agentMemoryScope'
   | 'tieredCache'
-  | 'hybridSearch'
-  | 'federatedSession'
   | 'semanticRouter'
   | 'sonaTrajectory'
   | 'hierarchicalMemory'
@@ -162,7 +159,7 @@ export const INIT_LEVELS: InitLevel[] = [
   // Level 0: Foundation - already exists
   { level: 0, controllers: [] },
   // Level 1: Core intelligence
-  { level: 1, controllers: ['reasoningBank', 'hierarchicalMemory', 'learningBridge', 'solverBandit', 'hybridSearch', 'tieredCache'] },
+  { level: 1, controllers: ['reasoningBank', 'hierarchicalMemory', 'learningBridge', 'solverBandit', 'tieredCache'] },
   // Level 2: Graph & security
   { level: 2, controllers: ['memoryGraph', 'agentMemoryScope', 'vectorBackend', 'mutationGuard', 'gnnService'] },
   // Level 3: Specialization
@@ -170,9 +167,9 @@ export const INIT_LEVELS: InitLevel[] = [
   // Level 4: Causal & routing
   { level: 4, controllers: ['causalGraph', 'nightlyLearner', 'learningSystem', 'semanticRouter'] },
   // Level 5: Advanced services
-  { level: 5, controllers: ['graphTransformer', 'sonaTrajectory', 'contextSynthesizer', 'rvfOptimizer', 'mmrDiversityRanker', 'guardedVectorBackend'] },
+  { level: 5, controllers: ['sonaTrajectory', 'contextSynthesizer', 'rvfOptimizer', 'mmrDiversityRanker', 'guardedVectorBackend'] },
   // Level 6: Session management
-  { level: 6, controllers: ['federatedSession', 'graphAdapter'] },
+  { level: 6, controllers: ['graphAdapter'] },
 ];
 
 // ===== ControllerRegistry =====
@@ -544,7 +541,6 @@ export class ControllerRegistry extends EventEmitter {
       case 'learningSystem':
       case 'explainableRecall':
       case 'nightlyLearner':
-      case 'graphTransformer':
       case 'graphAdapter':
       case 'gnnService':
       case 'memoryConsolidation':
@@ -563,9 +559,7 @@ export class ControllerRegistry extends EventEmitter {
         return this.agentdb !== null || this.backend !== null;
 
       // Optional controllers
-      case 'hybridSearch':
       case 'sonaTrajectory':
-      case 'federatedSession':
         return false; // Require explicit enabling
 
       default:
@@ -688,10 +682,6 @@ export class ControllerRegistry extends EventEmitter {
         });
         return cache;
       }
-
-      case 'hybridSearch':
-        // BM25 hybrid search — placeholder for future implementation
-        return null;
 
       case 'agentMemoryScope': {
         // P4-D: 3-scope isolation: agent, session, global
@@ -818,10 +808,6 @@ export class ControllerRegistry extends EventEmitter {
         }
       }
 
-      case 'federatedSession':
-        // Federated session — placeholder for Phase 4
-        return null;
-
       // ----- AgentDB-internal controllers (via getController) -----
       // AgentDB.getController() only supports: reflexion/memory, skills, causalGraph/causal
       case 'reasoningBank': {
@@ -845,52 +831,54 @@ export class ControllerRegistry extends EventEmitter {
       }
 
       case 'causalRecall': {
+        // ADR-0040: inject embedder + vectorBackend + optional singletons
         if (!this.agentdb) return null;
         try {
           const agentdbModule: any = await import('agentdb');
           const CR = agentdbModule.CausalRecall;
           if (!CR) return null;
-          return new CR(this.agentdb.database);
+          const embedder = this.createEmbeddingService();
+          const vb = this.agentdb.vectorBackend ?? null;
+          const cg = this.get('causalGraph') as any;
+          const er = this.get('explainableRecall') as any;
+          return new CR(this.agentdb.database, embedder, vb, undefined, cg, er);
         } catch { return null; }
       }
 
       case 'learningSystem': {
+        // ADR-0040: inject embedder
         if (!this.agentdb) return null;
         try {
           const agentdbModule: any = await import('agentdb');
           const LS = agentdbModule.LearningSystem;
           if (!LS) return null;
-          return new LS(this.agentdb.database);
+          return new LS(this.agentdb.database, this.createEmbeddingService());
         } catch { return null; }
       }
 
       case 'explainableRecall': {
+        // ADR-0040: inject embedder (optional per ExplainableRecall constructor)
         if (!this.agentdb) return null;
         try {
           const agentdbModule: any = await import('agentdb');
           const ER = agentdbModule.ExplainableRecall;
           if (!ER) return null;
-          return new ER(this.agentdb.database);
+          return new ER(this.agentdb.database, this.createEmbeddingService());
         } catch { return null; }
       }
 
       case 'nightlyLearner': {
+        // ADR-0040: inject embedder + pass pre-created singletons to avoid duplicates
         if (!this.agentdb) return null;
         try {
           const agentdbModule: any = await import('agentdb');
           const NL = agentdbModule.NightlyLearner;
           if (!NL) return null;
-          return new NL(this.agentdb.database);
-        } catch { return null; }
-      }
-
-      case 'graphTransformer': {
-        if (!this.agentdb) return null;
-        try {
-          const agentdbModule: any = await import('agentdb');
-          const GT = agentdbModule.CausalMemoryGraph;
-          if (!GT) return null;
-          return new GT(this.agentdb.database);
+          const embedder = this.createEmbeddingService();
+          const cg = this.get('causalGraph') as any;
+          const ref = this.get('reflexion') as any;
+          const sk = this.get('skills') as any;
+          return new NL(this.agentdb.database, embedder, undefined, cg, ref, sk);
         } catch { return null; }
       }
 
@@ -948,6 +936,7 @@ export class ControllerRegistry extends EventEmitter {
       }
 
       case 'gnnService': {
+        // ADR-0040: stats-only wrapper — no direct ML inference
         // GNNService class doesn't exist in agentdb — wrap gnn-wrapper functions
         try {
           const agentdbModule = await import('agentdb');
@@ -977,6 +966,7 @@ export class ControllerRegistry extends EventEmitter {
       }
 
       case 'rvfOptimizer': {
+        // ADR-0040: stats-only wrapper — backend optimization helper
         // RVFOptimizer class doesn't exist in agentdb — wrap backend optimization
         try {
           const _agentdbModule = await import('agentdb');
@@ -1023,13 +1013,18 @@ export class ControllerRegistry extends EventEmitter {
         } catch { return null; }
       }
 
-      case 'vectorBackend':
+      case 'vectorBackend': {
+        // ADR-0040: vectorBackend is a property on AgentDB, not a controller name
+        if (!this.agentdb) return null;
+        return this.agentdb.vectorBackend ?? null;
+      }
+
       case 'graphAdapter': {
-        // These are accessed via AgentDB internal state, not direct construction
+        // graphAdapter accessed via getController fallback
         if (!this.agentdb) return null;
         try {
           if (typeof this.agentdb.getController === 'function') {
-            return this.agentdb.getController(name) ?? null;
+            return this.agentdb.getController('graphAdapter') ?? null;
           }
         } catch { /* fallthrough */ }
         return null;
