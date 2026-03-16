@@ -1112,8 +1112,12 @@ export class ControllerRegistry extends EventEmitter {
       // ----- ADR-0041: Level 0 Infrastructure -----
 
       case 'resourceTracker': {
-        // D4: Lightweight resource tracking — no AgentDB dependency
+        // D4: Resource tracking with memory ceiling and query stats (ADR-0042)
         const resources = new Map<string, { allocated: number; limit: number }>();
+        const CEILING = 16 * 1024 * 1024 * 1024; // 16GB
+        let currentUsage = 0;
+        let queryCount = 0;
+        const queryWindow: number[] = []; // rolling last 100 query timestamps
         return {
           track(name: string, allocated: number, limit: number) {
             resources.set(name, { allocated, limit });
@@ -1121,40 +1125,72 @@ export class ControllerRegistry extends EventEmitter {
           check(name: string): { allocated: number; limit: number } | null {
             return resources.get(name) ?? null;
           },
+          record(bytes: number) { currentUsage += bytes; },
+          recordQuery() {
+            queryCount++;
+            queryWindow.push(Date.now());
+            if (queryWindow.length > 100) queryWindow.shift();
+          },
+          isOverLimit(): boolean { return currentUsage >= CEILING; },
+          isWarning(): boolean { return currentUsage >= CEILING * 0.8; },
           getStats() {
+            const pct = CEILING > 0 ? currentUsage / CEILING : 0;
             return {
               tracked: resources.size,
               resources: Object.fromEntries(resources),
+              currentUsage, ceiling: CEILING, pct,
+              warning: currentUsage >= CEILING * 0.8,
+              overlimit: currentUsage >= CEILING,
+              queryCount, queries: queryWindow.length,
             };
           },
         };
       }
 
       case 'rateLimiter': {
-        // D5: Token-bucket rate limiter — no AgentDB dependency
+        // D5: Token-bucket rate limiter with pre-configured buckets (ADR-0042)
         const buckets = new Map<string, { tokens: number; lastRefill: number; rate: number; max: number }>();
-        return {
+        const refill = (b: { tokens: number; lastRefill: number; rate: number; max: number }) => {
+          const now = Date.now();
+          b.tokens = Math.min(b.max, b.tokens + ((now - b.lastRefill) / 1000) * b.rate);
+          b.lastRefill = now;
+        };
+        const limiter = {
           configure(name: string, rate: number, max: number) {
             buckets.set(name, { tokens: max, lastRefill: Date.now(), rate, max });
           },
           tryAcquire(name: string): boolean {
             const bucket = buckets.get(name);
-            if (!bucket) return true; // unconfigured = unlimited
-            const now = Date.now();
-            const elapsed = (now - bucket.lastRefill) / 1000;
-            bucket.tokens = Math.min(bucket.max, bucket.tokens + elapsed * bucket.rate);
-            bucket.lastRefill = now;
+            if (!bucket) return true;
+            refill(bucket);
             if (bucket.tokens >= 1) { bucket.tokens--; return true; }
             return false;
           },
+          tryConsume(name: string): boolean { return limiter.tryAcquire(name); },
+          getRetryAfter(name: string): number {
+            const bucket = buckets.get(name);
+            if (!bucket) return 0;
+            refill(bucket);
+            if (bucket.tokens >= 1) return 0;
+            return Math.ceil((1 - bucket.tokens) / bucket.rate * 1000);
+          },
           getStats() {
-            return { buckets: buckets.size, names: [...buckets.keys()] };
+            const details: Record<string, { tokens: number; rate: number; max: number }> = {};
+            for (const [n, b] of buckets) { refill(b); details[n] = { tokens: b.tokens, rate: b.rate, max: b.max }; }
+            return { buckets: buckets.size, names: [...buckets.keys()], details };
           },
         };
+        // Pre-configure default buckets per ADR-0042
+        limiter.configure('insert', 100, 100);
+        limiter.configure('search', 1000, 1000);
+        limiter.configure('delete', 50, 50);
+        limiter.configure('batch', 10, 10);
+        return limiter;
       }
 
       case 'circuitBreakerController': {
-        // D6: Registry-level circuit breaker decorator
+        // D6: Registry-level circuit breaker decorator with events (ADR-0042)
+        const self = this;
         const breakers = new Map<string, { failures: number; state: 'CLOSED' | 'OPEN' | 'HALF_OPEN'; lastFailure: number }>();
         const FAILURE_THRESHOLD = 5;
         const RESET_TIMEOUT_MS = 30_000;
@@ -1180,22 +1216,27 @@ export class ControllerRegistry extends EventEmitter {
                 breaker.failures = 0;
               }
               return result;
-            } catch {
+            } catch (error) {
               breaker.failures++;
               breaker.lastFailure = Date.now();
               if (breaker.failures >= FAILURE_THRESHOLD) {
                 breaker.state = 'OPEN';
+                self.emit('controller:circuit-open', { name: controllerName, error });
               }
               return null;
             }
+          },
+          reset(controllerName: string) {
+            const breaker = breakers.get(controllerName);
+            if (breaker) { breaker.state = 'CLOSED'; breaker.failures = 0; }
           },
           getState(controllerName: string): string {
             return breakers.get(controllerName)?.state ?? 'CLOSED';
           },
           getStats() {
-            const stats: Record<string, { state: string; failures: number }> = {};
-            for (const [name, b] of breakers) {
-              stats[name] = { state: b.state, failures: b.failures };
+            const stats: Record<string, { state: string; failures: number; lastFailure: number }> = {};
+            for (const [n, b] of breakers) {
+              stats[n] = { state: b.state, failures: b.failures, lastFailure: b.lastFailure };
             }
             return { breakers: stats, total: breakers.size };
           },
