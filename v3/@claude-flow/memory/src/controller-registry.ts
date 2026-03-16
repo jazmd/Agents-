@@ -342,14 +342,19 @@ export class ControllerRegistry extends EventEmitter {
     this.backend = config.backend || null;
 
     // Step 3: Initialize controllers level by level
+    // ADR-0048: Levels 0-1 are eager (fast, <200ms). Levels 2+ are deferred
+    // to a background promise so initialize() returns quickly (~1s).
+    const eagerMaxLevel = config.eagerMaxLevel ?? 1;
+
     for (const level of INIT_LEVELS) {
+      if (level.level > eagerMaxLevel) break; // defer remaining levels
+
       const controllersToInit = level.controllers.filter(
         (name) => this.isControllerEnabled(name),
       );
 
       if (controllersToInit.length === 0) continue;
 
-      // Initialize all controllers in this level in parallel
       const results = await Promise.allSettled(
         controllersToInit.map((name) => this.initController(name, level.level)),
       );
@@ -384,7 +389,49 @@ export class ControllerRegistry extends EventEmitter {
       activeControllers: this.getActiveCount(),
       totalControllers: this.controllers.size,
     });
+
+    // ADR-0048: Initialize deferred levels (2+) in background.
+    // This returns immediately so CLI tools can respond within ~1s.
+    // Tools that need Level 2+ controllers will find them available
+    // after the background init completes (~30-60s).
+    const deferredLevels = INIT_LEVELS.filter(l => l.level > eagerMaxLevel);
+    if (deferredLevels.length > 0) {
+      this._deferredInitPromise = (async () => {
+        for (const level of deferredLevels) {
+          const controllersToInit = level.controllers.filter(
+            (name) => this.isControllerEnabled(name),
+          );
+          if (controllersToInit.length === 0) continue;
+
+          const results = await Promise.allSettled(
+            controllersToInit.map((name) => this.initController(name, level.level)),
+          );
+
+          for (let i = 0; i < results.length; i++) {
+            const result = results[i];
+            const name = controllersToInit[i];
+            if (result.status === 'rejected') {
+              const errorMsg = result.reason instanceof Error
+                ? result.reason.message : String(result.reason);
+              this.controllers.set(name, {
+                name, instance: null, level: level.level,
+                initTimeMs: 0, enabled: false, error: errorMsg,
+              });
+              this.emit('controller:failed', { name, error: errorMsg, level: level.level });
+            }
+          }
+        }
+        this.emit('deferred:initialized', { activeControllers: this.getActiveCount() });
+      })().catch(() => { /* non-fatal: deferred controllers are optional */ });
+    }
   }
+
+  /** Wait for deferred controllers to finish initializing (for tools that need them). */
+  async waitForDeferred(): Promise<void> {
+    if (this._deferredInitPromise) await this._deferredInitPromise;
+  }
+
+  private _deferredInitPromise: Promise<void> | null = null;
 
   /**
    * Shutdown all controllers in reverse initialization order.
