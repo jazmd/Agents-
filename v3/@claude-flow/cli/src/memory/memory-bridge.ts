@@ -148,7 +148,7 @@ async function getRegistry(dbPath?: string): Promise<any | null> {
           // Safety timeout ensures console is always restored even if the
           // deferred init hangs or the event never fires.
           const _deferredTimeout = setTimeout(_restoreConsole, 120_000);
-          registry.once('deferred:initialized', () => {
+          (registry as any).once('deferred:initialized', () => {
             clearTimeout(_deferredTimeout);
             _restoreConsole();
           });
