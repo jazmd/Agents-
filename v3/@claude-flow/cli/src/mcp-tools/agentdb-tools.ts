@@ -65,6 +65,8 @@ export const agentdbHealth: MCPTool = {
   handler: async () => {
     try {
       const bridge = await getBridge();
+      // Wait for deferred controllers so health count matches controllers count
+      await bridge.bridgeWaitForDeferred?.();
       const health = await bridge.bridgeHealthCheck();
       if (!health) return { available: false, error: 'AgentDB bridge not available' };
       return health;
