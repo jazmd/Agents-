@@ -685,6 +685,13 @@ export async function bridgeStoreEntry(options: {
     // Phase 4: AttestationLog write audit
     await logAttestation(registry, 'store', id, { key, namespace, hasEmbedding: !!embeddingJson });
 
+    // Flush sql.js WASM memory to disk (sql.js stores in WASM heap, not on disk).
+    // Without this, data is lost when the CLI process exits or is killed by _run_and_kill.
+    // better-sqlite3 writes directly to disk via WAL, so save() is a no-op for native.
+    try {
+      if (typeof ctx.db.save === 'function') ctx.db.save();
+    } catch { /* best-effort flush */ }
+
     return {
       success: true,
       id,
