@@ -2655,8 +2655,9 @@ export async function bridgeHealthReport(
     const monitorChecked = requireController(monitor, 'indexHealthMonitor', 'bridgeHealthReport');
     if (!monitorChecked) return { success: false, error: 'IndexHealthMonitor not active' };
     return { success: true, assessment: typeof monitorChecked.assess === 'function' ? monitorChecked.assess() : {} };
-  } catch {
-    return { success: false, error: 'Failed to get health report' };
+  } catch (e: any) {
+    const msg = e?.controllerName ? `${e.controllerName} not available` : (e?.message || 'Failed to get health report');
+    return { success: false, error: msg };
   }
 }
 
