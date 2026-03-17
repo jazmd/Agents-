@@ -26,6 +26,23 @@ import type { MemoryGraphConfig } from './memory-graph.js';
 import { TieredCacheManager } from './cache-manager.js';
 import type { CacheConfig } from './types.js';
 
+// ===== ADR-0049: Fail-Loud Error Classes =====
+
+/** Thrown when a controller factory fails during initialization (strict mode) */
+export class ControllerInitError extends Error {
+  controllerName: string;
+  override cause: Error;
+  constructor(controllerName: string, cause: Error) {
+    super(`Controller '${controllerName}' failed to initialize: ${cause.message}`);
+    this.name = 'ControllerInitError';
+    this.controllerName = controllerName;
+    this.cause = cause;
+  }
+}
+
+/** ADR-0049: strict mode — throws on factory/bridge failures instead of returning null */
+const STRICT_MODE = process.env.CLAUDE_FLOW_STRICT !== 'false';
+
 // ===== Types =====
 
 /**
@@ -320,6 +337,10 @@ export class ControllerRegistry extends EventEmitter {
   private config: RuntimeConfig = {};
   private initialized = false;
   private initTimeMs = 0;
+  /** ADR-0049: collected init errors for summary reporting */
+  private initErrors: ControllerInitError[] = [];
+  /** ADR-0049: strict mode flag */
+  readonly strictMode = STRICT_MODE;
 
   /**
    * Initialize all controllers in level-based order.
@@ -384,6 +405,19 @@ export class ControllerRegistry extends EventEmitter {
     }
 
     this.initTimeMs = performance.now() - startTime;
+
+    // ADR-0049: Report init errors
+    if (this.initErrors.length > 0) {
+      const summary = this.initErrors.map(e => `  ${e.controllerName}: ${e.cause.message}`).join('\n');
+      this.emit('controller:init-summary', {
+        failedCount: this.initErrors.length,
+        errors: this.initErrors.map(e => ({ name: e.controllerName, error: e.cause.message })),
+      });
+      if (this.strictMode) {
+        throw new Error(`${this.initErrors.length} controller(s) failed to initialize:\n${summary}`);
+      }
+    }
+
     this.emit('initialized', {
       initTimeMs: this.initTimeMs,
       activeControllers: this.getActiveCount(),
@@ -422,7 +456,11 @@ export class ControllerRegistry extends EventEmitter {
           }
         }
         this.emit('deferred:initialized', { activeControllers: this.getActiveCount() });
-      })().catch(() => { /* non-fatal: deferred controllers are optional */ });
+      })().catch((e) => {
+        if (this.strictMode && e) {
+          console.error('[ADR-0049] Deferred controller init failed:', e.message ?? e);
+        }
+      });
     }
   }
 
@@ -875,7 +913,10 @@ export class ControllerRegistry extends EventEmitter {
           } catch { /* cold start — no persisted state */ }
           return bandit;
         } catch (e) {
-          this.emit('controller:warn', { name: 'solverBandit', error: e });
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
           return null;
         }
       }
@@ -966,8 +1007,11 @@ export class ControllerRegistry extends EventEmitter {
               };
             },
           };
-        } catch {
-          // AgentMemoryScope init failed — non-fatal
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
           return null;
         }
       }
@@ -982,7 +1026,13 @@ export class ControllerRegistry extends EventEmitter {
           const router = new SR();
           await router.initialize();
           return router;
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'sonaTrajectory':
@@ -990,7 +1040,11 @@ export class ControllerRegistry extends EventEmitter {
         if (this.agentdb && typeof this.agentdb.getController === 'function') {
           try {
             return this.agentdb.getController('sonaTrajectory');
-          } catch {
+          } catch (e) {
+            const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+            this.initErrors.push(err);
+            this.emit('controller:init-error', { name, error: err });
+            if (this.strictMode) throw err;
             return null;
           }
         }
@@ -1008,7 +1062,11 @@ export class ControllerRegistry extends EventEmitter {
           const hm = new HM(this.agentdb.database, embedder);
           await hm.initializeDatabase();
           return hm;
-        } catch {
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
           return this.createTieredMemoryStub();
         }
       }
@@ -1030,7 +1088,11 @@ export class ControllerRegistry extends EventEmitter {
           const mc = new MC(this.agentdb.database, hm, embedder);
           await mc.initializeDatabase();
           return mc;
-        } catch {
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
           return this.createConsolidationStub();
         }
       }
@@ -1045,7 +1107,13 @@ export class ControllerRegistry extends EventEmitter {
           const RB = agentdbModule.ReasoningBank;
           if (!RB) return null;
           return new RB(this.agentdb.database);
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'skills':
@@ -1054,7 +1122,13 @@ export class ControllerRegistry extends EventEmitter {
         if (!this.agentdb || typeof this.agentdb.getController !== 'function') return null;
         try {
           return this.agentdb.getController(name) ?? null;
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'causalRecall': {
@@ -1069,7 +1143,13 @@ export class ControllerRegistry extends EventEmitter {
           const cg = this.get('causalGraph') as any;
           const er = this.get('explainableRecall') as any;
           return new CR(this.agentdb.database, embedder, vb, undefined, cg, er);
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'learningSystem': {
@@ -1080,7 +1160,13 @@ export class ControllerRegistry extends EventEmitter {
           const LS = agentdbModule.LearningSystem;
           if (!LS) return null;
           return new LS(this.agentdb.database, this.createEmbeddingService());
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'explainableRecall': {
@@ -1091,7 +1177,13 @@ export class ControllerRegistry extends EventEmitter {
           const ER = agentdbModule.ExplainableRecall;
           if (!ER) return null;
           return new ER(this.agentdb.database, this.createEmbeddingService());
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'nightlyLearner': {
@@ -1106,7 +1198,13 @@ export class ControllerRegistry extends EventEmitter {
           const ref = this.get('reflexion') as any;
           const sk = this.get('skills') as any;
           return new NL(this.agentdb.database, embedder, undefined, cg, ref, sk);
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       // ----- Direct-instantiation controllers -----
@@ -1118,7 +1216,13 @@ export class ControllerRegistry extends EventEmitter {
           if (!BO) return null;
           const embedder = this.config.embeddingGenerator || null;
           return new BO(this.agentdb.database, embedder);
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'contextSynthesizer': {
@@ -1126,7 +1230,13 @@ export class ControllerRegistry extends EventEmitter {
         try {
           const agentdbModule: any = await import('agentdb');
           return agentdbModule.ContextSynthesizer ?? null;
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'mmrDiversityRanker': {
@@ -1135,7 +1245,13 @@ export class ControllerRegistry extends EventEmitter {
           const MMR = agentdbModule.MMRDiversityRanker;
           if (!MMR) return null;
           return new MMR();
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'mutationGuard': {
@@ -1147,7 +1263,13 @@ export class ControllerRegistry extends EventEmitter {
           const MG = agentdbModule.MutationGuard;
           if (!MG) return null;
           return new MG({ dimension: this.config.dimension || 384 });
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'attestationLog': {
@@ -1159,7 +1281,13 @@ export class ControllerRegistry extends EventEmitter {
           const AL = agentdbModule.AttestationLog;
           if (!AL) return null;
           return new AL(this.agentdb.database);
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'gnnService': {
@@ -1187,7 +1315,10 @@ export class ControllerRegistry extends EventEmitter {
             },
           };
         } catch (e) {
-          this.emit('controller:warn', { name: 'gnnService', error: e });
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
           return null;
         }
       }
@@ -1218,7 +1349,10 @@ export class ControllerRegistry extends EventEmitter {
             },
           };
         } catch (e) {
-          this.emit('controller:warn', { name: 'rvfOptimizer', error: e });
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
           return null;
         }
       }
@@ -1237,7 +1371,13 @@ export class ControllerRegistry extends EventEmitter {
           if (!GVB) return null;
           const log = this.get('attestationLog');
           return new GVB(vb, guard, log || undefined);
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'vectorBackend': {
@@ -1461,7 +1601,13 @@ export class ControllerRegistry extends EventEmitter {
           const MF = agentdbModule.MetadataFilter;
           if (!MF) return null;
           return new MF();
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'queryOptimizer': {
@@ -1472,7 +1618,13 @@ export class ControllerRegistry extends EventEmitter {
           const QO = agentdbModule.QueryOptimizer;
           if (!QO) return null;
           return new QO();
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       // ----- ADR-0041: Level 2 Composites -----
@@ -1496,7 +1648,13 @@ export class ControllerRegistry extends EventEmitter {
             await accel.initialize();
           }
           return accel;
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'selfLearningRvfBackend': {
@@ -1518,7 +1676,13 @@ export class ControllerRegistry extends EventEmitter {
             instance.initComponents().catch(() => {});
           }
           return instance;
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'quantizedVectorStore': {
@@ -1533,7 +1697,13 @@ export class ControllerRegistry extends EventEmitter {
             dimension: this.config.dimension || 768,
             innerBackend: vb || undefined,
           });
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'selfAttention': {
@@ -1545,7 +1715,13 @@ export class ControllerRegistry extends EventEmitter {
           if (!SA) return null;
           const vb = this.get('vectorBackend');
           return new SA({ dimension: this.config.dimension || 768, vectorBackend: vb || undefined });
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'crossAttention': {
@@ -1557,7 +1733,13 @@ export class ControllerRegistry extends EventEmitter {
           if (!CA) return null;
           const vb = this.get('vectorBackend');
           return new CA({ dimension: this.config.dimension || 768, vectorBackend: vb || undefined });
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'multiHeadAttention': {
@@ -1573,7 +1755,13 @@ export class ControllerRegistry extends EventEmitter {
             numHeads: 8,
             vectorBackend: vb || undefined,
           });
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'attentionService': {
@@ -1590,7 +1778,13 @@ export class ControllerRegistry extends EventEmitter {
             // A5 mechanism gating: Hyperbolic only when NativeAccelerator reports simdAvailable
             enableHyperbolic: !!(accel && typeof (accel as any).simdAvailable === 'boolean' && (accel as any).simdAvailable),
           });
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       // ----- ADR-0041: Level 3 Additions -----
@@ -1610,7 +1804,13 @@ export class ControllerRegistry extends EventEmitter {
             cache: { maxSize: this.config.embeddingCacheSize ?? 100_000, ttl: 3600 },
             batch: { concurrency: this.config.embeddingBatchConcurrency ?? 10 },
           });
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'auditLogger': {
@@ -1624,7 +1824,13 @@ export class ControllerRegistry extends EventEmitter {
             rotation: { maxSize: this.config.auditRotationSize ?? '10MB', maxFiles: this.config.auditRotationFiles ?? 10 },
             format: this.config.auditFormat ?? 'soc2',
           });
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       // ----- ADR-0041: Level 4 Additions -----
@@ -1640,7 +1846,13 @@ export class ControllerRegistry extends EventEmitter {
             vectorBackend: this.get('vectorBackend') || undefined,
             guardedBackend: this.get('guardedVectorBackend') || undefined,
           });
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'federatedLearningManager': {
@@ -1655,7 +1867,13 @@ export class ControllerRegistry extends EventEmitter {
             backend: rvf || undefined,
             dimension: this.config.dimension || 768,
           });
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       case 'attentionMetrics': {
@@ -1675,7 +1893,13 @@ export class ControllerRegistry extends EventEmitter {
             crossAttention: crossAttn || undefined,
             multiHeadAttention: multiHead || undefined,
           });
-        } catch { return null; }
+        } catch (e) {
+          const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
+          this.initErrors.push(err);
+          this.emit('controller:init-error', { name, error: err });
+          if (this.strictMode) throw err;
+          return null;
+        }
       }
 
       default:

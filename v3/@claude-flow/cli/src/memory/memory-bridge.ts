@@ -390,6 +390,38 @@ async function logAttestation(
   }
 }
 
+// ===== ADR-0049: Fail-Loud Bridge Errors =====
+
+/** Thrown when a required controller is not available (strict mode) */
+export class ControllerNotAvailable extends Error {
+  controllerName: string;
+  bridgeFunction: string;
+  constructor(controllerName: string, bridgeFunction: string) {
+    super(`Controller '${controllerName}' not available (called from ${bridgeFunction})`);
+    this.name = 'ControllerNotAvailable';
+    this.controllerName = controllerName;
+    this.bridgeFunction = bridgeFunction;
+  }
+}
+
+/** ADR-0049: strict mode — throws on missing controllers instead of returning fallback */
+const BRIDGE_STRICT = process.env.CLAUDE_FLOW_STRICT !== 'false';
+
+/** ADR-0049: log missing controller in non-strict mode */
+function logMissingController(name: string, bridgeFn: string): void {
+  if (typeof process !== 'undefined' && process.env?.CLAUDE_FLOW_STRICT_QUIET !== 'true') {
+    console.warn(`[ADR-0049] Controller '${name}' not available in ${bridgeFn}`);
+  }
+}
+
+/** ADR-0049: assert controller exists, throw or log based on strict mode */
+function requireController<T>(ctrl: T | null | undefined, name: string, bridgeFn: string): T | null {
+  if (ctrl) return ctrl;
+  if (BRIDGE_STRICT) throw new ControllerNotAvailable(name, bridgeFn);
+  logMissingController(name, bridgeFn);
+  return null;
+}
+
 // ===== ADR-0041: Safeguards 1-4 shared wrapper =====
 
 /**
@@ -1680,6 +1712,7 @@ export async function bridgeRecordFeedback(options: {
 
     // ADR-0046: Forward to A6 SelfLearningRvfBackend (fire-and-forget)
     const a6 = registry.get('selfLearningRvfBackend');
+    requireController(a6, 'selfLearningRvfBackend', 'bridgeRecordFeedback');
     if (a6 && typeof (a6 as any).recordFeedback === 'function') {
       (a6 as any).recordFeedback({
         query: options.taskId,
@@ -2587,7 +2620,8 @@ export async function bridgeSelectBackend(
   try {
     if (entryCount !== undefined && entryCount > QUANTIZATION_THRESHOLD) {
       const quantized = registry.get('quantizedVectorStore');
-      if (quantized) {
+      const quantizedChecked = requireController(quantized, 'quantizedVectorStore', 'bridgeSelectBackend');
+      if (quantizedChecked) {
         return { success: true, backend: 'quantizedVectorStore', quantized: true };
       }
     }
@@ -2618,8 +2652,9 @@ export async function bridgeHealthReport(
   if (!registry) return { success: false, error: 'Registry not available' };
   try {
     const monitor = registry.get('indexHealthMonitor');
-    if (!monitor) return { success: false, error: 'IndexHealthMonitor not active' };
-    return { success: true, assessment: typeof monitor.assess === 'function' ? monitor.assess() : {} };
+    const monitorChecked = requireController(monitor, 'indexHealthMonitor', 'bridgeHealthReport');
+    if (!monitorChecked) return { success: false, error: 'IndexHealthMonitor not active' };
+    return { success: true, assessment: typeof monitorChecked.assess === 'function' ? monitorChecked.assess() : {} };
   } catch {
     return { success: false, error: 'Failed to get health report' };
   }
@@ -2634,17 +2669,18 @@ export async function bridgeFederatedRound(
   if (!registry) return { success: false, error: 'Registry not available' };
   try {
     const manager = registry.get('federatedLearningManager');
-    if (!manager) return { success: false, error: 'FederatedLearningManager not active' };
+    const managerChecked = requireController(manager, 'federatedLearningManager', 'bridgeFederatedRound');
+    if (!managerChecked) return { success: false, error: 'FederatedLearningManager not active' };
     const op = action || 'status';
     switch (op) {
       case 'start':
-        return { success: true, result: typeof manager.startRound === 'function' ? manager.startRound() : {} };
+        return { success: true, result: typeof managerChecked.startRound === 'function' ? managerChecked.startRound() : {} };
       case 'submit':
-        return { success: true, result: typeof manager.submitUpdate === 'function' ? manager.submitUpdate(params) : {} };
+        return { success: true, result: typeof managerChecked.submitUpdate === 'function' ? managerChecked.submitUpdate(params) : {} };
       case 'aggregate':
-        return { success: true, result: typeof manager.aggregateRound === 'function' ? manager.aggregateRound() : {} };
+        return { success: true, result: typeof managerChecked.aggregateRound === 'function' ? managerChecked.aggregateRound() : {} };
       case 'status':
-        return { success: true, result: typeof manager.getStatus === 'function' ? manager.getStatus() : {} };
+        return { success: true, result: typeof managerChecked.getStatus === 'function' ? managerChecked.getStatus() : {} };
       default:
         return { success: false, error: `Unknown federated action: ${op}` };
     }
@@ -2684,10 +2720,11 @@ export async function bridgeFilteredSearch(options: {
 
   try {
     const mf = registry.get('metadataFilter');
-    if (!mf || typeof mf.filter !== 'function') {
+    const mfChecked = requireController(mf, 'metadataFilter', 'bridgeFilteredSearch');
+    if (!mfChecked || typeof mfChecked.filter !== 'function') {
       return { ...searchResult, filtered: false };
     }
-    const filtered = mf.filter(searchResult.results, options.filter);
+    const filtered = mfChecked.filter(searchResult.results, options.filter);
     return {
       success: true,
       results: Array.isArray(filtered) ? filtered : searchResult.results,
@@ -2715,20 +2752,21 @@ export async function bridgeOptimizedSearch(options: {
 
   try {
     const qo = registry.get('queryOptimizer');
-    if (!qo || typeof qo.getCached !== 'function') {
+    const qoChecked = requireController(qo, 'queryOptimizer', 'bridgeOptimizedSearch');
+    if (!qoChecked || typeof qoChecked.getCached !== 'function') {
       const result = await bridgeSearchEntries(options);
       return result ? { ...result, cached: false } : null;
     }
 
     const cacheKey = JSON.stringify({ q: options.query, ns: options.namespace, limit: options.limit, th: options.threshold });
-    const cached = qo.getCached(cacheKey);
+    const cached = qoChecked.getCached(cacheKey);
     if (cached) {
       return { success: true, results: cached.results || cached, cached: true, searchTime: 0 };
     }
 
     const result = await bridgeSearchEntries(options);
     if (result && result.success) {
-      try { qo.cache(cacheKey, result); } catch { /* cache write failure is non-fatal */ }
+      try { qoChecked.cache(cacheKey, result); } catch { /* cache write failure is non-fatal */ }
     }
     return result ? { ...result, cached: false } : null;
   } catch {
@@ -2790,6 +2828,7 @@ export async function bridgeEmbed(
       await registry.waitForDeferred();
     }
     const enhanced = registry.get('enhancedEmbeddingService');
+    requireController(enhanced, 'enhancedEmbeddingService', 'bridgeEmbed');
     if (enhanced && typeof enhanced.embed === 'function') {
       const result = await enhanced.embed(text);
       return {
@@ -2829,13 +2868,14 @@ export async function bridgeAuditEvent(
   if (!registry) return { success: true, logged: false }; // no-op when absent
   try {
     const logger = registry.get('auditLogger');
-    if (!logger) return { success: true, logged: false }; // no-op when absent
-    if (typeof logger.log === 'function') {
-      await logger.log({ type, payload: payload ?? {}, timestamp: Date.now() });
+    const loggerChecked = requireController(logger, 'auditLogger', 'bridgeAuditEvent');
+    if (!loggerChecked) return { success: true, logged: false }; // no-op when absent
+    if (typeof loggerChecked.log === 'function') {
+      await loggerChecked.log({ type, payload: payload ?? {}, timestamp: Date.now() });
       return { success: true, logged: true };
     }
-    if (typeof logger.record === 'function') {
-      await logger.record({ type, payload: payload ?? {}, timestamp: Date.now() });
+    if (typeof loggerChecked.record === 'function') {
+      await loggerChecked.record({ type, payload: payload ?? {}, timestamp: Date.now() });
       return { success: true, logged: true };
     }
     return { success: true, logged: false };
@@ -2898,6 +2938,7 @@ export async function bridgeSelfLearningSearch(options: {
   try {
     // Try A6 SelfLearningRvfBackend first
     const a6 = registry.get('selfLearningRvfBackend');
+    requireController(a6, 'selfLearningRvfBackend', 'bridgeSelfLearningSearch');
     if (a6 && typeof (a6 as any).search === 'function') {
       const results = await (a6 as any).search({
         query: options.query,
@@ -2945,12 +2986,13 @@ export async function bridgeSelfLearningFeedback(options: {
 
   try {
     const a6 = registry.get('selfLearningRvfBackend');
-    if (!a6 || typeof (a6 as any).recordFeedback !== 'function') {
+    const a6Checked = requireController(a6, 'selfLearningRvfBackend', 'bridgeSelfLearningFeedback');
+    if (!a6Checked || typeof (a6Checked as any).recordFeedback !== 'function') {
       return { success: false, controller: 'none' };
     }
 
     // Fire-and-forget: do not await — must not block response
-    (a6 as any).recordFeedback({
+    (a6Checked as any).recordFeedback({
       query: options.query,
       selectedResult: options.selectedResult,
       reward: options.reward,
@@ -3010,7 +3052,8 @@ export async function bridgeAttentionSearch(options: {
   if (!registry) return { success: false, error: 'Registry not available' };
   try {
     const multiHead = registry.get('multiHeadAttention');
-    if (!multiHead) {
+    const multiHeadChecked = requireController(multiHead, 'multiHeadAttention', 'bridgeAttentionSearch');
+    if (!multiHeadChecked) {
       // Fallback to standard search when attention controller unavailable
       const fallback = await bridgeSearchEntries({
         query: options.query,
@@ -3029,8 +3072,8 @@ export async function bridgeAttentionSearch(options: {
       return vectorResults ?? { success: false, error: 'Search returned null' };
     }
     // Re-rank using multi-head attention
-    const attended = typeof multiHead.computeMultiHeadAttention === 'function'
-      ? await multiHead.computeMultiHeadAttention(
+    const attended = typeof multiHeadChecked.computeMultiHeadAttention === 'function'
+      ? await multiHeadChecked.computeMultiHeadAttention(
           vectorResults.results.map((r: any) => r.embedding || []).filter((e: any) => e.length > 0),
           { topK: options.limit || 10 }
         )
@@ -3059,7 +3102,8 @@ export async function bridgeFlashConsolidate(params: {
   if (!registry) return { success: false, error: 'Registry not available' };
   try {
     const attn = registry.get('attentionService');
-    if (!attn || typeof attn.applyFlashAttention !== 'function') {
+    const attnChecked = requireController(attn, 'attentionService', 'bridgeFlashConsolidate');
+    if (!attnChecked || typeof attnChecked.applyFlashAttention !== 'function') {
       // Fallback to standard consolidation
       return bridgeConsolidate({ maxEntries: params.entries?.length });
     }
@@ -3070,7 +3114,7 @@ export async function bridgeFlashConsolidate(params: {
     const query = embeddings[0];
     const keys = embeddings.slice(1);
     const values = keys; // Self-attention: keys === values
-    const output = await attn.applyFlashAttention(query, keys, values);
+    const output = await attnChecked.applyFlashAttention(query, keys, values);
     return { success: true, result: { consolidated: entries.length, flashOutput: output } };
   } catch {
     return { success: false, error: 'Flash consolidation failed' };
@@ -3087,7 +3131,8 @@ export async function bridgeMoERoute(params: {
   if (!registry) return { success: false, error: 'Registry not available' };
   try {
     const attn = registry.get('attentionService');
-    if (!attn || typeof attn.applyMoE !== 'function') {
+    const attnChecked = requireController(attn, 'attentionService', 'bridgeMoERoute');
+    if (!attnChecked || typeof attnChecked.applyMoE !== 'function') {
       return { success: false, error: 'AttentionService (MoE) not available' };
     }
     // Generate a simple hash-based input vector from the task string
@@ -3098,7 +3143,7 @@ export async function bridgeMoERoute(params: {
     }
     const experts = params.candidates?.length || 8;
     const topK = Math.min(params.topK || 2, experts);
-    const moeResult = await attn.applyMoE(input, experts, topK);
+    const moeResult = await attnChecked.applyMoE(input, experts, topK);
     return {
       success: true,
       result: {
@@ -3124,13 +3169,14 @@ export async function bridgeGraphRoPESearch(params: {
   if (!registry) return { success: false, error: 'Registry not available' };
   try {
     const attn = registry.get('attentionService');
-    if (!attn) {
+    const attnChecked = requireController(attn, 'attentionService', 'bridgeGraphRoPESearch');
+    if (!attnChecked) {
       return { success: false, error: 'AttentionService (GraphRoPE) not available' };
     }
     // GraphRoPE requires the attention service's low-level API
     // For now, delegate to the service if it exposes graphRoPE
-    if (typeof (attn as any).graphRoPE === 'function') {
-      const result = await (attn as any).graphRoPE(params.query, {
+    if (typeof (attnChecked as any).graphRoPE === 'function') {
+      const result = await (attnChecked as any).graphRoPE(params.query, {
         hopDistances: params.hopDistances || [],
         maxHops: params.maxHops || 10,
       });
