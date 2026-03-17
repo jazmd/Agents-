@@ -1069,11 +1069,16 @@ export const agentdbEmbedStatus: MCPTool = {
   handler: async () => {
     try {
       const bridge = await getBridge();
-      const has = await bridge.bridgeHasController('enhancedEmbeddingService');
-      if (!has) return { active: false, error: 'EnhancedEmbeddingService not active' };
-      // Try to get status from the controller
-      const controller = await bridge.bridgeGetController('enhancedEmbeddingService');
-      const status: Record<string, unknown> = { active: true };
+      // D5: Report both enabled (configuration readiness) and initialized
+      // (instantiation readiness) to avoid disagreement between health report
+      // and embed_status for Level 3+ deferred controllers.
+      const controllers = await bridge.bridgeListControllers();
+      const entry = controllers?.find((c: { name: string }) => c.name === 'enhancedEmbeddingService');
+      const enabled = entry?.enabled ?? false;
+      const initialized = await bridge.bridgeHasController('enhancedEmbeddingService');
+      // Try to get status from the controller if instantiated
+      const controller = initialized ? await bridge.bridgeGetController('enhancedEmbeddingService') : null;
+      const status: Record<string, unknown> = { active: initialized, enabled, initialized };
       if (controller && typeof controller === 'object') {
         if (typeof (controller as any).getStats === 'function') {
           Object.assign(status, (controller as any).getStats());
@@ -1081,7 +1086,7 @@ export const agentdbEmbedStatus: MCPTool = {
       }
       return status;
     } catch (error) {
-      return { active: false, error: sanitizeError(error) };
+      return { active: false, enabled: false, initialized: false, error: sanitizeError(error) };
     }
   },
 };
@@ -1099,7 +1104,13 @@ export const agentdbTelemetryMetrics: MCPTool = {
     try {
       const bridge = await getBridge();
       const result = await bridge.bridgeTelemetryMetrics();
-      return result ?? { success: false, error: 'Bridge not available' };
+      if (!result) return { success: false, error: 'Bridge not available' };
+      const metrics = result.metrics;
+      const isEmpty = !metrics || (typeof metrics === 'object' && Object.keys(metrics).length === 0);
+      if (result.success && isEmpty) {
+        return { ...result, notice: 'No telemetry instrumentation active. Counters require explicit startSpan/increment calls from controller operations.' };
+      }
+      return result;
     } catch (error) {
       return { success: false, error: sanitizeError(error) };
     }
@@ -1122,7 +1133,11 @@ export const agentdbTelemetrySpans: MCPTool = {
       const limit = validatePositiveInt(params.limit, 100, 500);
       const bridge = await getBridge();
       const result = await bridge.bridgeTelemetrySpans(limit);
-      return result ?? { success: false, error: 'Bridge not available' };
+      if (!result) return { success: false, error: 'Bridge not available' };
+      if (result.success && (!result.spans || result.spans.length === 0)) {
+        return { ...result, notice: 'No span instrumentation wired. Spans require controller operations to call telemetryManager.startSpan().' };
+      }
+      return result;
     } catch (error) {
       return { success: false, error: sanitizeError(error) };
     }
@@ -1168,6 +1183,7 @@ export const agentdbAttentionBenchmark: MCPTool = {
     type: 'object',
     properties: {
       entryCount: { type: 'number', description: 'Number of entries to benchmark (default 100)' },
+      dimensions: { type: 'number', description: 'Vector dimensions for benchmark entries (default 64)' },
       blockSize: { type: 'number', description: 'Flash attention block size (default 256)' },
     },
   },
@@ -1175,10 +1191,11 @@ export const agentdbAttentionBenchmark: MCPTool = {
     try {
       const bridge = await getBridge();
       const count = validatePositiveInt(args.entryCount, 100, 10000);
+      const dim = validatePositiveInt(args.dimensions, 64, 4096);
       // Generate synthetic entries for benchmarking
       const entries = Array.from({ length: count }, (_, i) => ({
         id: `bench_${i}`,
-        embedding: Array.from({ length: 64 }, () => Math.random()),
+        embedding: Array.from({ length: dim }, () => Math.random()),
       }));
       const start = Date.now();
       const result = await bridge.bridgeFlashConsolidate({

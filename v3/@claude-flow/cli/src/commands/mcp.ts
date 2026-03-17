@@ -559,6 +559,15 @@ const execCommand: Command = {
     { command: 'claude-flow mcp exec -t swarm_init -p \'{"topology":"mesh"}\'', description: 'Execute tool' }
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
+    // Reject unknown flags (X1: --args and other typos are silently ignored otherwise)
+    const knownFlags = new Set(['tool', 'params', 'format', 'help', 'version', 'verbose', 'quiet', 'config', 'noColor', 'interactive', '_']);
+    for (const key of Object.keys(ctx.flags)) {
+      if (!knownFlags.has(key)) {
+        output.printError(`Unknown option: --${key}`);
+        return { success: false, exitCode: 1 };
+      }
+    }
+
     const tool = ctx.flags.tool as string || ctx.args[0];
     const paramsStr = ctx.flags.params as string;
 
@@ -597,8 +606,15 @@ const execCommand: Command = {
       });
       const duration = performance.now() - startTime;
 
+      // X2: Propagate tool failure to exit code
+      const toolSuccess = result == null || typeof result !== 'object' || (result as Record<string, unknown>).success !== false;
+
       output.writeln();
-      output.printSuccess(`Tool executed in ${duration.toFixed(2)}ms`);
+      if (toolSuccess) {
+        output.printSuccess(`Tool executed in ${duration.toFixed(2)}ms`);
+      } else {
+        output.printError(`Tool returned failure after ${duration.toFixed(2)}ms`);
+      }
 
       if (ctx.flags.format === 'json') {
         output.printJson({ tool, params, result, duration });
@@ -608,6 +624,9 @@ const execCommand: Command = {
         output.printJson(result);
       }
 
+      if (!toolSuccess) {
+        return { success: false, exitCode: 1, data: { tool, params, result, duration } };
+      }
       return { success: true, data: { tool, params, result, duration } };
     } catch (error) {
       output.printError(`Tool execution failed: ${(error as Error).message}`);

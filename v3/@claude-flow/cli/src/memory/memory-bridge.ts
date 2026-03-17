@@ -2651,6 +2651,10 @@ export async function bridgeHealthReport(
   const registry = await getRegistry(dbPath);
   if (!registry) return { success: false, error: 'Registry not available' };
   try {
+    // Wait for deferred (Level 2+) controllers so Level 4 IndexHealthMonitor is ready
+    if (typeof registry.waitForDeferred === 'function') {
+      await registry.waitForDeferred();
+    }
     const monitor = registry.get('indexHealthMonitor');
     const monitorChecked = requireController(monitor, 'indexHealthMonitor', 'bridgeHealthReport');
     if (!monitorChecked) return { success: false, error: 'IndexHealthMonitor not active' };
@@ -2711,7 +2715,18 @@ export async function bridgeFilteredSearch(options: {
     threshold: options.threshold,
     dbPath: options.dbPath,
   });
-  if (!searchResult) return null;
+  if (!searchResult) {
+    // Diagnose why search is unavailable — registry vs database vs search engine
+    const registry = await getRegistry(options.dbPath);
+    if (!registry) {
+      return { success: false, results: [], filtered: false, searchTime: 0, error: 'FilteredSearch unavailable: registry not initialized' };
+    }
+    const ctx = getDb(registry);
+    if (!ctx) {
+      return { success: false, results: [], filtered: false, searchTime: 0, error: 'FilteredSearch unavailable: database not initialized' };
+    }
+    return { success: false, results: [], filtered: false, searchTime: 0, error: 'FilteredSearch unavailable: search engine returned no results' };
+  }
   if (!options.filter || Object.keys(options.filter).length === 0) {
     return { ...searchResult, filtered: false };
   }

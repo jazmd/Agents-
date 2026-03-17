@@ -124,7 +124,7 @@ export class SearchMemoryQueryHandler {
     const allEntries = await this.repository.findAll(options);
 
     // Filter by text query
-    const query = input.textQuery!.toLowerCase();
+    const query = (input.textQuery ?? '').toLowerCase();
     const matchingEntries = allEntries.filter((entry) => {
       const valueStr = JSON.stringify(entry.value).toLowerCase();
       const metadataStr = JSON.stringify(entry.metadata).toLowerCase();

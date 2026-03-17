@@ -1692,10 +1692,8 @@ export class ControllerRegistry extends EventEmitter {
           const agentdbModule: any = await import('agentdb');
           const QVS = agentdbModule.QuantizedVectorStore;
           if (!QVS) return null;
-          const vb = this.get('vectorBackend');
           return new QVS({
-            dimension: this.config.dimension || 768,
-            innerBackend: vb || undefined,
+            type: 'scalar-8bit' as const,
           });
         } catch (e) {
           const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
@@ -1791,18 +1789,17 @@ export class ControllerRegistry extends EventEmitter {
 
       case 'enhancedEmbeddingService': {
         // A9: Multi-provider embeddings with LRU cache, semaphore batch, dimension alignment (ADR-0045)
+        // Barrel export must point to services/enhanced-embeddings.ts (full impl),
+        // not controllers/EnhancedEmbeddingService.ts (WASM wrapper).
         if (!this.agentdb) return null;
         try {
           const agentdbModule: any = await import('agentdb');
           const EES = agentdbModule.EnhancedEmbeddingService;
           if (!EES) return null;
-          const embedder = this.createEmbeddingService();
           return new EES({
-            embedder,
             dimension: this.config.dimension || 768,
-            providers: this.config.embeddingProviders ?? ['xenova', 'openai', 'cohere'],
-            cache: { maxSize: this.config.embeddingCacheSize ?? 100_000, ttl: 3600 },
-            batch: { concurrency: this.config.embeddingBatchConcurrency ?? 10 },
+            cache: { maxSize: this.config.embeddingCacheSize ?? 100_000 },
+            batch: { maxConcurrency: this.config.embeddingBatchConcurrency ?? 10 },
           });
         } catch (e) {
           const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
@@ -1862,10 +1859,8 @@ export class ControllerRegistry extends EventEmitter {
           const agentdbModule: any = await import('agentdb');
           const FLM = agentdbModule.FederatedLearningManager;
           if (!FLM) return null;
-          const rvf = this.get('selfLearningRvfBackend');
           return new FLM({
-            backend: rvf || undefined,
-            dimension: this.config.dimension || 768,
+            agentId: 'default',
           });
         } catch (e) {
           const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
@@ -1881,18 +1876,9 @@ export class ControllerRegistry extends EventEmitter {
         if (!this.agentdb) return null;
         try {
           const agentdbModule: any = await import('agentdb');
-          const AM = agentdbModule.AttentionMetrics;
+          const AM = agentdbModule.AttentionMetricsCollector;
           if (!AM) return null;
-          const attention = this.get('attentionService');
-          const selfAttn = this.get('selfAttention');
-          const crossAttn = this.get('crossAttention');
-          const multiHead = this.get('multiHeadAttention');
-          return new AM({
-            attentionService: attention || undefined,
-            selfAttention: selfAttn || undefined,
-            crossAttention: crossAttn || undefined,
-            multiHeadAttention: multiHead || undefined,
-          });
+          return new AM();
         } catch (e) {
           const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
           this.initErrors.push(err);
