@@ -480,7 +480,7 @@ export class MockEmbeddingService extends BaseEmbeddingService {
   constructor(config: Partial<MockEmbeddingConfig> = {}) {
     const fullConfig: MockEmbeddingConfig = {
       provider: 'mock',
-      dimensions: config.dimensions ?? 384,
+      dimensions: config.dimensions ?? 768, // ADR-0052: matches embedding config default
       cacheSize: config.cacheSize ?? 1000,
       simulatedLatency: config.simulatedLatency ?? 0,
       enableCache: config.enableCache ?? true,
@@ -612,7 +612,7 @@ export class AgenticFlowEmbeddingService extends BaseEmbeddingService {
   constructor(config: AgenticFlowEmbeddingConfig) {
     super(config);
     this.modelId = config.modelId ?? 'all-MiniLM-L6-v2';
-    this.dimensions = config.dimensions ?? 384;
+    this.dimensions = config.dimensions ?? 768; // ADR-0052: matches embedding config default
     this.embedderCacheSize = config.embedderCacheSize ?? 256;
     this.modelDir = config.modelDir;
     this.autoDownload = config.autoDownload ?? false;
@@ -880,7 +880,7 @@ export function createEmbeddingService(config: EmbeddingConfig): IEmbeddingServi
       return new RvfEmbeddingService(config as RvfEmbeddingConfig);
     default:
       console.warn(`Unknown provider, using mock`);
-      return new MockEmbeddingService({ provider: 'mock', dimensions: 384 });
+      return new MockEmbeddingService({ provider: 'mock', dimensions: 768 }); // ADR-0052
   }
 }
 
@@ -935,7 +935,7 @@ export async function createEmbeddingServiceAsync(
     try {
       const service = new RvfEmbeddingService({
         provider: 'rvf',
-        dimensions: rest.dimensions ?? 384,
+        dimensions: rest.dimensions ?? 768, // ADR-0052
         cacheSize: rest.cacheSize,
       });
       await service.embed('test');
@@ -955,7 +955,7 @@ export async function createEmbeddingServiceAsync(
         const service = new AgenticFlowEmbeddingService({
           provider: 'agentic-flow',
           modelId: rest.modelId ?? 'all-MiniLM-L6-v2',
-          dimensions: rest.dimensions ?? 384,
+          dimensions: rest.dimensions ?? 768, // ADR-0052
           cacheSize: rest.cacheSize,
         });
         // Validate it can initialize
@@ -983,7 +983,7 @@ export async function createEmbeddingServiceAsync(
     // Fallback to mock (always works)
     console.warn('[embeddings] Using mock provider - install agentic-flow or @xenova/transformers for real embeddings');
     return new MockEmbeddingService({
-      dimensions: rest.dimensions ?? 384,
+      dimensions: rest.dimensions ?? 768, // ADR-0052
       cacheSize: rest.cacheSize,
     });
   }
@@ -995,7 +995,7 @@ export async function createEmbeddingServiceAsync(
         return new AgenticFlowEmbeddingService({
           provider: 'agentic-flow',
           modelId: rest.modelId ?? 'all-MiniLM-L6-v2',
-          dimensions: rest.dimensions ?? 384,
+          dimensions: rest.dimensions ?? 768, // ADR-0052
           cacheSize: rest.cacheSize,
         });
       case 'transformers':
@@ -1015,12 +1015,12 @@ export async function createEmbeddingServiceAsync(
       case 'rvf':
         return new RvfEmbeddingService({
           provider: 'rvf',
-          dimensions: rest.dimensions ?? 384,
+          dimensions: rest.dimensions ?? 768, // ADR-0052
           cacheSize: rest.cacheSize,
         });
       case 'mock':
         return new MockEmbeddingService({
-          dimensions: rest.dimensions ?? 384,
+          dimensions: rest.dimensions ?? 768, // ADR-0052
           cacheSize: rest.cacheSize,
         });
       default:
@@ -1055,7 +1055,7 @@ export async function getEmbedding(
 ): Promise<Float32Array | number[]> {
   const service = createEmbeddingService({
     provider: 'mock',
-    dimensions: 384,
+    dimensions: 768, // ADR-0052: matches embedding config default
     ...config,
   } as EmbeddingConfig);
 

@@ -102,7 +102,7 @@ const DEFAULT_CONFIG: ReasoningBankConfig = {
   dedupThreshold: 0.95,
   enableContradictionDetection: true,
   dbPath: undefined,
-  vectorDimension: 768,
+  vectorDimension: 768, // ADR-0052: matches embedding config default
   namespace: 'reasoning-bank',
   enableAgentDB: true,
 };

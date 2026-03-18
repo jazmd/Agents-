@@ -131,7 +131,7 @@ export interface AgenticFlowEmbeddingConfig extends EmbeddingBaseConfig {
   /** Model ID (default: all-MiniLM-L6-v2) */
   modelId?: string;
 
-  /** Embedding dimensions (default: 384) */
+  /** Embedding dimensions (default: 768, ADR-0052) */
   dimensions?: number;
 
   /** Internal cache size for embedder (default: 256) */
@@ -151,7 +151,7 @@ export interface AgenticFlowEmbeddingConfig extends EmbeddingBaseConfig {
 export interface RvfEmbeddingConfig extends EmbeddingBaseConfig {
   provider: 'rvf';
 
-  /** Embedding dimensions (default: 384) */
+  /** Embedding dimensions (default: 768, ADR-0052) */
   dimensions?: number;
 
   /** Path to binary cache file for persistent storage */

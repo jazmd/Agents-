@@ -45,8 +45,8 @@ const FNV_OFFSET_BASIS = 0x811c9dc5;
 /** FNV-1a prime (32-bit) */
 const FNV_PRIME = 0x01000193;
 
-/** Default embedding dimensions */
-const DEFAULT_DIMENSIONS = 384;
+/** Default embedding dimensions — ADR-0052: matches embedding config default */
+const DEFAULT_DIMENSIONS = 768;
 
 /** Default in-memory LRU cache size */
 const DEFAULT_CACHE_SIZE = 1000;
@@ -122,7 +122,7 @@ class LRUCache<K, V> {
  *
  * Generates deterministic embeddings from text using FNV-1a hashing
  * with multi-round mixing and L2 normalization. The output is a unit
- * vector in R^n where n = configured dimensions (default 384).
+ * vector in R^n where n = configured dimensions (default 768).
  *
  * Extends EventEmitter and implements IEmbeddingService for drop-in
  * compatibility with other providers.

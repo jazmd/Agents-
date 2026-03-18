@@ -75,8 +75,8 @@ export interface SONAStats {
  */
 function modeToConfig(mode: SONAMode, modeConfig: SONAModeConfig): JsSonaConfig {
   const baseConfig: JsSonaConfig = {
-    hiddenDim: 768, // Standard transformer dimension
-    embeddingDim: 768,
+    hiddenDim: 768, // ADR-0052: matches embedding config default
+    embeddingDim: 768, // ADR-0052: matches embedding config default
     microLoraRank: modeConfig.loraRank <= 2 ? modeConfig.loraRank : 1,
     baseLoraRank: modeConfig.loraRank,
     microLoraLr: modeConfig.learningRate,

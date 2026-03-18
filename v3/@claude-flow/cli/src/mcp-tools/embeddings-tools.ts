@@ -208,7 +208,8 @@ export const embeddingsTools: MCPTool[] = [
         };
       }
 
-      const dimension = model.includes('mpnet') ? 768 : 384;
+      // ADR-0052: use 768 as default, MiniLM is 384
+      const dimension = model.includes('MiniLM') ? 384 : 768;
       const modelPath = resolve(join(CONFIG_DIR, MODELS_DIR));
 
       // Create models directory

@@ -13,7 +13,7 @@
  * Memory savings:
  * - Original: d × k parameters
  * - LoRA: r × (d + k) parameters
- * - For d=384, k=384, r=8: 786,432 → 6,144 (128x reduction)
+ * - For d=768, k=768, r=8: 589,824 → 12,288 (48x reduction)
  *
  * @module lora-adapter
  */
@@ -31,14 +31,15 @@ import { dirname, join } from 'path';
 export const DEFAULT_RANK = 8;
 
 /**
- * Input dimension (384 from ONNX MiniLM-L6-v2)
+ * Input dimension — ADR-0052: matches embedding config default
  */
-export const INPUT_DIM = 384;
+export const INPUT_DIM = 768;
 
 /**
  * Default output dimension (same as input for adapter)
+ * ADR-0052: matches embedding config default
  */
-export const OUTPUT_DIM = 384;
+export const OUTPUT_DIM = 768;
 
 /**
  * Default alpha scaling factor

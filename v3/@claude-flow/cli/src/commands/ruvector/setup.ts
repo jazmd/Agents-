@@ -115,11 +115,11 @@ SET search_path TO claude_flow, public;
 -- PART 2: CORE TABLES
 -- ============================================
 
--- Embeddings table with RuVector vector type (384-dim for all-MiniLM-L6-v2)
+-- Embeddings table with RuVector vector type (768-dim for all-mpnet-base-v2; ADR-0052)
 CREATE TABLE IF NOT EXISTS claude_flow.embeddings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     content TEXT NOT NULL,
-    embedding ruvector(384),
+    embedding ruvector(768),
     metadata JSONB DEFAULT '{}',
     namespace VARCHAR(100) DEFAULT 'default',
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS claude_flow.patterns (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name VARCHAR(255) NOT NULL,
     description TEXT,
-    embedding ruvector(384),
+    embedding ruvector(768),
     pattern_type VARCHAR(50),
     confidence FLOAT DEFAULT 0.5,
     success_count INT DEFAULT 0,
@@ -147,7 +147,7 @@ CREATE TABLE IF NOT EXISTS claude_flow.agents (
     agent_id VARCHAR(255) NOT NULL UNIQUE,
     agent_type VARCHAR(50),
     state JSONB DEFAULT '{}',
-    memory_embedding ruvector(384),
+    memory_embedding ruvector(768),
     last_active TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -171,7 +171,7 @@ CREATE TABLE IF NOT EXISTS claude_flow.memory_entries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     key VARCHAR(255) NOT NULL,
     value TEXT NOT NULL,
-    embedding ruvector(384),
+    embedding ruvector(768),
     namespace VARCHAR(100) DEFAULT 'default',
     metadata JSONB DEFAULT '{}',
     ttl TIMESTAMPTZ,
@@ -184,7 +184,7 @@ CREATE TABLE IF NOT EXISTS claude_flow.memory_entries (
 CREATE TABLE IF NOT EXISTS claude_flow.hyperbolic_embeddings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     content TEXT NOT NULL,
-    euclidean_embedding ruvector(384),
+    euclidean_embedding ruvector(768),
     poincare_embedding real[],  -- Array for hyperbolic operations
     curvature FLOAT DEFAULT -1.0,
     hierarchy_level INT DEFAULT 0,
@@ -198,7 +198,7 @@ CREATE TABLE IF NOT EXISTS claude_flow.graph_nodes (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     node_id VARCHAR(255) NOT NULL UNIQUE,
     node_type VARCHAR(50),
-    embedding ruvector(384),
+    embedding ruvector(768),
     features JSONB DEFAULT '{}',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -265,7 +265,7 @@ CREATE INDEX IF NOT EXISTS idx_memory_entries_key ON claude_flow.memory_entries(
 
 -- Semantic similarity search using RuVector HNSW
 CREATE OR REPLACE FUNCTION claude_flow.search_similar(
-    query_embedding ruvector(384),
+    query_embedding ruvector(768),
     limit_count INT DEFAULT 10,
     min_similarity FLOAT DEFAULT 0.5
 )
@@ -292,7 +292,7 @@ $$ LANGUAGE plpgsql STABLE;
 
 -- Memory search with namespace filtering
 CREATE OR REPLACE FUNCTION claude_flow.search_memory(
-    query_embedding ruvector(384),
+    query_embedding ruvector(768),
     namespace_filter VARCHAR(100) DEFAULT NULL,
     limit_count INT DEFAULT 10,
     min_similarity FLOAT DEFAULT 0.5
@@ -326,7 +326,7 @@ $$ LANGUAGE plpgsql STABLE;
 
 -- Pattern search with type filtering
 CREATE OR REPLACE FUNCTION claude_flow.search_patterns(
-    query_embedding ruvector(384),
+    query_embedding ruvector(768),
     pattern_type_filter VARCHAR(50) DEFAULT NULL,
     limit_count INT DEFAULT 10,
     min_confidence FLOAT DEFAULT 0.5
@@ -359,7 +359,7 @@ $$ LANGUAGE plpgsql STABLE;
 
 -- Agent routing by expertise similarity
 CREATE OR REPLACE FUNCTION claude_flow.find_agents(
-    query_embedding ruvector(384),
+    query_embedding ruvector(768),
     agent_type_filter VARCHAR(50) DEFAULT NULL,
     limit_count INT DEFAULT 5
 )
@@ -413,7 +413,7 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 
 -- Hyperbolic search in Poincaré ball
 CREATE OR REPLACE FUNCTION claude_flow.hyperbolic_search(
-    query ruvector(384),
+    query ruvector(768),
     limit_count INT DEFAULT 10,
     curvature FLOAT DEFAULT -1.0
 )
@@ -492,7 +492,7 @@ $$ LANGUAGE plpgsql IMMUTABLE;
 CREATE OR REPLACE FUNCTION claude_flow.upsert_memory(
     p_key VARCHAR(255),
     p_value TEXT,
-    p_embedding ruvector(384) DEFAULT NULL,
+    p_embedding ruvector(768) DEFAULT NULL,
     p_namespace VARCHAR(100) DEFAULT 'default',
     p_metadata JSONB DEFAULT '{}',
     p_ttl TIMESTAMPTZ DEFAULT NULL
@@ -595,10 +595,10 @@ CREATE EXTENSION IF NOT EXISTS ruvector VERSION '0.1.0';
 
 ### Vector Type
 \`\`\`sql
--- Use ruvector(384), NOT vector(384)
+-- Use ruvector(768), NOT vector(768)
 CREATE TABLE embeddings (
     id UUID PRIMARY KEY,
-    embedding ruvector(384)
+    embedding ruvector(768)
 );
 \`\`\`
 

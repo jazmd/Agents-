@@ -73,8 +73,8 @@ export class PPOAlgorithm {
   constructor(config: Partial<PPOConfig> = {}) {
     this.config = { ...DEFAULT_PPO_CONFIG, ...config };
 
-    // Initialize weights (768 input dim, simplified)
-    const dim = 768;
+    // ADR-0052: use config.inputDim if provided, default 768
+    const dim = this.config.inputDim ?? 768;
     this.policyWeights = new Float32Array(dim);
     this.valueWeights = new Float32Array(dim);
     this.policyMomentum = new Float32Array(dim);

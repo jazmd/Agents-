@@ -648,7 +648,7 @@ export class ReasoningBankAdapter {
 
   private computePatternEmbedding(trajectory: Trajectory, index: number): Float32Array {
     if (trajectory.steps.length === 0) {
-      return new Float32Array(768);
+      return new Float32Array(768); // ADR-0052: matches embedding config default
     }
 
     // Use weighted average of step embeddings

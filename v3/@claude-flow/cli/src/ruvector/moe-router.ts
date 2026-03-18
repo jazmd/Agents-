@@ -9,7 +9,7 @@
  * - Weight persistence to .swarm/moe-weights.json
  *
  * Architecture:
- * - Input: 384-dim task embedding (from ONNX)
+ * - Input: 768-dim task embedding (ADR-0052)
  * - Hidden: 128-dim layer with ReLU
  * - Output: 8-dim softmax weights
  *
@@ -56,9 +56,9 @@ export const EXPERT_NAMES: ExpertType[] = [
 export const NUM_EXPERTS = 8;
 
 /**
- * Input dimension (384 from ONNX MiniLM-L6-v2)
+ * Input dimension — ADR-0052: matches embedding config default
  */
-export const INPUT_DIM = 384;
+export const INPUT_DIM = 768;
 
 /**
  * Hidden layer dimension
@@ -285,7 +285,7 @@ function addNoise(x: Float32Array, std: number, out: Float32Array): void {
  * Mixture of Experts Router
  *
  * Implements a two-layer gating network:
- * - Layer 1: Linear(384, 128) + ReLU
+ * - Layer 1: Linear(768, 128) + ReLU
  * - Layer 2: Linear(128, 8) + Softmax
  *
  * Uses top-k expert selection with load balancing.
@@ -366,7 +366,7 @@ export class MoERouter {
   /**
    * Route task to top-k experts based on embedding
    *
-   * @param taskEmbedding - 384-dim task embedding from ONNX
+   * @param taskEmbedding - 768-dim task embedding (ADR-0052)
    * @returns Routing result with selected experts and weights
    */
   route(taskEmbedding: Float32Array | number[]): RoutingResult {

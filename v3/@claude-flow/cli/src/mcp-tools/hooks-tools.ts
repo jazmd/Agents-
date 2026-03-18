@@ -128,7 +128,8 @@ let routerBackend: 'native' | 'pure-js' | 'none' = 'none';
 // Pre-computed embeddings for common task patterns (cached)
 const TASK_PATTERN_EMBEDDINGS: Map<string, Float32Array> = new Map();
 
-function generateSimpleEmbedding(text: string, dimension: number = 384): Float32Array {
+// ADR-0052: matches embedding config default
+function generateSimpleEmbedding(text: string, dimension: number = 768): Float32Array {
   // Simple deterministic embedding based on character codes
   // This is for routing purposes where we need consistent, fast embeddings
   const embedding = new Float32Array(dimension);
@@ -244,8 +245,9 @@ async function getSemanticRouter() {
 
     if (router.VectorDb && router.DistanceMetric) {
       // Try to create VectorDb - may fail with lock error in concurrent envs
+      // ADR-0052: matches embedding config default
       const db = new router.VectorDb({
-        dimensions: 384,
+        dimensions: 768,
         distanceMetric: router.DistanceMetric.Cosine,
         hnswM: 16,
         hnswEfConstruction: 200,
@@ -274,7 +276,8 @@ async function getSemanticRouter() {
   // STEP 2: Fall back to pure JS SemanticRouter
   try {
     const { SemanticRouter } = await import('../ruvector/semantic-router.js');
-    semanticRouter = new SemanticRouter({ dimension: 384 });
+    // ADR-0052: matches embedding config default
+    semanticRouter = new SemanticRouter({ dimension: 768 });
 
     for (const [patternName, { keywords, agents }] of Object.entries(TASK_PATTERNS)) {
       const embeddings = keywords.map(kw => generateSimpleEmbedding(kw));
@@ -2034,9 +2037,9 @@ export const hooksIntelligence: MCPTool = {
         embeddings: {
           provider: 'transformers',
           model: 'all-MiniLM-L6-v2',
-          dimension: 384,
+          dimension: 768, // ADR-0052: matches embedding config default
           implemented: true,
-          note: 'Real ONNX embeddings via all-MiniLM-L6-v2',
+          note: 'Real ONNX embeddings via all-mpnet-base-v2',
         },
       },
       realMetrics: {
@@ -2262,7 +2265,8 @@ export const hooksTrajectoryEnd: MCPTool = {
           try {
             // Record gradient sample for Fisher matrix update
             // Create a simple gradient from trajectory steps
-            const gradients = new Array(384).fill(0).map((_, i) =>
+            // ADR-0052: matches embedding config default
+            const gradients = new Array(768).fill(0).map((_, i) =>
               Math.sin(i * 0.01) * (trajectory.steps.length / 10)
             );
             ewc.recordGradient(`trajectory-${trajectoryId}`, gradients, success);
@@ -2369,7 +2373,8 @@ export const hooksPatternStore: MCPTool = {
       const neuralStore = loadNeuralStore();
       const neuralPatternId = reasoningResult?.patternId || storeResult.id || patternId;
       // Generate a real embedding so neural_patterns search (cosine similarity) can find this pattern
-      const embedding = await generateEmbedding(pattern, 384);
+      // ADR-0052: matches embedding config default
+      const embedding = await generateEmbedding(pattern, 768);
       neuralStore.patterns[neuralPatternId] = {
         id: neuralPatternId,
         name: pattern,
@@ -2502,7 +2507,8 @@ export const hooksPatternSearch: MCPTool = {
       const neuralStore = loadNeuralStore();
       const neuralPatterns = Object.values(neuralStore.patterns);
       if (neuralPatterns.length > 0) {
-        const queryEmbedding = await generateEmbedding(query, 384);
+        // ADR-0052: matches embedding config default
+        const queryEmbedding = await generateEmbedding(query, 768);
         // Inline cosine similarity to avoid importing private function
         const cosSim = (a: number[], b: number[]): number => {
           if (a.length !== b.length || a.length === 0) return 0;
@@ -2933,8 +2939,9 @@ export const hooksIntelligenceAttention: MCPTool = {
       if (moe) {
         try {
           // Generate a simple embedding from query (hash-based for demo)
-          const embedding = new Float32Array(384);
-          for (let i = 0; i < 384; i++) {
+          // ADR-0052: matches embedding config default
+          const embedding = new Float32Array(768);
+          for (let i = 0; i < 768; i++) {
             embedding[i] = Math.sin(query.charCodeAt(i % query.length) * (i + 1) * 0.01);
           }
 
@@ -2959,19 +2966,20 @@ export const hooksIntelligenceAttention: MCPTool = {
       if (flash) {
         try {
           // Generate query/key/value embeddings
-          const q = new Float32Array(384);
+          // ADR-0052: matches embedding config default
+          const q = new Float32Array(768);
           const keys: Float32Array[] = [];
           const values: Float32Array[] = [];
 
-          for (let i = 0; i < 384; i++) {
+          for (let i = 0; i < 768; i++) {
             q[i] = Math.sin(query.charCodeAt(i % query.length) * (i + 1) * 0.01);
           }
 
           // Generate some keys/values
           for (let k = 0; k < topK; k++) {
-            const key = new Float32Array(384);
-            const value = new Float32Array(384);
-            for (let i = 0; i < 384; i++) {
+            const key = new Float32Array(768);
+            const value = new Float32Array(768);
+            for (let i = 0; i < 768; i++) {
               key[i] = Math.cos((k + 1) * (i + 1) * 0.01);
               value[i] = k + 1;
             }

@@ -772,7 +772,8 @@ export function benchmarkAdaptation(iterations: number = 1000): {
   }
 
   const times: number[] = [];
-  const testEmbedding = Array.from({ length: 384 }, () => Math.random());
+  // ADR-0052: matches embedding config default
+  const testEmbedding = Array.from({ length: 768 }, () => Math.random());
 
   for (let i = 0; i < iterations; i++) {
     const start = performance.now();

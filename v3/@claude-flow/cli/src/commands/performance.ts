@@ -89,10 +89,11 @@ const benchmarkCommand: Command = {
       const flashTimes: number[] = [];
 
       // Generate test vectors
+      // ADR-0052: matches embedding config default
       const testVectors: Float32Array[] = Array.from({ length: 100 }, () =>
-        new Float32Array(Array.from({ length: 384 }, () => Math.random()))
+        new Float32Array(Array.from({ length: 768 }, () => Math.random()))
       );
-      const queryVector = new Float32Array(Array.from({ length: 384 }, () => Math.random()));
+      const queryVector = new Float32Array(Array.from({ length: 768 }, () => Math.random()));
 
       // Warmup
       for (let i = 0; i < warmup; i++) {

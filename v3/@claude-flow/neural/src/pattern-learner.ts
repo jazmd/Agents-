@@ -548,7 +548,7 @@ export class PatternLearner {
 
   private computePatternEmbedding(trajectory: Trajectory): Float32Array {
     if (trajectory.steps.length === 0) {
-      return new Float32Array(768);
+      return new Float32Array(768); // ADR-0052: matches embedding config default
     }
 
     const dim = trajectory.steps[0].stateAfter.length;

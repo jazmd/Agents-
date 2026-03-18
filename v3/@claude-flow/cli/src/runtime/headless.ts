@@ -207,7 +207,8 @@ async function runBenchmarks(): Promise<BenchmarkResults> {
 
   // Flash Attention Benchmark
   console.log('\n2. Flash Attention Search Benchmark...');
-  const dim = 384;
+  // ADR-0052: matches embedding config default
+  const dim = 768;
   const count = 10000;
   const query = new Float32Array(dim).map(() => Math.random() - 0.5);
   const vectors = Array.from({ length: count }, () =>

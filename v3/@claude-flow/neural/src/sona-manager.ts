@@ -525,7 +525,7 @@ export class SONAManager {
     for (const module of config.targetModules) {
       // A: (hidden_dim, rank) initialized with small random values
       // B: (rank, hidden_dim) initialized to zero
-      const hiddenDim = 768; // Typical transformer hidden dim
+      const hiddenDim = 768; // ADR-0052: matches embedding config default
       const A = new Float32Array(hiddenDim * config.rank);
       const B = new Float32Array(config.rank * hiddenDim);
 

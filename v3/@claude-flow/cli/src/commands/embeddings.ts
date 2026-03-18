@@ -282,7 +282,7 @@ const searchCommand: Command = {
 
 /**
  * Optimized cosine similarity
- * V8 JIT-friendly - ~0.5μs per 384-dim vector comparison
+ * V8 JIT-friendly - ~0.5μs per 768-dim vector comparison
  */
 function cosineSimilarity(a: number[], b: number[]): number {
   const len = Math.min(a.length, b.length);
@@ -734,7 +734,8 @@ const initCommand: Command = {
 
       // Write embeddings config
       spinner.setText('Writing configuration...');
-      const dimension = model.includes('mpnet') ? 768 : 384;
+      // ADR-0052: use 768 as default, MiniLM is 384
+      const dimension = model.includes('MiniLM') ? 384 : 768;
       const config = {
         model,
         modelPath: modelDir,
@@ -1353,7 +1354,7 @@ const cacheCommand: Command = {
           }
           db.close();
         } catch {
-          // Estimate entries from file size (~1600 bytes per entry for 384-dim embeddings)
+          // Estimate entries from file size (~3200 bytes per entry for 768-dim embeddings)
           sqliteEntries = Math.floor(stats.size / 1600);
         }
       }
@@ -1367,7 +1368,7 @@ const cacheCommand: Command = {
       const hnswStatus = getHNSWStatus();
       if (hnswStatus && hnswStatus.initialized) {
         memoryEntries = hnswStatus.entryCount || 0;
-        const memBytes = memoryEntries * (hnswStatus.dimensions || 384) * 4; // Float32 = 4 bytes per dimension
+        const memBytes = memoryEntries * (hnswStatus.dimensions || 768) * 4; // Float32 = 4 bytes per dimension; ADR-0052: matches embedding config default
         if (memBytes >= 1024 * 1024) {
           memorySize = `${(memBytes / 1024 / 1024).toFixed(1)} MB`;
         } else if (memBytes >= 1024) {
