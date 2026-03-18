@@ -337,6 +337,8 @@ export class ControllerRegistry extends EventEmitter {
   private config: RuntimeConfig = {};
   private initialized = false;
   private initTimeMs = 0;
+  /** Cached embedding dimension from getEmbeddingConfig() — set in initAgentDB */
+  private embeddingDimension = 0;
   /** ADR-0049: collected init errors for summary reporting */
   private initErrors: ControllerInitError[] = [];
   /** ADR-0049: strict mode flag */
@@ -701,6 +703,12 @@ export class ControllerRegistry extends EventEmitter {
 
       const agentdbModule: any = await import('agentdb');
       const AgentDBClass = agentdbModule.AgentDB || agentdbModule.default;
+
+      // Cache embedding config for createEmbeddingService() and other consumers
+      if (typeof agentdbModule.getEmbeddingConfig === 'function') {
+        const embCfg = agentdbModule.getEmbeddingConfig();
+        this.embeddingDimension = embCfg.dimension || 0;
+      }
 
       if (!AgentDBClass) {
         this.emit('agentdb:unavailable', { reason: 'No AgentDB class found' });
@@ -1918,6 +1926,8 @@ export class ControllerRegistry extends EventEmitter {
   /**
    * Create an EmbeddingService for controllers that need it.
    * Uses the config's embedding generator or creates a minimal local service.
+   * Reads dimension from the cached embedding config (populated during
+   * initAgentDB) instead of hardcoding 768.
    */
   private createEmbeddingService(): any {
     // If user provided an embedding generator, wrap it
@@ -1928,10 +1938,12 @@ export class ControllerRegistry extends EventEmitter {
         initialize: async () => {},
       };
     }
+    // Use dimension from centralized embedding config (cached in initAgentDB)
+    const dim = this.embeddingDimension || this.config.dimension || 768;
     // Return a minimal stub — HierarchicalMemory falls back to manualSearch without embeddings
     return {
-      embed: async () => new Float32Array(this.config.dimension || 768),
-      embedBatch: async (texts: string[]) => texts.map(() => new Float32Array(this.config.dimension || 768)),
+      embed: async () => new Float32Array(dim),
+      embedBatch: async (texts: string[]) => texts.map(() => new Float32Array(dim)),
       initialize: async () => {},
     };
   }

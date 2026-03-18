@@ -22,6 +22,8 @@ import {
 // Configuration
 // ============================================================================
 
+const DEFAULT_EMBEDDING_DIM = 768;
+
 const config = {
   connection: {
     host: process.env.POSTGRES_HOST || 'localhost',
@@ -30,7 +32,7 @@ const config = {
     user: process.env.POSTGRES_USER || 'postgres',
     password: process.env.POSTGRES_PASSWORD || 'postgres',
   },
-  dimensions: 768,      // Typical embedding dimension
+  dimensions: parseInt(process.env.EMBEDDING_DIM || '', 10) || DEFAULT_EMBEDDING_DIM,
   testVectors: 10000,   // Number of test vectors
   queryVectors: 100,    // Number of query vectors
   k: 10,               // Top-k for recall calculation
@@ -589,12 +591,12 @@ async function main(): Promise<void> {
     console.log('\n   Example SQL for halfvec:');
     console.log('     CREATE TABLE items (');
     console.log('       id bigserial PRIMARY KEY,');
-    console.log('       embedding halfvec(768)  -- Float16 storage');
+    console.log(`       embedding halfvec(${config.dimensions})  -- Float16 storage`);
     console.log('     );');
 
     console.log('\n   Example SQL for quantized index:');
     console.log('     CREATE INDEX ON items USING hnsw (');
-    console.log('       (embedding::halfvec(768)) halfvec_l2_ops');
+    console.log(`       (embedding::halfvec(${config.dimensions})) halfvec_l2_ops`);
     console.log('     );');
 
     // ========================================================================

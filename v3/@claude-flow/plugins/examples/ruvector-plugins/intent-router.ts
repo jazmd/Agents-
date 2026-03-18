@@ -73,6 +73,8 @@ export interface RouterConfig {
   maxAlternatives: number;
   enableLearning: boolean;
   defaultHandler?: IntentHandler;
+  /** Embedding dimension (default: 768) */
+  dimensions: number;
 }
 
 // ============================================================================
@@ -84,7 +86,7 @@ export class IntentRouter {
   private intents = new Map<string, Intent>();
   private routeHistory: Array<{ query: string; intentId: string; success: boolean; timestamp: Date }> = [];
   private config: RouterConfig;
-  private dimensions = 768;
+  private dimensions: number;
   private nextId = 1;
   private initPromise: Promise<void> | null = null;
 
@@ -93,8 +95,10 @@ export class IntentRouter {
       minConfidence: 0.4,
       maxAlternatives: 3,
       enableLearning: true,
+      dimensions: 768,
       ...config,
     };
+    this.dimensions = this.config.dimensions;
   }
 
   async initialize(): Promise<void> {

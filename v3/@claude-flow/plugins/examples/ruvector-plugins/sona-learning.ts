@@ -69,6 +69,8 @@ export interface SONAConfig {
   qualityThreshold: number;
   adaptationBudget: number; // max microseconds
   loraRank: number;
+  /** Embedding dimension (default: 768) */
+  dimensions: number;
 }
 
 // ============================================================================
@@ -81,7 +83,7 @@ export class SONALearning {
   private patterns = new Map<string, LearningPattern>();
   private adapters = new Map<string, LoRAAdapter>();
   private config: SONAConfig;
-  private dimensions = 768;
+  private dimensions: number;
   private nextId = 1;
   private initPromise: Promise<void> | null = null;
 
@@ -93,8 +95,10 @@ export class SONALearning {
       qualityThreshold: 0.5,
       adaptationBudget: 100,
       loraRank: 8,
+      dimensions: 768,
       ...config,
     };
+    this.dimensions = this.config.dimensions;
   }
 
   async initialize(): Promise<void> {

@@ -23,6 +23,8 @@ import {
 // Configuration
 // ============================================================================
 
+const DEFAULT_EMBEDDING_DIM = 768;
+
 const config = {
   connection: {
     host: process.env.POSTGRES_HOST || 'localhost',
@@ -31,7 +33,7 @@ const config = {
     user: process.env.POSTGRES_USER || 'postgres',
     password: process.env.POSTGRES_PASSWORD || 'postgres',
   },
-  dimensions: 768, // Code embedding dimension (e.g., CodeBERT, StarCoder)
+  dimensions: parseInt(process.env.EMBEDDING_DIM || '', 10) || DEFAULT_EMBEDDING_DIM,
 };
 
 // ============================================================================

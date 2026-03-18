@@ -320,6 +320,9 @@ export interface RLConfig {
 
   /** Mini-batch size */
   miniBatchSize: number;
+
+  /** Input/state embedding dimension (default: 768) */
+  inputDim?: number;
 }
 
 /**

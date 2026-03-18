@@ -84,8 +84,8 @@ export class SemanticCodeSearch {
   private nextId = 1;
   private initPromise: Promise<void> | null = null;
 
-  constructor(dimensions: number = 768) {
-    this.dimensions = dimensions;
+  constructor(dimensions?: number) {
+    this.dimensions = dimensions ?? 768;
   }
 
   async initialize(): Promise<void> {
@@ -393,7 +393,7 @@ let searchInstance: SemanticCodeSearch | null = null;
 
 async function getCodeSearch(): Promise<SemanticCodeSearch> {
   if (!searchInstance) {
-    searchInstance = new SemanticCodeSearch(768);
+    searchInstance = new SemanticCodeSearch();
     await searchInstance.initialize();
   }
   return searchInstance;

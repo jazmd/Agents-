@@ -89,7 +89,12 @@ export class FallbackVectorDB implements IVectorDB {
 export class FallbackLoRAEngine implements ILoRAEngine {
   private adapters = new Map<string, LoRAAdapter>();
   private adapterWeights = new Map<string, Float32Array>();
+  private dimensions: number;
   private nextId = 1;
+
+  constructor(dimensions: number = 768) {
+    this.dimensions = dimensions;
+  }
 
   async createAdapter(category: string, rank: number): Promise<LoRAAdapter> {
     const adapter: LoRAAdapter = {
@@ -99,7 +104,7 @@ export class FallbackLoRAEngine implements ILoRAEngine {
       alpha: 16,
     };
     this.adapters.set(adapter.id, adapter);
-    this.adapterWeights.set(adapter.id, new Float32Array(rank * 768));
+    this.adapterWeights.set(adapter.id, new Float32Array(rank * this.dimensions));
     return adapter;
   }
 

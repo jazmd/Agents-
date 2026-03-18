@@ -39,6 +39,8 @@ export interface LearningBridgeConfig {
   consolidationThreshold?: number;
   /** Enable the bridge (default: true). When false all methods are no-ops */
   enabled?: boolean;
+  /** Embedding dimension for hash embeddings (default: 768) */
+  embeddingDim?: number;
   /**
    * Optional factory for the neural learning system.
    * When provided, this replaces the default dynamic import of @claude-flow/neural.
@@ -77,8 +79,9 @@ export interface PatternMatch {
 // ===== Defaults =====
 
 /** Internal resolved config type where neuralLoader stays optional */
-type ResolvedConfig = Required<Omit<LearningBridgeConfig, 'neuralLoader'>> & {
+type ResolvedConfig = Required<Omit<LearningBridgeConfig, 'neuralLoader' | 'embeddingDim'>> & {
   neuralLoader?: NeuralLoader;
+  embeddingDim: number;
 };
 
 const DEFAULT_CONFIG: ResolvedConfig = {
@@ -90,6 +93,7 @@ const DEFAULT_CONFIG: ResolvedConfig = {
   ewcLambda: 2000,
   consolidationThreshold: 10,
   enabled: true,
+  embeddingDim: 768,
 };
 
 const MS_PER_HOUR = 3_600_000;
@@ -440,7 +444,7 @@ export class LearningBridge extends EventEmitter {
    * This is a lightweight stand-in for a real embedding model,
    * suitable for pattern matching within the neural trajectory system.
    */
-  private createHashEmbedding(text: string, dimensions: number = 384): Float32Array {
+  private createHashEmbedding(text: string, dimensions: number = this.config.embeddingDim): Float32Array {
     const embedding = new Float32Array(dimensions);
     const normalized = text.toLowerCase().trim();
 

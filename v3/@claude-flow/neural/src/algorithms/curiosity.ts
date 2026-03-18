@@ -56,7 +56,7 @@ export class CuriosityModule {
   private rndMomentum: Float32Array;
 
   // Dimensions
-  private stateDim = 768;
+  private stateDim: number;
   private numActions = 4;
 
   // Running statistics for normalization
@@ -71,6 +71,7 @@ export class CuriosityModule {
 
   constructor(config: Partial<CuriosityConfig> = {}) {
     this.config = { ...DEFAULT_CURIOSITY_CONFIG, ...config };
+    this.stateDim = this.config.inputDim ?? 768;
 
     const featureDim = this.config.featureDim;
 

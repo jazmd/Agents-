@@ -655,7 +655,15 @@ export async function bridgeStoreEntry(options: {
             if (emb) {
               embeddingJson = JSON.stringify(Array.from(emb));
               dimensions = emb.length;
-              model = 'Xenova/all-mpnet-base-v2';
+              // Read model name from centralized config instead of hardcoding
+              try {
+                const agentdbMod: any = await import('agentdb');
+                if (typeof agentdbMod.getEmbeddingConfig === 'function') {
+                  model = agentdbMod.getEmbeddingConfig().model || 'nomic-ai/nomic-embed-text-v1.5';
+                }
+              } catch {
+                model = 'nomic-ai/nomic-embed-text-v1.5';
+              }
             }
           }
         } catch {
@@ -1419,15 +1427,23 @@ export async function bridgeAddToHNSW(
   try {
     const now = Date.now();
     const embeddingJson = JSON.stringify(embedding);
+    // Read model name from centralized config instead of hardcoding
+    let embeddingModel = 'nomic-ai/nomic-embed-text-v1.5';
+    try {
+      const agentdbMod: any = await import('agentdb');
+      if (typeof agentdbMod.getEmbeddingConfig === 'function') {
+        embeddingModel = agentdbMod.getEmbeddingConfig().model || embeddingModel;
+      }
+    } catch { /* agentdb not available — use default */ }
     ctx.db.prepare(`
       INSERT OR REPLACE INTO memory_entries (
         id, key, namespace, content, type,
         embedding, embedding_dimensions, embedding_model,
         created_at, updated_at, status
-      ) VALUES (?, ?, ?, ?, 'semantic', ?, ?, 'Xenova/all-mpnet-base-v2', ?, ?, 'active')
+      ) VALUES (?, ?, ?, ?, 'semantic', ?, ?, ?, ?, ?, 'active')
     `).run(
       id, entry.key, entry.namespace, entry.content,
-      embeddingJson, embedding.length,
+      embeddingJson, embedding.length, embeddingModel,
       now, now,
     );
     return true;

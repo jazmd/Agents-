@@ -218,6 +218,8 @@ export interface RLConfig {
     epochs: number;
     /** Mini-batch size */
     miniBatchSize: number;
+    /** Input/state embedding dimension (default: 768) */
+    inputDim?: number;
 }
 /**
  * PPO-specific configuration

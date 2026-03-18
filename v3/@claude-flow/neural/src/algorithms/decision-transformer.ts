@@ -69,7 +69,7 @@ export class DecisionTransformer {
   private trajectoryBuffer: Trajectory[] = [];
 
   // Dimensions
-  private stateDim = 768;
+  private stateDim: number;
   private numActions = 4;
 
   // Statistics
@@ -78,6 +78,7 @@ export class DecisionTransformer {
 
   constructor(config: Partial<DecisionTransformerConfig> = {}) {
     this.config = { ...DEFAULT_DT_CONFIG, ...config };
+    this.stateDim = this.config.inputDim ?? 768;
 
     // Initialize embeddings
     this.stateEmbed = this.initEmbedding(this.stateDim, this.config.embeddingDim);
