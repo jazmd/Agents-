@@ -882,9 +882,16 @@ export class ControllerRegistry extends EventEmitter {
       // ----- CLI-layer controllers -----
 
       case 'learningBridge': {
-        if (!this.backend) return null;
+        // Backend is optional — provide no-op stub when not configured
+        const noOpBackend: any = {
+          async get() { return null; },
+          async update() { return null; },
+          async query() { return []; },
+          async initialize() {},
+          async shutdown() {},
+        };
         const config = this.config.memory?.learningBridge || {};
-        const bridge = new LearningBridge(this.backend, {
+        const bridge = new LearningBridge(this.backend || noOpBackend, {
           sonaMode: config.sonaMode || this.config.neural?.sonaMode || 'balanced',
           confidenceDecayRate: config.confidenceDecayRate,
           accessBoostAmount: config.accessBoostAmount,
@@ -1291,29 +1298,21 @@ export class ControllerRegistry extends EventEmitter {
       }
 
       case 'gnnService': {
-        // ADR-0040: stats-only wrapper — no direct ML inference
-        // GNNService class doesn't exist in agentdb — wrap gnn-wrapper functions
+        // GNNService is exported from agentdb — use real class with JS fallbacks
         try {
-          const agentdbModule = await import('agentdb');
-          const gnn = agentdbModule as any;
-
-          // Check if GNN wrapper functions are available
-          const isAvailable = typeof gnn.isGNNAvailable === 'function'
-            ? gnn.isGNNAvailable()
-            : false;
-
-          return {
-            isAvailable() { return isAvailable; },
-            async differentiableSearch(query: any, candidates: any[], k = 10, temperature = 1.0) {
-              if (typeof gnn.differentiableSearch === 'function') {
-                return gnn.differentiableSearch(query, candidates, k, temperature);
-              }
-              return null;
-            },
-            getStats() {
-              return { available: isAvailable, type: 'gnn-wrapper' };
-            },
-          };
+          const agentdbModule: any = await import('agentdb');
+          const GNN = agentdbModule.GNNService;
+          if (!GNN) return null;
+          const svc = new GNN({
+            inputDim: this.config.dimension || 384,
+            hiddenDim: 128,
+            outputDim: 64,
+            heads: 8,
+          });
+          if (typeof svc.initialize === 'function') {
+            await svc.initialize();
+          }
+          return svc;
         } catch (e) {
           const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
           this.initErrors.push(err);
@@ -1666,16 +1665,11 @@ export class ControllerRegistry extends EventEmitter {
           const agentdbModule: any = await import('agentdb');
           const SLRB = agentdbModule.SelfLearningRvfBackend;
           if (!SLRB) return null;
-          const accel = this.get('nativeAccelerator'); // shared singleton
-          const instance = new SLRB({
+          // Private constructor — must use static async create() factory
+          if (typeof SLRB.create !== 'function') return null;
+          return await SLRB.create({
             dimension: this.config.dimension || 768,
-            accelerator: accel || undefined,
           });
-          // initComponents() creates children lazily — fire-and-forget
-          if (typeof instance.initComponents === 'function') {
-            instance.initComponents().catch(() => {});
-          }
-          return instance;
         } catch (e) {
           const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
           this.initErrors.push(err);

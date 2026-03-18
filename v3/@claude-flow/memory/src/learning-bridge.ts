@@ -132,6 +132,24 @@ export class LearningBridge extends EventEmitter {
   // ===== Public API =====
 
   /**
+   * High-level learn entry point — records an insight and consolidates.
+   * Called by bridgeLearningBridgeLearn and hooks_intelligence_learn.
+   */
+  async learn(input: { content?: string; namespace?: string; [key: string]: unknown }): Promise<{ learned: boolean; stats?: any }> {
+    if (!this.config.enabled || this.destroyed) return { learned: false };
+    const insight: MemoryInsight = {
+      category: 'project-patterns',
+      summary: input.content || '',
+      confidence: 1.0,
+      source: 'learn-api',
+    };
+    const entryId = `learn_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    await this.onInsightRecorded(insight, entryId);
+    await this.consolidate();
+    return { learned: true, stats: this.getStats() };
+  }
+
+  /**
    * Notify the bridge that an insight has been recorded in AgentDB.
    * Creates a learning trajectory so the neural system can track the
    * insight's lifecycle.
