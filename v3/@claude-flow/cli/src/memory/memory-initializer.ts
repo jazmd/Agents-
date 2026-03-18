@@ -1577,7 +1577,8 @@ export async function loadEmbeddingModel(options?: {
             }
         } catch { /* EM-001: embeddings.json may not exist — use defaults */ }
     }
-    const xenovaModel = modelName.startsWith('Xenova/') ? modelName : `Xenova/${modelName}`;
+    // Models with org prefix (e.g. nomic-ai/...) keep their prefix; only bare names get Xenova/
+    const xenovaModel = modelName.includes('/') ? modelName : `Xenova/${modelName}`;
     // EM-002: Set TRANSFORMERS_CACHE to user-writable path to prevent EACCES on global installs
     if (!process.env.TRANSFORMERS_CACHE) {
       const os = await import('os');

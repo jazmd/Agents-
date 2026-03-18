@@ -1790,8 +1790,13 @@ export class ControllerRegistry extends EventEmitter {
           const agentdbModule: any = await import('agentdb');
           const EES = agentdbModule.EnhancedEmbeddingService;
           if (!EES) return null;
+          // Read model + dimension from centralized embedding config
+          const embCfg = typeof agentdbModule.getEmbeddingConfig === 'function'
+            ? agentdbModule.getEmbeddingConfig()
+            : { model: 'nomic-ai/nomic-embed-text-v1.5', dimension: 768 };
           return new EES({
-            dimension: this.config.dimension || 768,
+            model: embCfg.model,
+            dimension: this.config.dimension || embCfg.dimension,
             cache: { maxSize: this.config.embeddingCacheSize ?? 500_000 },
             batch: { maxConcurrency: this.config.embeddingBatchConcurrency ?? 24 },
           });

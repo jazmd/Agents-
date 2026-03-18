@@ -135,12 +135,15 @@ async function getRegistry(dbPath?: string): Promise<any | null> {
         console.log = (..._args: unknown[]) => { /* suppress all during init */ };
         console.warn = (..._args: unknown[]) => { /* suppress all during init */ };
 
-        // Get dimension from agentdb embedding config (single source of truth)
+        // Get dimension + model from agentdb embedding config (single source of truth)
         let _embDimension = 768; // safe default
+        let _embModelName = 'nomic-ai/nomic-embed-text-v1.5';
         try {
           const _agentdbCfg: any = await import('agentdb');
           if (_agentdbCfg.getEmbeddingConfig) {
-            _embDimension = _agentdbCfg.getEmbeddingConfig().dimension;
+            const _ec = _agentdbCfg.getEmbeddingConfig();
+            _embDimension = _ec.dimension;
+            _embModelName = _ec.model;
           }
         } catch { /* agentdb not available, use default */ }
 
@@ -1222,13 +1225,19 @@ export async function bridgeGenerateEmbedding(
     const emb = await embedder.embed(text);
     if (!emb) return null;
 
-    // ADR-0030: Reject mismatched dimensions — let caller use 768-dim fallback
-    if (emb.length !== 768) return null;
+    // Read expected dimension from config — don't hardcode
+    let expectedDim = 768;
+    let reportedModel = 'unknown';
+    try {
+      const _m: any = await import('agentdb');
+      if (_m.getEmbeddingConfig) { const _c = _m.getEmbeddingConfig(); expectedDim = _c.dimension; reportedModel = _c.model; }
+    } catch { /* use defaults */ }
+    if (emb.length !== expectedDim) return null;
 
     return {
       embedding: Array.from(emb),
       dimensions: emb.length,
-      model: 'Xenova/all-mpnet-base-v2',
+      model: reportedModel,
     };
   } catch {
     return null;
@@ -1263,7 +1272,7 @@ export async function bridgeLoadEmbeddingModel(
     return {
       success: true,
       dimensions: test.length,
-      modelName: 'Xenova/all-mpnet-base-v2',
+      modelName: await import('agentdb').then((m: any) => m.getEmbeddingConfig?.()?.model || 'unknown').catch(() => 'unknown'),
       loadTime: Date.now() - startTime,
     };
   } catch {
