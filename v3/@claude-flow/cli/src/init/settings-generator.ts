@@ -28,7 +28,7 @@ export function generateSettings(options: InitOptions): object {
     allow: [
       'Bash(npx @claude-flow/cli:*)',
       'Bash(npx claude-flow:*)',
-      'Bash(node "$CLAUDE_PROJECT_DIR"/.claude/*)',
+      'Bash(node "$(git rev-parse --show-toplevel)"/.claude/*)',
       'mcp__claude-flow__:*',
     ],
     deny: [
@@ -224,12 +224,12 @@ function hookCmdEsm(script: string, subcommand: string): string {
 
 /** Shorthand for CJS hook-handler commands */
 function hookHandlerCmd(subcommand: string): string {
-  return hookCmd('"$CLAUDE_PROJECT_DIR/.claude/helpers/hook-handler.cjs"', subcommand);
+  return hookCmd('"$(git rev-parse --show-toplevel)/.claude/helpers/hook-handler.cjs"', subcommand);
 }
 
 /** Shorthand for ESM auto-memory-hook commands */
 function autoMemoryCmd(subcommand: string): string {
-  return hookCmdEsm('"$CLAUDE_PROJECT_DIR/.claude/helpers/auto-memory-hook.mjs"', subcommand);
+  return hookCmdEsm('"$(git rev-parse --show-toplevel)/.claude/helpers/auto-memory-hook.mjs"', subcommand);
 }
 
 /**
@@ -244,7 +244,7 @@ function generateStatusLineConfig(_options: InitOptions): object {
   // directly for statusline commands, and `cmd /c` blocks stdin forwarding.
   return {
     type: 'command',
-    command: `node "$CLAUDE_PROJECT_DIR/.claude/helpers/statusline.cjs"`,
+    command: `node "$(git rev-parse --show-toplevel)/.claude/helpers/statusline.cjs"`,
   };
 }
 
@@ -369,7 +369,7 @@ function generateHooksConfig(config: HooksConfig): object {
           },
           {
             type: 'command',
-            command: 'bash "$CLAUDE_PROJECT_DIR"/.claude/scripts/check-patches.sh --global',
+            command: 'bash "$(git rev-parse --show-toplevel)"/.claude/scripts/check-patches.sh --global',
             timeout: 30000,
           },
         ],
