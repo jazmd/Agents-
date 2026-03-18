@@ -352,16 +352,25 @@ export async function getHNSWIndex(options?: {
   dimensions?: number;
   forceRebuild?: boolean;
 }): Promise<HNSWIndex | null> {
-  // EM-001: Read dims from embeddings.json
+  // Read dimension from agentdb embedding config (single source of truth)
     let dimensions = options?.dimensions;
     if (!dimensions) {
         try {
-            const embConfigPath = path.join(process.cwd(), '.claude-flow', 'embeddings.json');
-            if (fs.existsSync(embConfigPath)) {
-                const embConfig = JSON.parse(fs.readFileSync(embConfigPath, 'utf-8'));
-                dimensions = embConfig.dimension || 768;
+            const _agentdbMod: any = await import('agentdb');
+            if (_agentdbMod.getEmbeddingConfig) {
+                dimensions = _agentdbMod.getEmbeddingConfig().dimension;
             }
-        } catch { /* EM-001: embeddings.json may not exist — use defaults */ }
+        } catch { /* agentdb not available */ }
+        // EM-001: Fall back to embeddings.json
+        if (!dimensions) {
+            try {
+                const embConfigPath = path.join(process.cwd(), '.claude-flow', 'embeddings.json');
+                if (fs.existsSync(embConfigPath)) {
+                    const embConfig = JSON.parse(fs.readFileSync(embConfigPath, 'utf-8'));
+                    dimensions = embConfig.dimension || 768;
+                }
+            } catch { /* EM-001: embeddings.json may not exist — use defaults */ }
+        }
         dimensions = dimensions || 768;
     }
 
@@ -1544,19 +1553,30 @@ export async function loadEmbeddingModel(options?: {
   }
 
   try {
-    // EM-001: Read embedding model from project config instead of hardcoding
+    // Read embedding model from agentdb config (single source of truth)
     let modelName = 'nomic-ai/nomic-embed-text-v1.5';
     let modelDimensions = 768;
     try {
-        const embConfigPath = path.join(process.cwd(), '.claude-flow', 'embeddings.json');
-        if (fs.existsSync(embConfigPath)) {
-            const embConfig = JSON.parse(fs.readFileSync(embConfigPath, 'utf-8'));
-            if (embConfig.model) {
-                modelName = embConfig.model;
-                modelDimensions = embConfig.dimension || 768;
-            }
+        const _agentdbMod: any = await import('agentdb');
+        if (_agentdbMod.getEmbeddingConfig) {
+            const _embCfg = _agentdbMod.getEmbeddingConfig();
+            modelName = _embCfg.model;
+            modelDimensions = _embCfg.dimension;
         }
-    } catch { /* EM-001: embeddings.json may not exist — use defaults */ }
+    } catch { /* agentdb not available */ }
+    // EM-001: Fall back to embeddings.json
+    if (modelName === 'nomic-ai/nomic-embed-text-v1.5') {
+        try {
+            const embConfigPath = path.join(process.cwd(), '.claude-flow', 'embeddings.json');
+            if (fs.existsSync(embConfigPath)) {
+                const embConfig = JSON.parse(fs.readFileSync(embConfigPath, 'utf-8'));
+                if (embConfig.model) {
+                    modelName = embConfig.model;
+                    modelDimensions = embConfig.dimension || 768;
+                }
+            }
+        } catch { /* EM-001: embeddings.json may not exist — use defaults */ }
+    }
     const xenovaModel = modelName.startsWith('Xenova/') ? modelName : `Xenova/${modelName}`;
     // EM-002: Set TRANSFORMERS_CACHE to user-writable path to prevent EACCES on global installs
     if (!process.env.TRANSFORMERS_CACHE) {
@@ -1663,15 +1683,27 @@ export async function loadEmbeddingModel(options?: {
  * Generate real embedding for text
  * Uses ONNX model if available, falls back to deterministic hash
  */
-export async function generateEmbedding(text: string): Promise<{
+export async function generateEmbedding(
+  text: string,
+  options?: { intent?: 'query' | 'document' },
+): Promise<{
   embedding: number[];
   dimensions: number;
   model: string;
 }> {
+  // Apply model-specific task prefix via agentdb
+  let processedText = text;
+  try {
+    const _agentdbMod: any = await import('agentdb');
+    if (_agentdbMod.applyTaskPrefix) {
+      processedText = _agentdbMod.applyTaskPrefix(text, options?.intent || 'document');
+    }
+  } catch { /* no prefix available */ }
+
   // ADR-053: Try AgentDB v3 bridge first
   const bridge = await getBridge();
   if (bridge) {
-    const bridgeResult = await bridge.bridgeGenerateEmbedding(text);
+    const bridgeResult = await bridge.bridgeGenerateEmbedding(processedText);
     if (bridgeResult) return bridgeResult;
   }
 
@@ -1685,7 +1717,7 @@ export async function generateEmbedding(text: string): Promise<{
   // Use ONNX model if available
   if (state.model && typeof (state.model as any) === 'function') {
     try {
-      const output = await (state.model as any)(text, { pooling: 'mean', normalize: true });
+      const output = await (state.model as any)(processedText, { pooling: 'mean', normalize: true });
       const embedding = Array.from(output.data as Float32Array);
       return {
         embedding,
@@ -1698,7 +1730,7 @@ export async function generateEmbedding(text: string): Promise<{
   }
 
   // Deterministic hash-based fallback (for testing/demo without ONNX)
-  const embedding = generateHashEmbedding(text, state.dimensions);
+  const embedding = generateHashEmbedding(processedText, state.dimensions);
   return {
     embedding,
     dimensions: state.dimensions,
@@ -2212,8 +2244,8 @@ export async function searchEntries(options: {
     // Ensure schema has all required columns (migration for older DBs)
     await ensureSchemaColumns(dbPath);
 
-    // Generate query embedding
-    const queryEmb = await generateEmbedding(query);
+    // Generate query embedding (intent: 'query' for model-specific prefix)
+    const queryEmb = await generateEmbedding(query, { intent: 'query' });
     const queryEmbedding = queryEmb.embedding;
 
     // Try HNSW search first (150x faster)

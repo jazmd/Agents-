@@ -135,6 +135,15 @@ async function getRegistry(dbPath?: string): Promise<any | null> {
         console.log = (..._args: unknown[]) => { /* suppress all during init */ };
         console.warn = (..._args: unknown[]) => { /* suppress all during init */ };
 
+        // Get dimension from agentdb embedding config (single source of truth)
+        let _embDimension = 768; // safe default
+        try {
+          const _agentdbCfg: any = await import('agentdb');
+          if (_agentdbCfg.getEmbeddingConfig) {
+            _embDimension = _agentdbCfg.getEmbeddingConfig().dimension;
+          }
+        } catch { /* agentdb not available, use default */ }
+
         try {
           // WM-102b: wire config.json into ControllerRegistry
           const _cfg = readProjectConfig();
@@ -155,7 +164,7 @@ async function getRegistry(dbPath?: string): Promise<any | null> {
 
           await registry.initialize({
             dbPath: dbPath || getDbPath(),
-            dimension: 768,
+            dimension: _embDimension,
             enableHNSW: _mem.enableHNSW !== false,
             cacheSize: _mem.cacheSize || 2048,
             similarityThreshold: _mg.similarityThreshold || 0.65,
@@ -205,7 +214,7 @@ async function getRegistry(dbPath?: string): Promise<any | null> {
           const WASMVectorSearch = agentdbMod.WASMVectorSearch || agentdbMod.default?.WASMVectorSearch;
           if (WASMVectorSearch) {
             const wasmSearch = new WASMVectorSearch({
-              dimension: 768,
+              dimension: _embDimension,
               wasmAvailable: false, // JS fallback active
             });
             registry.register('wasmVectorSearch', wasmSearch);

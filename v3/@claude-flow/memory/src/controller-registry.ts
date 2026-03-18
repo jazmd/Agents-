@@ -220,7 +220,7 @@ export interface RuntimeConfig {
   /** Database path for AgentDB */
   dbPath?: string;
 
-  /** Vector dimension (default: 768 for all-mpnet) */
+  /** Vector dimension — derived from embedding model config. Do NOT hardcode. */
   dimension?: number;
 
   /** Embedding generator function */
