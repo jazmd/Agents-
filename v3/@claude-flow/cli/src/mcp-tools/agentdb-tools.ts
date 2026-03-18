@@ -541,7 +541,12 @@ export const agentdbSemanticRoute: MCPTool = {
       if (!input) return { success: false, route: null, error: 'input is required (non-empty string, max 10KB)' };
       const bridge = await getBridge();
       const result = await bridge.bridgeSemanticRoute({ input });
-      return result ?? { success: false, route: null, error: 'Bridge not available' };
+      if (!result) return { success: false, route: null, error: 'Bridge not available' };
+      const r = result as Record<string, unknown>;
+      if (r.error || r.route === null || r.route === undefined) {
+        return { success: false, ...r };
+      }
+      return { success: true, ...r };
     } catch (error) {
       return { success: false, route: null, error: sanitizeError(error) };
     }
