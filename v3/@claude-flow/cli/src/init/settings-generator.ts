@@ -119,7 +119,7 @@ export function generateSettings(options: InitOptions): object {
       agentdb: {
         learningThreshold: 0.6,
         vectorBackend: 'auto',
-        tickInterval: 300000,
+        tickInterval: 15000,
       },
       learningBridge: {
         enabled: options.runtime.enableLearningBridge ?? true,

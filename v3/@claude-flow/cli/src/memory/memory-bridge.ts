@@ -157,8 +157,8 @@ async function getRegistry(dbPath?: string): Promise<any | null> {
             dbPath: dbPath || getDbPath(),
             dimension: 768,
             enableHNSW: _mem.enableHNSW !== false,
-            cacheSize: _mem.cacheSize || 100,
-            similarityThreshold: _mg.similarityThreshold || 0.8,
+            cacheSize: _mem.cacheSize || 2048,
+            similarityThreshold: _mg.similarityThreshold || 0.65,
             controllers: {
               reasoningBank: true,
               learningBridge: _lb.enabled !== false,
@@ -170,17 +170,17 @@ async function getRegistry(dbPath?: string): Promise<any | null> {
             },
             memory: {
               enableHNSW: _mem.enableHNSW !== false,
-              cacheSize: _mem.cacheSize || 100,
+              cacheSize: _mem.cacheSize || 2048,
               learningBridge: {
-                sonaMode: _lb.sonaMode || 'balanced',
+                sonaMode: _lb.sonaMode || 'real-time',
                 confidenceDecayRate: _lb.confidenceDecayRate || 0.005,
                 accessBoostAmount: _lb.accessBoostAmount || 0.03,
                 consolidationThreshold: _lb.consolidationThreshold || 10,
               },
               memoryGraph: {
                 pageRankDamping: _mg.pageRankDamping || 0.85,
-                maxNodes: _mg.maxNodes || 5000,
-                similarityThreshold: _mg.similarityThreshold || 0.8,
+                maxNodes: _mg.maxNodes || 50000,
+                similarityThreshold: _mg.similarityThreshold || 0.65,
               },
             },
           } as any);

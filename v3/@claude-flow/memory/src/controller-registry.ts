@@ -892,7 +892,7 @@ export class ControllerRegistry extends EventEmitter {
         };
         const config = this.config.memory?.learningBridge || {};
         const bridge = new LearningBridge(this.backend || noOpBackend, {
-          sonaMode: config.sonaMode || this.config.neural?.sonaMode || 'balanced',
+          sonaMode: config.sonaMode || this.config.neural?.sonaMode || 'real-time',
           confidenceDecayRate: config.confidenceDecayRate,
           accessBoostAmount: config.accessBoostAmount,
           consolidationThreshold: config.consolidationThreshold,
@@ -1401,7 +1401,7 @@ export class ControllerRegistry extends EventEmitter {
       case 'resourceTracker': {
         // D4: Resource tracking with memory ceiling and query stats (ADR-0042)
         const resources = new Map<string, { allocated: number; limit: number }>();
-        const CEILING = 96 * 1024 * 1024 * 1024; // 96GB — optimized for 187GB server
+        const CEILING = 160 * 1024 * 1024 * 1024; // 160GB — dedicated 187GB server, nothing else running
         let currentUsage = 0;
         let queryCount = 0;
         const queryWindow: number[] = []; // rolling last 100 query timestamps
