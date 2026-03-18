@@ -1817,9 +1817,9 @@ export class ControllerRegistry extends EventEmitter {
           const agentdbModule: any = await import('agentdb');
           const AL = agentdbModule.AuditLogger;
           if (!AL) return null;
-          return new AL(this.agentdb.database, {
-            rotation: { maxSize: this.config.auditRotationSize ?? '10MB', maxFiles: this.config.auditRotationFiles ?? 10 },
-            format: this.config.auditFormat ?? 'soc2',
+          return new AL({
+            maxFileSize: this.config.auditRotationSize ?? 10 * 1024 * 1024,
+            maxFiles: this.config.auditRotationFiles ?? 10,
           });
         } catch (e) {
           const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
@@ -1839,10 +1839,7 @@ export class ControllerRegistry extends EventEmitter {
           const agentdbModule: any = await import('agentdb');
           const IHM = agentdbModule.IndexHealthMonitor;
           if (!IHM) return null;
-          return new IHM({
-            vectorBackend: this.get('vectorBackend') || undefined,
-            guardedBackend: this.get('guardedVectorBackend') || undefined,
-          });
+          return new IHM();
         } catch (e) {
           const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
           this.initErrors.push(err);
