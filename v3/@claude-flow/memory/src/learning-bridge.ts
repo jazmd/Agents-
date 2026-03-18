@@ -440,7 +440,7 @@ export class LearningBridge extends EventEmitter {
    * This is a lightweight stand-in for a real embedding model,
    * suitable for pattern matching within the neural trajectory system.
    */
-  private createHashEmbedding(text: string, dimensions: number = 768): Float32Array {
+  private createHashEmbedding(text: string, dimensions: number = 384): Float32Array {
     const embedding = new Float32Array(dimensions);
     const normalized = text.toLowerCase().trim();
 

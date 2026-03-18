@@ -359,10 +359,10 @@ export async function getHNSWIndex(options?: {
             const embConfigPath = path.join(process.cwd(), '.claude-flow', 'embeddings.json');
             if (fs.existsSync(embConfigPath)) {
                 const embConfig = JSON.parse(fs.readFileSync(embConfigPath, 'utf-8'));
-                dimensions = embConfig.dimension || 768;
+                dimensions = embConfig.dimension || 384;
             }
         } catch { /* EM-001: embeddings.json may not exist — use defaults */ }
-        dimensions = dimensions || 768;
+        dimensions = dimensions || 384;
     }
 
   // Return existing index if already initialized
@@ -639,7 +639,7 @@ export function getHNSWStatus(): {
       available: true,
       initialized: true,
       entryCount: hnswIndex?.entries.size ?? 0,
-      dimensions: hnswIndex?.dimensions ?? 768
+      dimensions: hnswIndex?.dimensions ?? 384
     };
   }
 
@@ -647,7 +647,7 @@ export function getHNSWStatus(): {
     available: hnswIndex !== null,
     initialized: hnswIndex?.initialized ?? false,
     entryCount: hnswIndex?.entries.size ?? 0,
-    dimensions: hnswIndex?.dimensions ?? 768
+    dimensions: hnswIndex?.dimensions ?? 384
   };
 }
 
@@ -1545,15 +1545,15 @@ export async function loadEmbeddingModel(options?: {
 
   try {
     // EM-001: Read embedding model from project config instead of hardcoding
-    let modelName = 'all-mpnet-base-v2';
-    let modelDimensions = 768;
+    let modelName = 'all-MiniLM-L6-v2';
+    let modelDimensions = 384;
     try {
         const embConfigPath = path.join(process.cwd(), '.claude-flow', 'embeddings.json');
         if (fs.existsSync(embConfigPath)) {
             const embConfig = JSON.parse(fs.readFileSync(embConfigPath, 'utf-8'));
             if (embConfig.model) {
                 modelName = embConfig.model;
-                modelDimensions = embConfig.dimension || 768;
+                modelDimensions = embConfig.dimension || 384;
             }
         }
     } catch { /* EM-001: embeddings.json may not exist — use defaults */ }
@@ -1601,12 +1601,12 @@ export async function loadEmbeddingModel(options?: {
         loaded: true,
         model: { embed: reasoningBank.computeEmbedding },
         tokenizer: null,
-        dimensions: 768
+        dimensions: 384
       };
 
       return {
         success: true,
-        dimensions: 768,
+        dimensions: 384,
         modelName: 'agentic-flow/reasoningbank',
         loadTime: Date.now() - startTime
       };
@@ -1624,12 +1624,12 @@ export async function loadEmbeddingModel(options?: {
         loaded: true,
         model: (agenticFlow as any).embeddings,
         tokenizer: null,
-        dimensions: 768
+        dimensions: 384
       };
 
       return {
         success: true,
-        dimensions: 768,
+        dimensions: 384,
         modelName: 'agentic-flow',
         loadTime: Date.now() - startTime
       };
@@ -1640,12 +1640,12 @@ export async function loadEmbeddingModel(options?: {
       loaded: true,
       model: null, // Will use simple hash-based fallback
       tokenizer: null,
-      dimensions: 768 // Match HNSW index dimensions (hash fallback)
+      dimensions: 384 // Match HNSW index dimensions (hash fallback)
     };
 
     return {
       success: true,
-      dimensions: 768,
+      dimensions: 384,
       modelName: 'hash-fallback',
       loadTime: Date.now() - startTime
     };

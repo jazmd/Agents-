@@ -220,7 +220,7 @@ export interface RuntimeConfig {
   /** Database path for AgentDB */
   dbPath?: string;
 
-  /** Vector dimension (default: 768 for all-mpnet) */
+  /** Vector dimension (default: 384 for all-MiniLM-L6-v2) */
   dimension?: number;
 
   /** Embedding generator function */
@@ -1401,7 +1401,7 @@ export class ControllerRegistry extends EventEmitter {
       case 'resourceTracker': {
         // D4: Resource tracking with memory ceiling and query stats (ADR-0042)
         const resources = new Map<string, { allocated: number; limit: number }>();
-        const CEILING = 16 * 1024 * 1024 * 1024; // 16GB
+        const CEILING = 96 * 1024 * 1024 * 1024; // 96GB — tuned for 187GB server
         let currentUsage = 0;
         let queryCount = 0;
         const queryWindow: number[] = []; // rolling last 100 query timestamps
@@ -1468,10 +1468,10 @@ export class ControllerRegistry extends EventEmitter {
           },
         };
         // Pre-configure default buckets per ADR-0042
-        limiter.configure('insert', 100, 100);
-        limiter.configure('search', 1000, 1000);
-        limiter.configure('delete', 50, 50);
-        limiter.configure('batch', 10, 10);
+        limiter.configure('insert', 1000, 1000);
+        limiter.configure('search', 10000, 10000);
+        limiter.configure('delete', 500, 500);
+        limiter.configure('batch', 100, 100);
         return limiter;
       }
 
@@ -1668,7 +1668,7 @@ export class ControllerRegistry extends EventEmitter {
           // Private constructor — must use static async create() factory
           if (typeof SLRB.create !== 'function') return null;
           return await SLRB.create({
-            dimension: this.config.dimension || 768,
+            dimension: this.config.dimension || 384,
           });
         } catch (e) {
           const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
@@ -1706,7 +1706,7 @@ export class ControllerRegistry extends EventEmitter {
           const SA = agentdbModule.SelfAttentionController;
           if (!SA) return null;
           const vb = this.get('vectorBackend');
-          return new SA({ dimension: this.config.dimension || 768, vectorBackend: vb || undefined });
+          return new SA({ dimension: this.config.dimension || 384, vectorBackend: vb || undefined });
         } catch (e) {
           const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
           this.initErrors.push(err);
@@ -1724,7 +1724,7 @@ export class ControllerRegistry extends EventEmitter {
           const CA = agentdbModule.CrossAttentionController;
           if (!CA) return null;
           const vb = this.get('vectorBackend');
-          return new CA({ dimension: this.config.dimension || 768, vectorBackend: vb || undefined });
+          return new CA({ dimension: this.config.dimension || 384, vectorBackend: vb || undefined });
         } catch (e) {
           const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
           this.initErrors.push(err);
@@ -1743,7 +1743,7 @@ export class ControllerRegistry extends EventEmitter {
           if (!MHA) return null;
           const vb = this.get('vectorBackend');
           return new MHA({
-            dimension: this.config.dimension || 768,
+            dimension: this.config.dimension || 384,
             numHeads: 8,
             vectorBackend: vb || undefined,
           });
@@ -1765,7 +1765,7 @@ export class ControllerRegistry extends EventEmitter {
           if (!AS) return null;
           const accel = this.get('nativeAccelerator');
           return new AS({
-            dimension: this.config.dimension || 768,
+            dimension: this.config.dimension || 384,
             accelerator: accel || undefined,
             // A5 mechanism gating: Hyperbolic only when NativeAccelerator reports simdAvailable
             enableHyperbolic: !!(accel && typeof (accel as any).simdAvailable === 'boolean' && (accel as any).simdAvailable),
@@ -1791,9 +1791,9 @@ export class ControllerRegistry extends EventEmitter {
           const EES = agentdbModule.EnhancedEmbeddingService;
           if (!EES) return null;
           return new EES({
-            dimension: this.config.dimension || 768,
+            dimension: this.config.dimension || 384,
             cache: { maxSize: this.config.embeddingCacheSize ?? 100_000 },
-            batch: { maxConcurrency: this.config.embeddingBatchConcurrency ?? 10 },
+            batch: { maxConcurrency: this.config.embeddingBatchConcurrency ?? 24 },
           });
         } catch (e) {
           const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));

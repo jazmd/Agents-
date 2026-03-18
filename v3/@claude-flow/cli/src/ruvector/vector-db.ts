@@ -97,7 +97,7 @@ function cosineSimilarity(a: Float32Array, b: Float32Array): number {
 /**
  * Generate a simple hash-based embedding (fallback when ruvector not available)
  */
-function generateHashEmbedding(text: string, dimensions: number = 768): Float32Array {
+function generateHashEmbedding(text: string, dimensions: number = 384): Float32Array {
   const embedding = new Float32Array(dimensions);
   const normalized = text.toLowerCase().trim();
 
@@ -186,7 +186,7 @@ export async function loadRuVector(): Promise<boolean> {
             },
           } as VectorDB;
         },
-        generateEmbedding: (text: string, dimensions: number = 768): Float32Array => {
+        generateEmbedding: (text: string, dimensions: number = 384): Float32Array => {
           // ruvector may not have this - use fallback
           return generateHashEmbedding(text, dimensions);
         },
@@ -229,7 +229,7 @@ export function isWASMAccelerated(): boolean {
  * Create a vector database
  * Uses ruvector HNSW if available, falls back to brute-force search
  */
-export async function createVectorDB(dimensions: number = 768): Promise<VectorDB> {
+export async function createVectorDB(dimensions: number = 384): Promise<VectorDB> {
   await loadRuVector();
 
   if (ruvectorModule && typeof ruvectorModule.createVectorDB === 'function') {
@@ -247,7 +247,7 @@ export async function createVectorDB(dimensions: number = 768): Promise<VectorDB
  * Generate an embedding for text
  * Uses ruvector if available, falls back to hash-based embedding
  */
-export function generateEmbedding(text: string, dimensions: number = 768): Float32Array {
+export function generateEmbedding(text: string, dimensions: number = 384): Float32Array {
   if (ruvectorModule && typeof ruvectorModule.generateEmbedding === 'function') {
     try {
       return ruvectorModule.generateEmbedding(text, dimensions);

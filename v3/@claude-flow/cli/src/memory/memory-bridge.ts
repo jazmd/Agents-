@@ -155,7 +155,7 @@ async function getRegistry(dbPath?: string): Promise<any | null> {
 
           await registry.initialize({
             dbPath: dbPath || getDbPath(),
-            dimension: 768,
+            dimension: 384,
             enableHNSW: _mem.enableHNSW !== false,
             cacheSize: _mem.cacheSize || 100,
             similarityThreshold: _mg.similarityThreshold || 0.8,
@@ -1194,9 +1194,8 @@ export async function bridgeDeleteEntry(options: {
 
 /**
  * Generate embedding via AgentDB v3's embedder.
- * Returns null if bridge unavailable or dimensions don't match 768 —
- * caller falls back to own ONNX/hash which produces correct 768-dim.
- * ADR-0030: Reject 384-dim embeddings to ensure dimension consistency.
+ * Returns null if bridge unavailable — caller falls back to own ONNX/hash.
+ * Accepts any dimension (384 or 768) from the bridge embedder.
  */
 export async function bridgeGenerateEmbedding(
   text: string,
@@ -1213,13 +1212,12 @@ export async function bridgeGenerateEmbedding(
     const emb = await embedder.embed(text);
     if (!emb) return null;
 
-    // ADR-0030: Reject mismatched dimensions — let caller use 768-dim fallback
-    if (emb.length !== 768) return null;
+    if (emb.length === 0) return null;
 
     return {
       embedding: Array.from(emb),
       dimensions: emb.length,
-      model: 'Xenova/all-mpnet-base-v2',
+      model: emb.length <= 384 ? 'Xenova/all-MiniLM-L6-v2' : 'Xenova/all-mpnet-base-v2',
     };
   } catch {
     return null;
@@ -1298,7 +1296,7 @@ export async function bridgeGetHNSWStatus(
       available: true,
       initialized: true,
       entryCount,
-      dimensions: 768,
+      dimensions: 384,
     };
   } catch {
     return null;
