@@ -380,10 +380,10 @@ export const agentdbHierarchicalRecall: MCPTool = {
   handler: async (params: Record<string, unknown>) => {
     try {
       const query = validateString(params.query, 'query', 10_000);
-      if (!query) return { results: [], error: 'query is required (non-empty string, max 10KB)' };
+      if (!query) return { success: false, results: [], error: 'query is required (non-empty string, max 10KB)' };
       const tier = validateString(params.tier, 'tier', 20);
       if (tier && !['working', 'episodic', 'semantic'].includes(tier)) {
-        return { results: [], error: `Invalid tier: ${tier}. Must be working, episodic, or semantic` };
+        return { success: false, results: [], error: `Invalid tier: ${tier}. Must be working, episodic, or semantic` };
       }
       const bridge = await getBridge();
       const result = await bridge.bridgeHierarchicalRecall({
@@ -391,9 +391,14 @@ export const agentdbHierarchicalRecall: MCPTool = {
         tier: tier ?? undefined,
         topK: validatePositiveInt(params.topK, 5, MAX_TOP_K),
       });
-      return result ?? { results: [], error: 'Bridge not available' };
+      if (!result) return { success: false, results: [], error: 'Bridge not available' };
+      const resultObj = result as Record<string, unknown>;
+      if (!resultObj.results || (Array.isArray(resultObj.results) && resultObj.results.length === 0)) {
+        return { success: true, ...resultObj, notice: 'No results found. Hierarchical recall uses semantic search which may not match exact stored values.' };
+      }
+      return { success: true, ...resultObj };
     } catch (error) {
-      return { results: [], error: sanitizeError(error) };
+      return { success: false, results: [], error: sanitizeError(error) };
     }
   },
 };
@@ -533,12 +538,12 @@ export const agentdbSemanticRoute: MCPTool = {
   handler: async (params: Record<string, unknown>) => {
     try {
       const input = validateString(params.input, 'input', 10_000);
-      if (!input) return { route: null, error: 'input is required (non-empty string, max 10KB)' };
+      if (!input) return { success: false, route: null, error: 'input is required (non-empty string, max 10KB)' };
       const bridge = await getBridge();
       const result = await bridge.bridgeSemanticRoute({ input });
-      return result ?? { route: null, error: 'Bridge not available' };
+      return result ?? { success: false, route: null, error: 'Bridge not available' };
     } catch (error) {
-      return { route: null, error: sanitizeError(error) };
+      return { success: false, route: null, error: sanitizeError(error) };
     }
   },
 };
@@ -668,16 +673,21 @@ export const agentdbCausalQuery: MCPTool = {
       const k = validatePositiveInt(params.k, 10, MAX_TOP_K);
       let results: unknown[] = [];
 
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('causal_query timeout (2s)')), 2000),
-      );
+      let timerId: ReturnType<typeof setTimeout> | undefined;
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        timerId = setTimeout(() => reject(new Error('causal_query timeout (2s)')), 2000);
+      });
 
-      if (cause && typeof causal.getEffects === 'function') {
-        results = await Promise.race([causal.getEffects(cause, k), timeoutPromise]) as unknown[];
-      } else if (effect && typeof causal.getCauses === 'function') {
-        results = await Promise.race([causal.getCauses(effect, k), timeoutPromise]) as unknown[];
-      } else if (typeof causal.query === 'function') {
-        results = await Promise.race([causal.query(params), timeoutPromise]) as unknown[];
+      try {
+        if (cause && typeof causal.getEffects === 'function') {
+          results = await Promise.race([causal.getEffects(cause, k), timeoutPromise]) as unknown[];
+        } else if (effect && typeof causal.getCauses === 'function') {
+          results = await Promise.race([causal.getCauses(effect, k), timeoutPromise]) as unknown[];
+        } else if (typeof causal.query === 'function') {
+          results = await Promise.race([causal.query(params), timeoutPromise]) as unknown[];
+        }
+      } finally {
+        clearTimeout(timerId);
       }
 
       // Filter by min_uplift
@@ -1256,6 +1266,9 @@ export const agentdbAttentionMetrics: MCPTool = {
         : typeof metricsCtrl.getStats === 'function'
           ? metricsCtrl.getStats()
           : {};
+      if (!metrics || Object.keys(metrics as Record<string, unknown>).length === 0) {
+        return { success: true, metrics, notice: 'No attention operations performed. Metrics populate after attention_compute or attention_benchmark calls.' };
+      }
       return { success: true, metrics };
     } catch (error) {
       return { success: false, error: sanitizeError(error) };

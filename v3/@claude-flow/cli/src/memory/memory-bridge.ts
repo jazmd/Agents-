@@ -1552,9 +1552,11 @@ export async function bridgeStorePattern(options: {
   confidence: number;
   metadata?: Record<string, unknown>;
   dbPath?: string;
-}): Promise<{ success: boolean; patternId: string; controller: string } | null> {
+}): Promise<{ success: boolean; patternId: string; controller: string; error?: string } | null> {
   const registry = await getRegistry(options.dbPath);
-  if (!registry) return null;
+  if (!registry) {
+    return { success: false, patternId: '', controller: '', error: 'PatternStore unavailable: registry not initialized' };
+  }
 
   try {
     const reasoningBank = registry.get('reasoningBank');
@@ -1584,9 +1586,28 @@ export async function bridgeStorePattern(options: {
       dbPath: options.dbPath,
     });
 
-    return result ? { success: true, patternId: result.id, controller: 'bridge-fallback' } : null;
-  } catch {
-    return null;
+    if (!result) {
+      // Diagnose why store is unavailable — database vs store engine
+      const ctx = getDb(registry);
+      if (!ctx) {
+        return { success: false, patternId: '', controller: '', error: 'PatternStore unavailable: database not initialized' };
+      }
+      return { success: false, patternId: '', controller: '', error: 'PatternStore unavailable: store operation failed' };
+    }
+
+    return { success: true, patternId: result.id, controller: 'bridge-fallback' };
+  } catch (e: unknown) {
+    // Diagnose the failure with cascading context
+    const registry2 = await getRegistry(options.dbPath);
+    if (!registry2) {
+      return { success: false, patternId: '', controller: '', error: 'PatternStore unavailable: registry lost during operation' };
+    }
+    const ctx = getDb(registry2);
+    if (!ctx) {
+      return { success: false, patternId: '', controller: '', error: 'PatternStore unavailable: database not initialized' };
+    }
+    const msg = e instanceof Error ? e.message : String(e);
+    return { success: false, patternId: '', controller: '', error: `PatternStore failed: ${msg}` };
   }
 }
 
@@ -2856,13 +2877,43 @@ export async function bridgeEmbed(
     requireController(enhanced, 'enhancedEmbeddingService', 'bridgeEmbed');
     if (enhanced && typeof enhanced.embed === 'function') {
       const result = await enhanced.embed(text);
-      return {
-        success: true,
-        embedding: Array.isArray(result.embedding) ? result.embedding : Array.from(result.embedding ?? []),
-        dimension: result.dimension ?? result.embedding?.length ?? 0,
-        provider: result.provider ?? 'unknown',
-        cached: result.cached ?? false,
-      };
+      // N6: EnhancedEmbeddingService.embed() returns Float32Array, not an object.
+      // Previous code destructured result.embedding/result.provider which are
+      // undefined on Float32Array, producing { embedding: [], dimension: 0,
+      // provider: "unknown" } — a false success with zero-dimension embedding.
+      if (result instanceof Float32Array || ArrayBuffer.isView(result)) {
+        // Direct Float32Array return from services/enhanced-embeddings.ts
+        const embedding = Array.from(result as Float32Array);
+        if (embedding.length === 0) {
+          return { success: false, error: 'EnhancedEmbeddingService returned empty embedding' };
+        }
+        // Extract provider/model info from getStats() if available
+        let provider = 'transformers';
+        if (typeof enhanced.getStats === 'function') {
+          const stats = enhanced.getStats();
+          provider = stats?.model?.provider ?? 'transformers';
+        }
+        return { success: true, embedding, dimension: embedding.length, provider, cached: false };
+      }
+      if (result && typeof result === 'object') {
+        // Object-shaped return (future-proofing if API changes)
+        const embeddingData = (result as any).embedding;
+        const arr = Array.isArray(embeddingData) ? embeddingData
+          : (embeddingData instanceof Float32Array || ArrayBuffer.isView(embeddingData))
+            ? Array.from(embeddingData as Float32Array)
+            : [];
+        if (arr.length === 0) {
+          return { success: false, error: 'EnhancedEmbeddingService returned empty embedding' };
+        }
+        return {
+          success: true,
+          embedding: arr,
+          dimension: (result as any).dimension ?? arr.length,
+          provider: (result as any).provider ?? 'unknown',
+          cached: (result as any).cached ?? false,
+        };
+      }
+      return { success: false, error: 'EnhancedEmbeddingService returned unexpected result type' };
     }
     // A9 not available — fallback to existing pipeline
     try {
