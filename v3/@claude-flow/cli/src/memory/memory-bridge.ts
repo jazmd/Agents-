@@ -155,7 +155,7 @@ async function getRegistry(dbPath?: string): Promise<any | null> {
 
           await registry.initialize({
             dbPath: dbPath || getDbPath(),
-            dimension: 384,
+            dimension: 768,
             enableHNSW: _mem.enableHNSW !== false,
             cacheSize: _mem.cacheSize || 100,
             similarityThreshold: _mg.similarityThreshold || 0.8,
@@ -205,7 +205,7 @@ async function getRegistry(dbPath?: string): Promise<any | null> {
           const WASMVectorSearch = agentdbMod.WASMVectorSearch || agentdbMod.default?.WASMVectorSearch;
           if (WASMVectorSearch) {
             const wasmSearch = new WASMVectorSearch({
-              dimension: 384,
+              dimension: 768,
               wasmAvailable: false, // JS fallback active
             });
             registry.register('wasmVectorSearch', wasmSearch);
@@ -1194,8 +1194,9 @@ export async function bridgeDeleteEntry(options: {
 
 /**
  * Generate embedding via AgentDB v3's embedder.
- * Returns null if bridge unavailable — caller falls back to own ONNX/hash.
- * Accepts any dimension (384 or 768) from the bridge embedder.
+ * Returns null if bridge unavailable or dimensions don't match 768 —
+ * caller falls back to own ONNX/hash which produces correct 768-dim.
+ * ADR-0030: Reject 384-dim embeddings to ensure dimension consistency.
  */
 export async function bridgeGenerateEmbedding(
   text: string,
@@ -1212,12 +1213,13 @@ export async function bridgeGenerateEmbedding(
     const emb = await embedder.embed(text);
     if (!emb) return null;
 
-    if (emb.length === 0) return null;
+    // ADR-0030: Reject mismatched dimensions — let caller use 768-dim fallback
+    if (emb.length !== 768) return null;
 
     return {
       embedding: Array.from(emb),
       dimensions: emb.length,
-      model: emb.length <= 384 ? 'Xenova/all-MiniLM-L6-v2' : 'Xenova/all-mpnet-base-v2',
+      model: 'Xenova/all-mpnet-base-v2',
     };
   } catch {
     return null;
@@ -1292,11 +1294,13 @@ export async function bridgeGetHNSWStatus(
       // Table might not exist
     }
 
+    // Read actual dimension from registry config instead of hardcoding
+    const dim = (registry as any).config?.dimension || 768;
     return {
       available: true,
       initialized: true,
       entryCount,
-      dimensions: 384,
+      dimensions: dim,
     };
   } catch {
     return null;

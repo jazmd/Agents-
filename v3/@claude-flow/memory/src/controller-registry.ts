@@ -220,7 +220,7 @@ export interface RuntimeConfig {
   /** Database path for AgentDB */
   dbPath?: string;
 
-  /** Vector dimension (default: 384 for all-MiniLM-L6-v2) */
+  /** Vector dimension (default: 768 for all-mpnet) */
   dimension?: number;
 
   /** Embedding generator function */
@@ -316,7 +316,7 @@ export const INIT_LEVELS: InitLevel[] = [
  * const registry = new ControllerRegistry();
  * await registry.initialize({
  *   dbPath: './data/memory.db',
- *   dimension: 384,
+ *   dimension: 768,
  *   memory: {
  *     enableHNSW: true,
  *     learningBridge: { sonaMode: 'balanced' },
@@ -1269,7 +1269,7 @@ export class ControllerRegistry extends EventEmitter {
           const agentdbModule: any = await import('agentdb');
           const MG = agentdbModule.MutationGuard;
           if (!MG) return null;
-          return new MG({ dimension: this.config.dimension || 384 });
+          return new MG({ dimension: this.config.dimension || 768 });
         } catch (e) {
           const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
           this.initErrors.push(err);
@@ -1304,7 +1304,7 @@ export class ControllerRegistry extends EventEmitter {
           const GNN = agentdbModule.GNNService;
           if (!GNN) return null;
           const svc = new GNN({
-            inputDim: this.config.dimension || 384,
+            inputDim: this.config.dimension || 768,
             hiddenDim: 128,
             outputDim: 64,
             heads: 8,
@@ -1401,7 +1401,7 @@ export class ControllerRegistry extends EventEmitter {
       case 'resourceTracker': {
         // D4: Resource tracking with memory ceiling and query stats (ADR-0042)
         const resources = new Map<string, { allocated: number; limit: number }>();
-        const CEILING = 96 * 1024 * 1024 * 1024; // 96GB — tuned for 187GB server
+        const CEILING = 96 * 1024 * 1024 * 1024; // 96GB — optimized for 187GB server
         let currentUsage = 0;
         let queryCount = 0;
         const queryWindow: number[] = []; // rolling last 100 query timestamps
@@ -1668,7 +1668,7 @@ export class ControllerRegistry extends EventEmitter {
           // Private constructor — must use static async create() factory
           if (typeof SLRB.create !== 'function') return null;
           return await SLRB.create({
-            dimension: this.config.dimension || 384,
+            dimension: this.config.dimension || 768,
           });
         } catch (e) {
           const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
@@ -1706,7 +1706,7 @@ export class ControllerRegistry extends EventEmitter {
           const SA = agentdbModule.SelfAttentionController;
           if (!SA) return null;
           const vb = this.get('vectorBackend');
-          return new SA({ dimension: this.config.dimension || 384, vectorBackend: vb || undefined });
+          return new SA({ dimension: this.config.dimension || 768, vectorBackend: vb || undefined });
         } catch (e) {
           const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
           this.initErrors.push(err);
@@ -1724,7 +1724,7 @@ export class ControllerRegistry extends EventEmitter {
           const CA = agentdbModule.CrossAttentionController;
           if (!CA) return null;
           const vb = this.get('vectorBackend');
-          return new CA({ dimension: this.config.dimension || 384, vectorBackend: vb || undefined });
+          return new CA({ dimension: this.config.dimension || 768, vectorBackend: vb || undefined });
         } catch (e) {
           const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
           this.initErrors.push(err);
@@ -1743,7 +1743,7 @@ export class ControllerRegistry extends EventEmitter {
           if (!MHA) return null;
           const vb = this.get('vectorBackend');
           return new MHA({
-            dimension: this.config.dimension || 384,
+            dimension: this.config.dimension || 768,
             numHeads: 8,
             vectorBackend: vb || undefined,
           });
@@ -1765,7 +1765,7 @@ export class ControllerRegistry extends EventEmitter {
           if (!AS) return null;
           const accel = this.get('nativeAccelerator');
           return new AS({
-            dimension: this.config.dimension || 384,
+            dimension: this.config.dimension || 768,
             accelerator: accel || undefined,
             // A5 mechanism gating: Hyperbolic only when NativeAccelerator reports simdAvailable
             enableHyperbolic: !!(accel && typeof (accel as any).simdAvailable === 'boolean' && (accel as any).simdAvailable),
@@ -1791,8 +1791,8 @@ export class ControllerRegistry extends EventEmitter {
           const EES = agentdbModule.EnhancedEmbeddingService;
           if (!EES) return null;
           return new EES({
-            dimension: this.config.dimension || 384,
-            cache: { maxSize: this.config.embeddingCacheSize ?? 100_000 },
+            dimension: this.config.dimension || 768,
+            cache: { maxSize: this.config.embeddingCacheSize ?? 500_000 },
             batch: { maxConcurrency: this.config.embeddingBatchConcurrency ?? 24 },
           });
         } catch (e) {
@@ -1925,8 +1925,8 @@ export class ControllerRegistry extends EventEmitter {
     }
     // Return a minimal stub — HierarchicalMemory falls back to manualSearch without embeddings
     return {
-      embed: async () => new Float32Array(this.config.dimension || 384),
-      embedBatch: async (texts: string[]) => texts.map(() => new Float32Array(this.config.dimension || 384)),
+      embed: async () => new Float32Array(this.config.dimension || 768),
+      embedBatch: async (texts: string[]) => texts.map(() => new Float32Array(this.config.dimension || 768)),
       initialize: async () => {},
     };
   }
