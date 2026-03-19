@@ -15,6 +15,7 @@
 
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
+import { EMBEDDING_DIM } from '../embedding-constants.js';
 
 // Dynamic imports for embeddings package
 async function getEmbeddings() {
@@ -735,7 +736,7 @@ const initCommand: Command = {
       // Write embeddings config
       spinner.setText('Writing configuration...');
       // ADR-0052: use 768 as default, MiniLM is 384
-      const dimension = model.includes('MiniLM') ? 384 : 768;
+      const dimension = model.includes('MiniLM') ? 384 : EMBEDDING_DIM;
       const config = {
         model,
         modelPath: modelDir,
@@ -1267,7 +1268,7 @@ const modelsCommand: Command = {
     // List models
     let models = [
       { id: 'all-MiniLM-L6-v2', dimension: 384, size: '23MB', quantized: false, downloaded: true },
-      { id: 'all-mpnet-base-v2', dimension: 768, size: '110MB', quantized: false, downloaded: false },
+      { id: 'all-mpnet-base-v2', dimension: EMBEDDING_DIM, size: '110MB', quantized: false, downloaded: false },
       { id: 'paraphrase-MiniLM-L3-v2', dimension: 384, size: '17MB', quantized: false, downloaded: false },
     ];
 
@@ -1368,7 +1369,7 @@ const cacheCommand: Command = {
       const hnswStatus = getHNSWStatus();
       if (hnswStatus && hnswStatus.initialized) {
         memoryEntries = hnswStatus.entryCount || 0;
-        const memBytes = memoryEntries * (hnswStatus.dimensions || 768) * 4; // Float32 = 4 bytes per dimension; ADR-0052: matches embedding config default
+        const memBytes = memoryEntries * (hnswStatus.dimensions || EMBEDDING_DIM) * 4; // Float32 = 4 bytes per dimension; ADR-0052: matches embedding config default
         if (memBytes >= 1024 * 1024) {
           memorySize = `${(memBytes / 1024 / 1024).toFixed(1)} MB`;
         } else if (memBytes >= 1024) {

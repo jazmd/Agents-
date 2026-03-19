@@ -25,6 +25,7 @@ import { MemoryGraph } from './memory-graph.js';
 import type { MemoryGraphConfig } from './memory-graph.js';
 import { TieredCacheManager } from './cache-manager.js';
 import type { CacheConfig } from './types.js';
+import { EMBEDDING_DIM } from './embedding-constants.js';
 
 // ===== ADR-0049: Fail-Loud Error Classes =====
 
@@ -1277,7 +1278,7 @@ export class ControllerRegistry extends EventEmitter {
           const agentdbModule: any = await import('agentdb');
           const MG = agentdbModule.MutationGuard;
           if (!MG) return null;
-          return new MG({ dimension: this.config.dimension || 768 });
+          return new MG({ dimension: this.config.dimension || EMBEDDING_DIM });
         } catch (e) {
           const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
           this.initErrors.push(err);
@@ -1312,7 +1313,7 @@ export class ControllerRegistry extends EventEmitter {
           const GNN = agentdbModule.GNNService;
           if (!GNN) return null;
           const svc = new GNN({
-            inputDim: this.config.dimension || 768,
+            inputDim: this.config.dimension || EMBEDDING_DIM,
             hiddenDim: 128,
             outputDim: 64,
             heads: 8,
@@ -1676,7 +1677,7 @@ export class ControllerRegistry extends EventEmitter {
           // Private constructor — must use static async create() factory
           if (typeof SLRB.create !== 'function') return null;
           return await SLRB.create({
-            dimension: this.config.dimension || 768,
+            dimension: this.config.dimension || EMBEDDING_DIM,
           });
         } catch (e) {
           const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
@@ -1714,7 +1715,7 @@ export class ControllerRegistry extends EventEmitter {
           const SA = agentdbModule.SelfAttentionController;
           if (!SA) return null;
           const vb = this.get('vectorBackend');
-          return new SA({ dimension: this.config.dimension || 768, vectorBackend: vb || undefined });
+          return new SA({ dimension: this.config.dimension || EMBEDDING_DIM, vectorBackend: vb || undefined });
         } catch (e) {
           const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
           this.initErrors.push(err);
@@ -1732,7 +1733,7 @@ export class ControllerRegistry extends EventEmitter {
           const CA = agentdbModule.CrossAttentionController;
           if (!CA) return null;
           const vb = this.get('vectorBackend');
-          return new CA({ dimension: this.config.dimension || 768, vectorBackend: vb || undefined });
+          return new CA({ dimension: this.config.dimension || EMBEDDING_DIM, vectorBackend: vb || undefined });
         } catch (e) {
           const err = new ControllerInitError(name, e instanceof Error ? e : new Error(String(e)));
           this.initErrors.push(err);
@@ -1751,7 +1752,7 @@ export class ControllerRegistry extends EventEmitter {
           if (!MHA) return null;
           const vb = this.get('vectorBackend');
           return new MHA({
-            dimension: this.config.dimension || 768,
+            dimension: this.config.dimension || EMBEDDING_DIM,
             numHeads: 8,
             vectorBackend: vb || undefined,
           });
@@ -1773,7 +1774,7 @@ export class ControllerRegistry extends EventEmitter {
           if (!AS) return null;
           const accel = this.get('nativeAccelerator');
           return new AS({
-            dimension: this.config.dimension || 768,
+            dimension: this.config.dimension || EMBEDDING_DIM,
             accelerator: accel || undefined,
             // A5 mechanism gating: Hyperbolic only when NativeAccelerator reports simdAvailable
             enableHyperbolic: !!(accel && typeof (accel as any).simdAvailable === 'boolean' && (accel as any).simdAvailable),
@@ -1939,7 +1940,7 @@ export class ControllerRegistry extends EventEmitter {
       };
     }
     // Use dimension from centralized embedding config (cached in initAgentDB)
-    const dim = this.embeddingDimension || this.config.dimension || 768;
+    const dim = this.embeddingDimension || this.config.dimension || EMBEDDING_DIM;
     // Return a minimal stub — HierarchicalMemory falls back to manualSearch without embeddings
     return {
       embed: async () => new Float32Array(dim),

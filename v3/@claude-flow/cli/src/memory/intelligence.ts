@@ -14,6 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { EMBEDDING_DIM } from '../embedding-constants.js';
 
 // ============================================================================
 // Persistence Configuration
@@ -773,7 +774,7 @@ export function benchmarkAdaptation(iterations: number = 1000): {
 
   const times: number[] = [];
   // ADR-0052: matches embedding config default
-  const testEmbedding = Array.from({ length: 768 }, () => Math.random());
+  const testEmbedding = Array.from({ length: EMBEDDING_DIM }, () => Math.random());
 
   for (let i = 0; i < iterations; i++) {
     const start = performance.now();

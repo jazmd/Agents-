@@ -75,7 +75,7 @@ export const defaultMemoryConfig: MemoryConfig = {
     wal: true,
   },
   agentdb: {
-    dimensions: 1536,
+    dimensions: 768, // ADR-0052: matches nomic-embed-text-v1.5 default
     indexType: 'hnsw',
     efConstruction: 200,
     m: 16,

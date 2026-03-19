@@ -8,6 +8,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join, resolve } from 'path';
 import type { MCPTool } from './types.js';
+import { EMBEDDING_DIM } from './embedding-constants.js';
 
 // Configuration paths
 const CONFIG_DIR = '.claude-flow';
@@ -208,8 +209,8 @@ export const embeddingsTools: MCPTool[] = [
         };
       }
 
-      // ADR-0052: use 768 as default, MiniLM is 384
-      const dimension = model.includes('MiniLM') ? 384 : 768;
+      // ADR-0052: use EMBEDDING_DIM as default, MiniLM is 384
+      const dimension = model.includes('MiniLM') ? 384 : EMBEDDING_DIM;
       const modelPath = resolve(join(CONFIG_DIR, MODELS_DIR));
 
       // Create models directory

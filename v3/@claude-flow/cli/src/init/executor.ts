@@ -1241,7 +1241,16 @@ async function writeRuntimeConfig(
   if (!fs.existsSync(embeddingsJsonPath) || options.force) {
     const embeddingsConfig = JSON.stringify({
       model: options.embeddings?.model || 'all-mpnet-base-v2',
-      dimension: options.embeddings?.model === 'all-MiniLM-L6-v2' ? 384 : 768,
+      // ADR-0052: model-dimension lookup (inline — no agentdb dependency here)
+      dimension: (() => {
+        const MODEL_DIMS: Record<string, number> = {
+          'all-MiniLM-L6-v2': 384,
+          'Xenova/all-MiniLM-L6-v2': 384,
+          'bge-small-en-v1.5': 384,
+          'BAAI/bge-small-en-v1.5': 384,
+        };
+        return MODEL_DIMS[options.embeddings?.model || ''] ?? 768;
+      })(),
       provider: 'onnx',
       cache: '~/.cache/transformers',
       batchSize: 32,

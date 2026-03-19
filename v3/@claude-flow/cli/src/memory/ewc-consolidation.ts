@@ -23,6 +23,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { EMBEDDING_DIM } from '../embedding-constants.js';
 
 // ============================================================================
 // Types
@@ -149,7 +150,7 @@ const DEFAULT_EWC_CONFIG: EWCConfig = {
   importanceThreshold: 0.3,
   storagePath: path.join(process.cwd(), '.swarm', 'ewc-fisher.json'),
   onlineMode: true,
-  dimensions: 768 // ADR-0052: matches embedding config default
+  dimensions: EMBEDDING_DIM // ADR-0052: matches embedding config default
 };
 
 // ============================================================================
