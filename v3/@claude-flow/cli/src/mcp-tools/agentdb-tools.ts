@@ -1284,7 +1284,7 @@ export const agentdbAttentionMetrics: MCPTool = {
 // ===== agentdb_skill_create — Create a reusable skill (P4) =====
 
 export const agentdbSkillCreate: MCPTool = {
-  name: 'agentdb_skill-create',
+  name: 'agentdb_skill_create',
   description: 'Create a reusable skill from task patterns via SkillLibrary controller',
   inputSchema: {
     type: 'object',
@@ -1324,7 +1324,7 @@ export const agentdbSkillCreate: MCPTool = {
 // ===== agentdb_skill_search — Search reusable skills (P4) =====
 
 export const agentdbSkillSearch: MCPTool = {
-  name: 'agentdb_skill-search',
+  name: 'agentdb_skill_search',
   description: 'Search for reusable skills by query via SkillLibrary controller',
   inputSchema: {
     type: 'object',
@@ -1364,7 +1364,7 @@ export const agentdbSkillSearch: MCPTool = {
 // ===== agentdb_learner_run — Run NightlyLearner pipeline (P4) =====
 
 export const agentdbLearnerRun: MCPTool = {
-  name: 'agentdb_learner-run',
+  name: 'agentdb_learner_run',
   description: 'Run the nightly learner pipeline (causal discovery, experiments, skill consolidation)',
   inputSchema: {
     type: 'object',
@@ -1396,7 +1396,7 @@ export const agentdbLearnerRun: MCPTool = {
 // ===== agentdb_learning_predict — Predict optimal action (P4) =====
 
 export const agentdbLearningPredict: MCPTool = {
-  name: 'agentdb_learning-predict',
+  name: 'agentdb_learning_predict',
   description: 'Predict optimal action for a given state using learned policies via LearningSystem',
   inputSchema: {
     type: 'object',
@@ -1435,7 +1435,7 @@ export const agentdbLearningPredict: MCPTool = {
 // ===== agentdb_experience_record — Record a learning episode (P3) =====
 
 export const agentdbExperienceRecord: MCPTool = {
-  name: 'agentdb_experience-record',
+  name: 'agentdb_experience_record',
   description: 'Record a learning experience (episode) with outcome via ReflexionMemory',
   inputSchema: {
     type: 'object',
