@@ -1281,6 +1281,201 @@ export const agentdbAttentionMetrics: MCPTool = {
   },
 };
 
+// ===== agentdb_skill_create — Create a reusable skill (P4) =====
+
+export const agentdbSkillCreate: MCPTool = {
+  name: 'agentdb_skill-create',
+  description: 'Create a reusable skill from task patterns via SkillLibrary controller',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      name: { type: 'string', description: 'Skill name' },
+      description: { type: 'string', description: 'Skill description' },
+      code: { type: 'string', description: 'Skill code or template' },
+      success_rate: { type: 'number', description: 'Historical success rate (0-1)' },
+    },
+    required: ['name'],
+  },
+  handler: async (params: Record<string, unknown>) => {
+    try {
+      const name = validateString(params.name, 'name', 500);
+      if (!name) return { success: false, error: 'name is required (non-empty string, max 500 chars)' };
+      const bridge = await getBridge();
+      const skills = await bridge.bridgeGetController('skills');
+      if (!skills) return { success: false, error: 'SkillLibrary controller not available' };
+      const description = validateString(params.description, 'description', 10_000) ?? '';
+      const code = validateString(params.code, 'code', MAX_STRING_LENGTH) ?? '';
+      const successRate = validateScore(params.success_rate, 0.5);
+      if (typeof skills.createSkill === 'function') {
+        const result = await skills.createSkill({ name, description, code, successRate });
+        return { success: true, skillId: result?.id ?? result ?? name };
+      }
+      if (typeof skills.promote === 'function') {
+        await skills.promote({ name, description, code }, successRate);
+        return { success: true, skillId: name };
+      }
+      return { success: false, error: 'SkillLibrary lacks createSkill/promote methods' };
+    } catch (error) {
+      return { success: false, error: sanitizeError(error) };
+    }
+  },
+};
+
+// ===== agentdb_skill_search — Search reusable skills (P4) =====
+
+export const agentdbSkillSearch: MCPTool = {
+  name: 'agentdb_skill-search',
+  description: 'Search for reusable skills by query via SkillLibrary controller',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', description: 'Search query' },
+      limit: { type: 'number', description: 'Maximum results (default: 5)' },
+    },
+    required: ['query'],
+  },
+  handler: async (params: Record<string, unknown>) => {
+    try {
+      const query = validateString(params.query, 'query', 10_000);
+      if (!query) return { success: false, skills: [], error: 'query is required (non-empty string, max 10KB)' };
+      const limit = validatePositiveInt(params.limit, 5, MAX_TOP_K);
+      const bridge = await getBridge();
+      const skills = await bridge.bridgeGetController('skills');
+      if (!skills) return { success: false, skills: [], error: 'SkillLibrary controller not available' };
+      if (typeof skills.retrieveSkills === 'function') {
+        const results = await skills.retrieveSkills(query, limit);
+        return { success: true, skills: Array.isArray(results) ? results : [] };
+      }
+      if (typeof skills.searchSkills === 'function') {
+        const results = await skills.searchSkills(query, limit);
+        return { success: true, skills: Array.isArray(results) ? results : [] };
+      }
+      if (typeof skills.search === 'function') {
+        const results = await skills.search(query, limit);
+        return { success: true, skills: Array.isArray(results) ? results : [] };
+      }
+      return { success: false, skills: [], error: 'SkillLibrary lacks retrieveSkills/searchSkills/search methods' };
+    } catch (error) {
+      return { success: false, skills: [], error: sanitizeError(error) };
+    }
+  },
+};
+
+// ===== agentdb_learner_run — Run NightlyLearner pipeline (P4) =====
+
+export const agentdbLearnerRun: MCPTool = {
+  name: 'agentdb_learner-run',
+  description: 'Run the nightly learner pipeline (causal discovery, experiments, skill consolidation)',
+  inputSchema: {
+    type: 'object',
+    properties: {},
+  },
+  handler: async () => {
+    try {
+      const bridge = await getBridge();
+      const learner = await bridge.bridgeGetController('nightlyLearner');
+      if (!learner) return { success: false, error: 'NightlyLearner controller not available' };
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('learner-run timeout (10s)')), 10_000),
+      );
+      if (typeof learner.run === 'function') {
+        const report = await Promise.race([learner.run(), timeoutPromise]);
+        return { success: true, report: report ?? {} };
+      }
+      if (typeof learner.consolidate === 'function') {
+        const report = await Promise.race([learner.consolidate({}), timeoutPromise]);
+        return { success: true, report: report ?? {} };
+      }
+      return { success: false, error: 'NightlyLearner lacks run/consolidate methods' };
+    } catch (error) {
+      return { success: false, error: sanitizeError(error) };
+    }
+  },
+};
+
+// ===== agentdb_learning_predict — Predict optimal action (P4) =====
+
+export const agentdbLearningPredict: MCPTool = {
+  name: 'agentdb_learning-predict',
+  description: 'Predict optimal action for a given state using learned policies via LearningSystem',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      state: { type: 'string', description: 'Current state description' },
+      context: { type: 'string', description: 'Additional context for prediction' },
+    },
+    required: ['state'],
+  },
+  handler: async (params: Record<string, unknown>) => {
+    try {
+      const state = validateString(params.state, 'state', 10_000);
+      if (!state) return { success: false, error: 'state is required (non-empty string, max 10KB)' };
+      const context = validateString(params.context, 'context', 10_000) ?? undefined;
+      const bridge = await getBridge();
+      const learningSystem = await bridge.bridgeGetController('learningSystem');
+      if (!learningSystem) return { success: false, error: 'LearningSystem controller not available' };
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('learning-predict timeout (2s)')), 2000),
+      );
+      if (typeof learningSystem.predict === 'function') {
+        const prediction = await Promise.race([learningSystem.predict(state, context), timeoutPromise]);
+        return { success: true, prediction: prediction ?? {} };
+      }
+      if (typeof learningSystem.recommendAlgorithm === 'function') {
+        const rec = await Promise.race([learningSystem.recommendAlgorithm(state), timeoutPromise]);
+        return { success: true, prediction: rec ?? {} };
+      }
+      return { success: false, error: 'LearningSystem lacks predict/recommendAlgorithm methods' };
+    } catch (error) {
+      return { success: false, error: sanitizeError(error) };
+    }
+  },
+};
+
+// ===== agentdb_experience_record — Record a learning episode (P3) =====
+
+export const agentdbExperienceRecord: MCPTool = {
+  name: 'agentdb_experience-record',
+  description: 'Record a learning experience (episode) with outcome via ReflexionMemory',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      task: { type: 'string', description: 'Task description' },
+      input: { type: 'string', description: 'Task input or context' },
+      output: { type: 'string', description: 'Task output or result' },
+      reward: { type: 'number', description: 'Reward signal (0-1)' },
+      success: { type: 'boolean', description: 'Whether the task succeeded' },
+    },
+    required: ['task'],
+  },
+  handler: async (params: Record<string, unknown>) => {
+    try {
+      const task = validateString(params.task, 'task', 10_000);
+      if (!task) return { success: false, error: 'task is required (non-empty string, max 10KB)' };
+      const input = validateString(params.input, 'input', MAX_STRING_LENGTH) ?? '';
+      const output = validateString(params.output, 'output', MAX_STRING_LENGTH) ?? '';
+      const reward = validateScore(params.reward, 0.5);
+      const succeeded = params.success === true;
+      const bridge = await getBridge();
+      const reflexion = await bridge.bridgeGetController('reflexion');
+      if (!reflexion || typeof reflexion.store !== 'function') {
+        return { success: false, error: 'ReflexionMemory controller not available' };
+      }
+      const sessionId = `exp-${Date.now()}`;
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('experience-record timeout (2s)')), 2000),
+      );
+      await Promise.race([
+        reflexion.store({ session_id: sessionId, task, input, output, reward, success: succeeded }),
+        timeoutPromise,
+      ]);
+      return { success: true, episodeId: sessionId };
+    } catch (error) {
+      return { success: false, error: sanitizeError(error) };
+    }
+  },
+};
+
 // ===== Export all tools =====
 
 export const agentdbTools: MCPTool[] = [
@@ -1320,4 +1515,9 @@ export const agentdbTools: MCPTool[] = [
   agentdbAttentionBenchmark, // ADR-0044
   agentdbAttentionConfigure, // ADR-0044
   agentdbAttentionMetrics,   // ADR-0044
+  agentdbSkillCreate,        // P4: SkillLibrary
+  agentdbSkillSearch,        // P4: SkillLibrary
+  agentdbLearnerRun,         // P4: NightlyLearner
+  agentdbLearningPredict,    // P4: LearningSystem
+  agentdbExperienceRecord,   // P3: ReflexionMemory
 ];
