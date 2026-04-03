@@ -1227,10 +1227,10 @@ async function writeRuntimeConfig(
     memory: {
       backend: options.runtime.memoryBackend || 'agentdb',
       enableHNSW: true,
-      cacheSize: options.runtime.cacheSize || 2048,
+      cacheSize: options.runtime.cacheSize || 256,
       learningBridge: {
         enabled: !!(options.runtime.enableLearningBridge ?? options.runtime.enableNeural),
-        sonaMode: options.runtime.sonaMode || 'instant',
+        sonaMode: options.runtime.sonaMode || 'balanced',
         confidenceDecayRate: 0.005,
         accessBoostAmount: options.runtime.accessBoostAmount ?? 0.03,
         consolidationThreshold: 10,
@@ -1238,7 +1238,7 @@ async function writeRuntimeConfig(
       memoryGraph: {
         enabled: !!(options.runtime.enableMemoryGraph ?? true),
         pageRankDamping: 0.85,
-        maxNodes: options.runtime.maxNodes || 50000,
+        maxNodes: options.runtime.maxNodes || 5000,
         similarityThreshold: options.runtime.similarityThreshold || 0.65,
       },
       agentScopes: {
