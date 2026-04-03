@@ -36,7 +36,7 @@ export function systemConfigToV3Config(systemConfig: SystemConfig): V3Config {
     memory: {
       backend: normalizeMemoryBackend(systemConfig.memory?.type),
       persistPath: systemConfig.memory?.path || './data/memory',
-      cacheSize: systemConfig.memory?.maxSize ?? 1000000,
+      cacheSize: systemConfig.memory?.maxSize ?? 100000,
       enableHNSW: systemConfig.memory?.agentdb?.indexType === 'hnsw',
       vectorDimension: systemConfig.memory?.agentdb?.dimensions ?? 384, // Match all-MiniLM-L6-v2 output (#1395 Bug 5)
     },

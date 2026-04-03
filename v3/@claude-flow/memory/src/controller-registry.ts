@@ -1415,7 +1415,9 @@ export class ControllerRegistry extends EventEmitter {
       case 'resourceTracker': {
         // D4: Resource tracking with memory ceiling and query stats (ADR-0042)
         const resources = new Map<string, { allocated: number; limit: number }>();
-        const CEILING = 160 * 1024 * 1024 * 1024; // 160GB — dedicated 187GB server, nothing else running
+        // Use 75% of system RAM or 4GB floor, whichever is larger
+        const os = await import('os');
+        const CEILING = Math.max(os.totalmem() * 0.75, 4 * 1024 * 1024 * 1024);
         let currentUsage = 0;
         let queryCount = 0;
         const queryWindow: number[] = []; // rolling last 100 query timestamps
