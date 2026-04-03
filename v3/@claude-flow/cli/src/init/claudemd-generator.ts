@@ -56,34 +56,23 @@ function projectArchitecture(options: InitOptions): string {
 }
 
 function concurrencyRules(): string {
-  return `## Concurrency: 1 MESSAGE = ALL RELATED OPERATIONS
+  return `## Concurrency
 
-- All operations MUST be concurrent/parallel in a single message
-- Use Claude Code's Task tool for spawning agents, not just MCP
-- ALWAYS batch ALL todos in ONE TodoWrite call (5-10+ minimum)
-- ALWAYS spawn ALL agents in ONE message with full instructions via Task tool
-- ALWAYS batch ALL file reads/writes/edits in ONE message
-- ALWAYS batch ALL Bash commands in ONE message`;
+- Batch ALL independent operations into a single message
+- Spawn ALL agents in ONE message using the Agent tool with \`run_in_background: true\`
+- Batch ALL independent file reads/writes/edits in ONE message
+- Batch ALL independent Bash commands in ONE message`;
 }
 
-function swarmOrchestration(): string {
-  return `## Swarm Orchestration
+function agentOrchestration(): string {
+  return `## Agent Orchestration
 
-- MUST initialize the swarm using CLI tools when starting complex tasks
-- MUST spawn concurrent agents using Claude Code's Task tool
-- Never use CLI tools alone for execution — Task tool agents do the actual work
-- MUST call CLI tools AND Task tool in ONE message for complex work
-
-### 3-Tier Model Routing (ADR-026)
-
-| Tier | Handler | Latency | Cost | Use Cases |
-|------|---------|---------|------|-----------|
-| **1** | Agent Booster (WASM) | <1ms | $0 | Simple transforms (var→const, add types) — Skip LLM |
-| **2** | Haiku | ~500ms | $0.0002 | Simple tasks, low complexity (<30%) |
-| **3** | Sonnet/Opus | 2-5s | $0.003-0.015 | Complex reasoning, architecture, security (>30%) |
-
-- Always check for \`[AGENT_BOOSTER_AVAILABLE]\` or \`[TASK_MODEL_RECOMMENDATION]\` before spawning agents
-- Use Edit tool directly when \`[AGENT_BOOSTER_AVAILABLE]\``;
+- Use the Agent tool to spawn subagents for complex multi-file tasks
+- ALWAYS set \`run_in_background: true\` when spawning agents
+- Put ALL agent spawns in a single message for parallel execution
+- After spawning agents, STOP and wait for results — do not poll or check status
+- Use CLI tools (via Bash) for coordination: swarm init, memory, hooks
+- NEVER use CLI tools as a substitute for Agent tool subagents`;
 }
 
 function antiDriftConfig(): string {
@@ -136,14 +125,47 @@ Task({prompt: "Review code quality...", subagent_type: "reviewer", run_in_backgr
 - SKIP SWARM for: single file edits, simple bug fixes (1-2 lines), documentation updates, configuration changes`;
 }
 
-function executionRules(): string {
-  return `## Swarm Execution Rules
+function mcpToolDiscovery(): string {
+  return `## MCP Tools (Deferred)
 
-- ALWAYS use \`run_in_background: true\` for all agent Task calls
-- ALWAYS put ALL agent Task calls in ONE message for parallel execution
-- After spawning, STOP — do NOT add more tool calls or check status
-- Never poll TaskOutput or check swarm status — trust agents to return
-- When agent results arrive, review ALL results before proceeding`;
+This project has a \`claude-flow\` MCP server with 200+ tools for memory,
+swarms, agents, hooks, and coordination. Tools are deferred — you MUST call
+ToolSearch to load a tool's schema before calling it.
+
+Quick discovery:
+- \`ToolSearch("claude-flow memory")\` — store, search, retrieve patterns
+- \`ToolSearch("claude-flow agent")\` — spawn, list, manage agents
+- \`ToolSearch("claude-flow swarm")\` — multi-agent coordination
+- \`ToolSearch("claude-flow hooks")\` — lifecycle hooks and learning
+
+Do NOT call \`mcp__claude-flow__agentdb_session-start\` or
+\`mcp__claude-flow__agentdb_session-end\` — hooks manage session lifecycle
+automatically.`;
+}
+
+function hookSignals(): string {
+  return `## Hook Signals
+
+Hooks run automatically and inject text into the conversation. When you see
+these signals in system-reminder text, act on them:
+
+- \`[INTELLIGENCE] Relevant patterns...\` — incorporate the listed patterns
+  into your approach when they are relevant to the current task
+- \`[INFO] Routing task...\` — the system recommends an agent type; consider
+  spawning a subagent of that type for complex tasks
+- \`[INFO] Router not available\` — routing is offline; proceed normally`;
+}
+
+function whenToUseWhat(): string {
+  return `## When to Use What
+
+| Need | Use |
+|------|-----|
+| Spawn a subagent for parallel work | Agent tool (built-in, \`run_in_background: true\`) |
+| Search or store memory | \`mcp__claude-flow__memory_*\` (load via ToolSearch first) |
+| Initialize a swarm | \`npx @claude-flow/cli@latest swarm init\` via Bash |
+| Run CLI diagnostics | \`npx @claude-flow/cli@latest doctor --fix\` via Bash |
+| Invoke a registered skill | Skill tool with the skill name (e.g., \`/commit\`) |`;
 }
 
 function cliCommandsTable(): string {
@@ -370,12 +392,6 @@ npx @claude-flow/cli@latest daemon start
 npx @claude-flow/cli@latest doctor --fix
 \`\`\`
 
-## Claude Code vs CLI Tools
-
-- Claude Code's Task tool handles ALL execution: agents, file ops, code generation, git
-- CLI tools handle coordination via Bash: swarm init, memory, hooks, routing
-- NEVER use CLI tools as a substitute for Task tool agents
-
 ## Support
 
 - Documentation: https://github.com/ruvnet/claude-flow
@@ -395,10 +411,8 @@ const TEMPLATE_SECTIONS: Record<ClaudeMdTemplate, Array<(opts: InitOptions) => s
     (_opts) => buildAndTest(),
     (_opts) => securityRulesLight(),
     concurrencyRules,
-    (_opts) => antiDriftConfig(),
-    executionRules,
-    (_opts) => cliCommandsTable(),
-    (_opts) => setupAndBoundary(),
+    (_opts) => mcpToolDiscovery(),
+    (_opts) => hookSignals(),
   ],
   standard: [
     behavioralRules,
@@ -407,13 +421,10 @@ const TEMPLATE_SECTIONS: Record<ClaudeMdTemplate, Array<(opts: InitOptions) => s
     (_opts) => buildAndTest(),
     (_opts) => securityRulesLight(),
     concurrencyRules,
-    (_opts) => swarmOrchestration(),
-    (_opts) => antiDriftConfig(),
-    executionRules,
-    (_opts) => cliCommandsTable(),
-    (_opts) => agentTypes(),
-    (_opts) => memoryCommands(),
-    (_opts) => setupAndBoundary(),
+    (_opts) => agentOrchestration(),
+    (_opts) => mcpToolDiscovery(),
+    (_opts) => hookSignals(),
+    (_opts) => whenToUseWhat(),
   ],
   full: [
     behavioralRules,
@@ -422,17 +433,13 @@ const TEMPLATE_SECTIONS: Record<ClaudeMdTemplate, Array<(opts: InitOptions) => s
     (_opts) => buildAndTest(),
     (_opts) => securityRulesLight(),
     concurrencyRules,
-    (_opts) => swarmOrchestration(),
+    (_opts) => agentOrchestration(),
     (_opts) => antiDriftConfig(),
-    (_opts) => autoStartProtocol(),
-    executionRules,
-    (_opts) => cliCommandsTable(),
+    (_opts) => mcpToolDiscovery(),
+    (_opts) => hookSignals(),
+    (_opts) => whenToUseWhat(),
     (_opts) => agentTypes(),
-    (_opts) => hooksSystem(),
-    (_opts) => learningProtocol(),
     (_opts) => memoryCommands(),
-    (_opts) => intelligenceSystem(),
-    (_opts) => envVars(),
     (_opts) => setupAndBoundary(),
   ],
   security: [
@@ -441,14 +448,11 @@ const TEMPLATE_SECTIONS: Record<ClaudeMdTemplate, Array<(opts: InitOptions) => s
     projectArchitecture,
     (_opts) => buildAndTest(),
     concurrencyRules,
-    (_opts) => swarmOrchestration(),
-    (_opts) => antiDriftConfig(),
-    executionRules,
+    (_opts) => agentOrchestration(),
     (_opts) => securitySection(),
-    (_opts) => cliCommandsTable(),
-    (_opts) => agentTypes(),
-    (_opts) => memoryCommands(),
-    (_opts) => setupAndBoundary(),
+    (_opts) => mcpToolDiscovery(),
+    (_opts) => hookSignals(),
+    (_opts) => whenToUseWhat(),
   ],
   performance: [
     behavioralRules,
@@ -457,15 +461,11 @@ const TEMPLATE_SECTIONS: Record<ClaudeMdTemplate, Array<(opts: InitOptions) => s
     (_opts) => buildAndTest(),
     (_opts) => securityRulesLight(),
     concurrencyRules,
-    (_opts) => swarmOrchestration(),
-    (_opts) => antiDriftConfig(),
-    executionRules,
+    (_opts) => agentOrchestration(),
     (_opts) => performanceSection(),
-    (_opts) => cliCommandsTable(),
-    (_opts) => agentTypes(),
-    (_opts) => memoryCommands(),
-    (_opts) => intelligenceSystem(),
-    (_opts) => setupAndBoundary(),
+    (_opts) => mcpToolDiscovery(),
+    (_opts) => hookSignals(),
+    (_opts) => whenToUseWhat(),
   ],
   solo: [
     behavioralRules,
@@ -474,10 +474,8 @@ const TEMPLATE_SECTIONS: Record<ClaudeMdTemplate, Array<(opts: InitOptions) => s
     (_opts) => buildAndTest(),
     (_opts) => securityRulesLight(),
     concurrencyRules,
-    executionRules,
-    (_opts) => cliCommandsTable(),
-    (_opts) => memoryCommands(),
-    (_opts) => setupAndBoundary(),
+    (_opts) => mcpToolDiscovery(),
+    (_opts) => hookSignals(),
   ],
 };
 
@@ -506,12 +504,12 @@ export function generateMinimalClaudeMd(options: InitOptions): string {
 
 /** Available template names for CLI wizard */
 export const CLAUDE_MD_TEMPLATES: Array<{ name: ClaudeMdTemplate; description: string }> = [
-  { name: 'minimal', description: 'Quick start — behavioral rules, anti-drift config, CLI reference (~120 lines)' },
-  { name: 'standard', description: 'Recommended — swarm orchestration, agents, memory commands (~250 lines)' },
-  { name: 'full', description: 'Everything — hooks, learning protocol, intelligence system (~400 lines)' },
+  { name: 'minimal', description: 'Quick start — behavioral rules, MCP discovery, hook signals (~60 lines)' },
+  { name: 'standard', description: 'Recommended — agent orchestration, MCP discovery, decision tree (~90 lines)' },
+  { name: 'full', description: 'Everything — adds anti-drift config, agent catalog, memory reference (~150 lines)' },
   { name: 'security', description: 'Security-focused — adds security scanning, audit protocols, CVE checks' },
   { name: 'performance', description: 'Performance-focused — adds benchmarking, profiling, optimization protocols' },
-  { name: 'solo', description: 'Solo developer — no swarm, simple agent usage, memory commands (~150 lines)' },
+  { name: 'solo', description: 'Solo developer — behavioral rules, MCP discovery, hook signals (~60 lines)' },
 ];
 
 export default generateClaudeMd;
