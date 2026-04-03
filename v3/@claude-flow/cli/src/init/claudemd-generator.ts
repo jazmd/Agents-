@@ -36,7 +36,7 @@ function fileOrganization(): string {
 - Use \`/examples\` for example code`;
 }
 
-function projectArchitecture(options: InitOptions): string {
+function projectArchitecture(_options: InitOptions): string {
   return `## Project Architecture
 
 - Follow Domain-Driven Design with bounded contexts
@@ -44,15 +44,7 @@ function projectArchitecture(options: InitOptions): string {
 - Use typed interfaces for all public APIs
 - Prefer TDD London School (mock-first) for new code
 - Use event sourcing for state changes
-- Ensure input validation at system boundaries
-
-### Project Config
-
-- **Topology**: ${options.runtime.topology}
-- **Max Agents**: ${options.runtime.maxAgents}
-- **Memory**: ${options.runtime.memoryBackend}
-- **HNSW**: ${options.runtime.enableHNSW ? 'Enabled' : 'Disabled'}
-- **Neural**: ${options.runtime.enableNeural ? 'Enabled' : 'Disabled'}`;
+- Ensure input validation at system boundaries`;
 }
 
 function concurrencyRules(): string {
@@ -61,13 +53,19 @@ function concurrencyRules(): string {
 - Batch ALL independent operations into a single message
 - Spawn ALL agents in ONE message using the Agent tool with \`run_in_background: true\`
 - Batch ALL independent file reads/writes/edits in ONE message
-- Batch ALL independent Bash commands in ONE message`;
+- Batch ALL independent Bash commands in ONE message
+
+## Task Complexity
+
+- Single file edit or fix: work directly, no agents needed
+- 3+ files, new feature, or cross-module refactoring: spawn agents
+- When in doubt, start direct — escalate to agents if scope grows`;
 }
 
 function agentOrchestration(): string {
   return `## Agent Orchestration
 
-- Use the Agent tool to spawn subagents for complex multi-file tasks
+- Use the Agent tool to spawn subagents for multi-file or cross-module tasks
 - ALWAYS set \`run_in_background: true\` when spawning agents
 - Put ALL agent spawns in a single message for parallel execution
 - After spawning agents, STOP and wait for results — do not poll or check status
@@ -146,14 +144,13 @@ automatically.`;
 function hookSignals(): string {
   return `## Hook Signals
 
-Hooks run automatically and inject text into the conversation. When you see
-these signals in system-reminder text, act on them:
+Hooks inject signals into the conversation at three points:
 
-- \`[INTELLIGENCE] Relevant patterns...\` — incorporate the listed patterns
-  into your approach when they are relevant to the current task
-- \`[INFO] Routing task...\` — the system recommends an agent type; consider
-  spawning a subagent of that type for complex tasks
-- \`[INFO] Router not available\` — routing is offline; proceed normally`;
+- **Before task**: \`[INTELLIGENCE] Relevant patterns...\` — incorporate when relevant
+- **During task**: \`[INFO] Routing task...\` — consider the recommended agent type
+- **After task**: hooks store outcomes automatically; do not call session-start/end
+
+If \`[INFO] Router not available\` appears, proceed normally without routing.`;
 }
 
 function whenToUseWhat(): string {
@@ -303,12 +300,23 @@ npm run build
 # Test
 npm test
 
+# Run a single test file
+npm test -- path/to/test.ts
+
 # Lint
 npm run lint
 \`\`\`
 
 - ALWAYS run tests after making code changes
-- ALWAYS verify build succeeds before committing`;
+- ALWAYS verify build succeeds before committing
+
+### Feature Workflow
+
+1. Create or update tests first
+2. Implement the change
+3. Run tests — verify pass
+4. Run build — verify success
+5. Commit`;
 }
 
 function securitySection(): string {
