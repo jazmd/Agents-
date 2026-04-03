@@ -91,7 +91,7 @@ export const agentdbControllers: MCPTool = {
       // Wait for deferred (Level 2+) controllers to finish background init
       await bridge.bridgeWaitForDeferred?.();
       const controllers = await bridge.bridgeListControllers();
-      if (!controllers) return { available: false, controllers: [], error: 'Bridge not available' };
+      if (!controllers) return { available: false, controllers: [], error: 'AgentDB bridge not available — @claude-flow/memory not installed or missing controller-registry. Use memory_store/memory_search tools instead.' };
       return {
         available: true,
         controllers,
@@ -128,7 +128,7 @@ export const agentdbPatternStore: MCPTool = {
         type: validateString(params.type, 'type', 200) ?? 'general',
         confidence: validateScore(params.confidence, 0.8),
       });
-      return result ?? { success: false, error: 'Bridge not available' };
+      return result ?? { success: false, error: 'AgentDB bridge not available. Use memory_store/memory_search instead.' };
     } catch (error) {
       return { success: false, error: sanitizeError(error) };
     }
@@ -192,7 +192,7 @@ export const agentdbFeedback: MCPTool = {
         quality: validateScore(params.quality, 0.85),
         agent: validateString(params.agent, 'agent', 200) ?? undefined,
       });
-      return result ?? { success: false, error: 'Bridge not available' };
+      return result ?? { success: false, error: 'AgentDB bridge not available. Use memory_store/memory_search instead.' };
     } catch (error) {
       return { success: false, error: sanitizeError(error) };
     }
@@ -229,7 +229,7 @@ export const agentdbCausalEdge: MCPTool = {
         relation,
         weight: typeof params.weight === 'number' ? validateScore(params.weight, 0.5) : undefined,
       });
-      return result ?? { success: false, error: 'Bridge not available' };
+      return result ?? { success: false, error: 'AgentDB bridge not available. Use memory_store/memory_search instead.' };
     } catch (error) {
       return { success: false, error: sanitizeError(error) };
     }
@@ -287,7 +287,7 @@ export const agentdbSessionStart: MCPTool = {
         sessionId,
         context: validateString(params.context, 'context', 10_000) ?? undefined,
       });
-      return result ?? { success: false, error: 'Bridge not available' };
+      return result ?? { success: false, error: 'AgentDB bridge not available. Use memory_store/memory_search instead.' };
     } catch (error) {
       return { success: false, error: sanitizeError(error) };
     }
@@ -318,7 +318,7 @@ export const agentdbSessionEnd: MCPTool = {
         summary: validateString(params.summary, 'summary', 50_000) ?? undefined,
         tasksCompleted: validatePositiveInt(params.tasksCompleted, 0, 10_000),
       });
-      return result ?? { success: false, error: 'Bridge not available' };
+      return result ?? { success: false, error: 'AgentDB bridge not available. Use memory_store/memory_search instead.' };
     } catch (error) {
       return { success: false, error: sanitizeError(error) };
     }
@@ -356,7 +356,7 @@ export const agentdbHierarchicalStore: MCPTool = {
       }
       const bridge = await getBridge();
       const result = await bridge.bridgeHierarchicalStore({ key, value, tier });
-      return result ?? { success: false, error: 'Bridge not available' };
+      return result ?? { success: false, error: 'AgentDB bridge not available. Use memory_store/memory_search instead.' };
     } catch (error) {
       return { success: false, error: sanitizeError(error) };
     }
@@ -391,12 +391,7 @@ export const agentdbHierarchicalRecall: MCPTool = {
         tier: tier ?? undefined,
         topK: validatePositiveInt(params.topK, 5, MAX_TOP_K),
       });
-      if (!result) return { success: false, results: [], error: 'Bridge not available' };
-      const resultObj = result as Record<string, unknown>;
-      if (!resultObj.results || (Array.isArray(resultObj.results) && resultObj.results.length === 0)) {
-        return { success: true, ...resultObj, notice: 'No results found. Hierarchical recall uses semantic search which may not match exact stored values.' };
-      }
-      return { success: true, ...resultObj };
+      return result ?? { results: [], error: 'AgentDB bridge not available. Use memory_search instead.' };
     } catch (error) {
       return { success: false, results: [], error: sanitizeError(error) };
     }
@@ -422,7 +417,7 @@ export const agentdbConsolidate: MCPTool = {
         minAge: typeof params.minAge === 'number' ? Math.max(0, params.minAge) : undefined,
         maxEntries: validatePositiveInt(params.maxEntries, 1000, 10_000),
       });
-      return result ?? { success: false, error: 'Bridge not available' };
+      return result ?? { success: false, error: 'AgentDB bridge not available. Use memory_store/memory_search instead.' };
     } catch (error) {
       return { success: false, error: sanitizeError(error) };
     }
@@ -487,7 +482,7 @@ export const agentdbBatch: MCPTool = {
         operation,
         entries: validatedEntries,
       });
-      return result ?? { success: false, error: 'Bridge not available' };
+      return result ?? { success: false, error: 'AgentDB bridge not available. Use memory_store/memory_search instead.' };
     } catch (error) {
       return { success: false, error: sanitizeError(error) };
     }
@@ -516,7 +511,7 @@ export const agentdbContextSynthesize: MCPTool = {
         query,
         maxEntries: validatePositiveInt(params.maxEntries, 10, MAX_TOP_K),
       });
-      return result ?? { success: false, error: 'Bridge not available' };
+      return result ?? { success: false, error: 'AgentDB bridge not available. Use memory_store/memory_search instead.' };
     } catch (error) {
       return { success: false, error: sanitizeError(error) };
     }
@@ -541,12 +536,7 @@ export const agentdbSemanticRoute: MCPTool = {
       if (!input) return { success: false, route: null, error: 'input is required (non-empty string, max 10KB)' };
       const bridge = await getBridge();
       const result = await bridge.bridgeSemanticRoute({ input });
-      if (!result) return { success: false, route: null, error: 'Bridge not available' };
-      const r = result as Record<string, unknown>;
-      if (r.error || r.route === null || r.route === undefined) {
-        return { success: false, ...r };
-      }
-      return { success: true, ...r };
+      return result ?? { route: null, error: 'AgentDB bridge not available. Use hooks route instead.' };
     } catch (error) {
       return { success: false, route: null, error: sanitizeError(error) };
     }

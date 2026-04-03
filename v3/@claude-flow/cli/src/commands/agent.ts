@@ -7,6 +7,45 @@ import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
 import { select, confirm, input } from '../prompt.js';
 import { callMCPTool, MCPClientError } from '../mcp-client.js';
+import { wasmSubcommands } from './agent-wasm.js';
+import * as fs from 'fs';
+import * as path from 'path';
+
+/**
+ * Update swarm-activity.json metrics after agent count changes.
+ * The statusline reads this file to display the swarm agent count.
+ */
+function updateSwarmActivityMetrics(agentCountDelta: number): void {
+  try {
+    const metricsDir = path.join(process.cwd(), '.claude-flow', 'metrics');
+    const activityPath = path.join(metricsDir, 'swarm-activity.json');
+
+    let data: Record<string, unknown> = {
+      timestamp: new Date().toISOString(),
+      swarm: { active: false, agent_count: 0, coordination_active: false },
+    };
+
+    if (fs.existsSync(activityPath)) {
+      data = JSON.parse(fs.readFileSync(activityPath, 'utf-8'));
+    } else {
+      fs.mkdirSync(metricsDir, { recursive: true });
+    }
+
+    const swarm = (data.swarm as Record<string, unknown>) ?? {};
+    const currentCount = Math.max(0, (swarm.agent_count as number) || 0);
+    const newCount = Math.max(0, currentCount + agentCountDelta);
+
+    swarm.agent_count = newCount;
+    swarm.active = newCount > 0;
+    swarm.coordination_active = newCount > 0;
+    data.swarm = swarm;
+    data.timestamp = new Date().toISOString();
+
+    fs.writeFileSync(activityPath, JSON.stringify(data, null, 2));
+  } catch {
+    // Non-critical — don't fail the command if metrics update fails
+  }
+}
 
 // Available agent types with descriptions
 const AGENT_TYPES = [
@@ -146,6 +185,9 @@ const spawnCommand: Command = {
 
       output.writeln();
       output.printSuccess(`Agent ${agentName} spawned successfully`);
+
+      // Update swarm-activity.json so statusline reflects the new agent count
+      updateSwarmActivityMetrics(1);
 
       if (ctx.flags.format === 'json') {
         output.printJson(result);
@@ -418,6 +460,9 @@ const stopCommand: Command = {
 
       output.printSuccess(`Agent ${agentId} stopped successfully`);
 
+      // Update swarm-activity.json so statusline reflects the reduced agent count
+      updateSwarmActivityMetrics(-1);
+
       if (ctx.flags.format === 'json') {
         output.printJson(result);
       }
@@ -451,26 +496,84 @@ const metricsCommand: Command = {
     const agentId = ctx.args[0];
     const period = ctx.flags.period as string;
 
-    // Default metrics (updated by MCP agent/metrics when available)
+    // Collect real metrics from .swarm/ state
+    const { existsSync, readFileSync, readdirSync, statSync } = await import('fs');
+    const { join } = await import('path');
+
+    let totalAgents = 0;
+    let activeAgents = 0;
+    let tasksCompleted = 0;
+    const typeCounts: Record<string, { count: number; tasks: number; success: number }> = {};
+
+    // Read swarm agent state
+    const swarmDir = join(process.cwd(), '.swarm');
+    const agentsDir = join(swarmDir, 'agents');
+    if (existsSync(agentsDir)) {
+      try {
+        const files = readdirSync(agentsDir).filter(f => f.endsWith('.json'));
+        for (const file of files) {
+          try {
+            const data = JSON.parse(readFileSync(join(agentsDir, file), 'utf-8'));
+            totalAgents++;
+            const agType = data.type || 'unknown';
+            if (!typeCounts[agType]) typeCounts[agType] = { count: 0, tasks: 0, success: 0 };
+            typeCounts[agType].count++;
+            if (data.status === 'active' || data.status === 'running') activeAgents++;
+            if (data.tasksCompleted) {
+              typeCounts[agType].tasks += data.tasksCompleted;
+              tasksCompleted += data.tasksCompleted;
+            }
+            if (data.successCount) typeCounts[agType].success += data.successCount;
+          } catch { /* skip malformed */ }
+        }
+      } catch { /* no agents dir */ }
+    }
+
+    // Read swarm activity for additional state
+    const activityFile = join(swarmDir, 'swarm-activity.json');
+    if (existsSync(activityFile)) {
+      try {
+        const activity = JSON.parse(readFileSync(activityFile, 'utf-8'));
+        if (activity.totalAgents && totalAgents === 0) totalAgents = activity.totalAgents;
+        if (activity.activeAgents && activeAgents === 0) activeAgents = activity.activeAgents;
+      } catch { /* ignore */ }
+    }
+
+    // Read memory.db stats
+    let vectorCount = 0;
+    const dbPath = join(swarmDir, 'memory.db');
+    if (existsSync(dbPath)) {
+      try {
+        const dbSize = statSync(dbPath).size;
+        vectorCount = Math.floor(dbSize / 2048);
+      } catch { /* ignore */ }
+    }
+
+    const byType = Object.entries(typeCounts).map(([type, data]) => ({
+      type,
+      count: data.count,
+      tasks: data.tasks,
+      successRate: data.tasks > 0 ? `${Math.round((data.success / data.tasks) * 100)}%` : 'N/A'
+    }));
+
+    const avgSuccessRate = tasksCompleted > 0
+      ? `${Math.round(Object.values(typeCounts).reduce((a, d) => a + d.success, 0) / tasksCompleted * 100)}%`
+      : 'N/A';
+
     const metrics = {
       period,
       summary: {
-        totalAgents: 4,
-        activeAgents: 3,
-        tasksCompleted: 127,
-        avgSuccessRate: '96.2%',
-        totalTokens: 1234567,
-        avgResponseTime: '1.45s'
+        totalAgents,
+        activeAgents,
+        tasksCompleted,
+        avgSuccessRate,
+        vectorCount,
+        note: totalAgents === 0 ? 'No agents spawned yet. Use: agent spawn -t coder' : undefined
       },
-      byType: [
-        { type: 'coder', count: 2, tasks: 45, successRate: '97%' },
-        { type: 'researcher', count: 1, tasks: 32, successRate: '95%' },
-        { type: 'tester', count: 1, tasks: 50, successRate: '98%' }
-      ],
+      byType,
       performance: {
-        flashAttention: '2.8x speedup',
-        memoryReduction: '52%',
-        searchImprovement: '150x faster'
+        memoryVectors: `${vectorCount} vectors`,
+        searchBackend: vectorCount > 0 ? 'HNSW-indexed' : 'none'
       }
     };
 
@@ -493,8 +596,7 @@ const metricsCommand: Command = {
         { metric: 'Active Agents', value: metrics.summary.activeAgents },
         { metric: 'Tasks Completed', value: metrics.summary.tasksCompleted },
         { metric: 'Success Rate', value: metrics.summary.avgSuccessRate },
-        { metric: 'Total Tokens', value: metrics.summary.totalTokens.toLocaleString() },
-        { metric: 'Avg Response Time', value: metrics.summary.avgResponseTime }
+        { metric: 'Memory Vectors', value: metrics.summary.vectorCount }
       ]
     });
 
@@ -510,12 +612,16 @@ const metricsCommand: Command = {
       data: metrics.byType
     });
 
+    if (metrics.summary.note) {
+      output.writeln();
+      output.writeln(output.dim(metrics.summary.note));
+    }
+
     output.writeln();
-    output.writeln(output.bold('V3 Performance Gains'));
+    output.writeln(output.bold('Memory'));
     output.printList([
-      `Flash Attention: ${output.success(metrics.performance.flashAttention)}`,
-      `Memory Reduction: ${output.success(metrics.performance.memoryReduction)}`,
-      `Search: ${output.success(metrics.performance.searchImprovement)}`
+      `Vectors: ${output.success(metrics.performance.memoryVectors)}`,
+      `Backend: ${output.success(metrics.performance.searchBackend)}`
     ]);
 
     return { success: true, data: metrics };
@@ -889,7 +995,7 @@ function formatLogLevel(level: string): string {
 export const agentCommand: Command = {
   name: 'agent',
   description: 'Agent management commands',
-  subcommands: [spawnCommand, listCommand, statusCommand, stopCommand, metricsCommand, poolCommand, healthCommand, logsCommand],
+  subcommands: [spawnCommand, listCommand, statusCommand, stopCommand, metricsCommand, poolCommand, healthCommand, logsCommand, ...wasmSubcommands],
   options: [],
   examples: [
     { command: 'claude-flow agent spawn -t coder', description: 'Spawn a coder agent' },
@@ -905,11 +1011,18 @@ export const agentCommand: Command = {
     output.writeln();
     output.writeln('Subcommands:');
     output.printList([
-      `${output.highlight('spawn')}    - Spawn a new agent`,
-      `${output.highlight('list')}     - List all active agents`,
-      `${output.highlight('status')}   - Show detailed agent status`,
-      `${output.highlight('stop')}     - Stop a running agent`,
-      `${output.highlight('metrics')}  - Show agent metrics`
+      `${output.highlight('spawn')}         - Spawn a new agent`,
+      `${output.highlight('list')}          - List all active agents`,
+      `${output.highlight('status')}        - Show detailed agent status`,
+      `${output.highlight('stop')}          - Stop a running agent`,
+      `${output.highlight('metrics')}       - Show agent metrics`,
+      `${output.highlight('pool')}          - Manage agent pool`,
+      `${output.highlight('health')}        - Show agent health`,
+      `${output.highlight('logs')}          - Show agent logs`,
+      `${output.highlight('wasm-status')}   - Check WASM runtime availability`,
+      `${output.highlight('wasm-create')}   - Create a WASM-sandboxed agent`,
+      `${output.highlight('wasm-prompt')}   - Send a prompt to a WASM agent`,
+      `${output.highlight('wasm-gallery')}  - List WASM agent gallery templates`,
     ]);
     output.writeln();
     output.writeln('Run "claude-flow agent <subcommand> --help" for subcommand help');

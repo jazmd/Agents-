@@ -40,9 +40,11 @@ async function initCodexAction(
     let CodexInitializer: any;
 
     // Try multiple resolution strategies for the @claude-flow/codex package
+    // Use a variable to prevent TypeScript from statically resolving the optional module
+    const codexModuleId = '@claude-flow/codex';
     const resolutionStrategies = [
       // Strategy 1: Direct import (works if installed as CLI dependency)
-      async () => (await import('@claude-flow/codex')).CodexInitializer,
+      async () => (await import(codexModuleId)).CodexInitializer,
       // Strategy 2: Project node_modules (works if installed in user's project)
       async () => {
         const projectPath = path.join(ctx.cwd, 'node_modules', '@claude-flow', 'codex', 'dist', 'index.js');
@@ -961,6 +963,8 @@ const hooksCommand: Command = {
             stop: false,
             preCompact: false,
             notification: false,
+            teammateIdle: false,
+            taskCompleted: false,
             timeout: 5000,
             continueOnError: true,
           }

@@ -5,19 +5,9 @@
 
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
-import { select, confirm, input } from '../prompt.js';
-import { callMCPTool, MCPClientError } from '../mcp-client.js';
-import { readFileSync, existsSync } from 'fs';
-import { join } from 'path';
-
-// CF-004: Read project config from .claude-flow/config.json
-function readJsonConfig(): Record<string, unknown> {
-  const jsonPath = join(process.cwd(), '.claude-flow', 'config.json');
-  if (existsSync(jsonPath)) {
-    try { return JSON.parse(readFileSync(jsonPath, 'utf-8')); } catch { /* T4: config.json may be malformed */ }
-  }
-  return {};
-}
+import { select, input } from '../prompt.js';
+import { configManager, parseConfigValue } from '../services/config-file-manager.js';
+import * as path from 'path';
 
 // Init configuration
 const initCommand: Command = {
@@ -45,82 +35,23 @@ const initCommand: Command = {
     }
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
-    const sparc = ctx.flags.sparc as boolean;
-    const v3 = ctx.flags.v3 as boolean;
-
-    output.writeln();
-    output.printInfo('Initializing RuFlo configuration...');
-    output.writeln();
-
-    // Create default configuration
-    const config = {
-      version: '3.0.0',
-      sparc: sparc,
-      agents: {
-        defaultType: 'coder',
-        maxConcurrent: 15,
-        autoSpawn: true,
-        timeout: 300
-      },
-      swarm: {
-        topology: 'hierarchical-mesh',
-        maxAgents: 15,
-        autoScale: true,
-        coordinationStrategy: 'consensus'
-      },
-      memory: {
-        backend: 'hybrid',
-        path: './data/memory',
-        cacheSize: 256,
-        enableHNSW: true
-      },
-      mcp: {
-        transport: 'stdio',
-        autoStart: true,
-        tools: 'all'
-      },
-      providers: [
-        { name: 'anthropic', priority: 1, enabled: true },
-        { name: 'openrouter', priority: 2, enabled: false },
-        { name: 'ollama', priority: 3, enabled: false }
-      ]
-    };
-
-    output.writeln(output.dim('  Creating claude-flow.config.json...'));
-    output.writeln(output.dim('  Creating .claude-flow/ directory...'));
-
-    if (sparc) {
-      output.writeln(output.dim('  Initializing SPARC methodology...'));
-      output.writeln(output.dim('  Creating SPARC workflow files...'));
+    try {
+      const configPath = configManager.create(ctx.cwd, undefined, ctx.flags.force as boolean);
+      output.writeln();
+      output.writeln(output.success(`Configuration created: ${configPath}`));
+      output.writeln();
+      const defaults = configManager.getDefaults();
+      output.writeln(output.bold('Key defaults:'));
+      output.writeln(`  swarm.topology     = ${(defaults.swarm as Record<string, unknown>).topology}`);
+      output.writeln(`  swarm.maxAgents    = ${(defaults.swarm as Record<string, unknown>).maxAgents}`);
+      output.writeln(`  memory.backend     = ${(defaults.memory as Record<string, unknown>).backend}`);
+      output.writeln(`  mcp.transportType  = ${(defaults.mcp as Record<string, unknown>).transportType}`);
+      return { success: true };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      output.printError(message);
+      return { success: false, exitCode: 1 };
     }
-
-    if (v3) {
-      output.writeln(output.dim('  Enabling V3 15-agent coordination...'));
-      output.writeln(output.dim('  Configuring AgentDB integration...'));
-      output.writeln(output.dim('  Setting up Flash Attention optimization...'));
-    }
-
-    output.writeln();
-    output.printTable({
-      columns: [
-        { key: 'setting', header: 'Setting', width: 25 },
-        { key: 'value', header: 'Value', width: 30 }
-      ],
-      data: [
-        { setting: 'Version', value: config.version },
-        { setting: 'SPARC Mode', value: config.sparc ? 'Enabled' : 'Disabled' },
-        { setting: 'Swarm Topology', value: config.swarm.topology },
-        { setting: 'Max Agents', value: config.swarm.maxAgents },
-        { setting: 'Memory Backend', value: config.memory.backend },
-        { setting: 'MCP Transport', value: config.mcp.transport }
-      ]
-    });
-
-    output.writeln();
-    output.printSuccess('Configuration initialized');
-    output.writeln(output.dim('  Config file: ./claude-flow.config.json'));
-
-    return { success: true, data: config };
   }
 };
 
@@ -143,76 +74,50 @@ const getCommand: Command = {
   action: async (ctx: CommandContext): Promise<CommandResult> => {
     const key = ctx.flags.key as string || ctx.args[0];
 
-    // CF-002/CF-004: Default config values merged with config.json
-    const defaults: Record<string, unknown> = {
-      'version': '3.0.0',
-      'swarm.topology': 'hierarchical-mesh',
-      'swarm.maxAgents': 15,
-      'swarm.autoScale': true,
-      'memory.backend': 'hybrid',
-      'memory.cacheSize': 256,
-      'mcp.transport': 'stdio',
-      'agents.defaultType': 'coder',
-      'agents.maxConcurrent': 15
-    };
-    // Read config.json and merge with defaults
-    const diskConfig = readJsonConfig();
-    const configValues: Record<string, unknown> = { ...defaults };
-    if (diskConfig.swarm && typeof diskConfig.swarm === 'object') {
-      const sw = diskConfig.swarm as Record<string, unknown>;
-      if (sw.topology) configValues['swarm.topology'] = sw.topology;
-      if (sw.maxAgents) configValues['swarm.maxAgents'] = parseInt(String(sw.maxAgents)) || (defaults['swarm.maxAgents'] as number);
-      if (sw.autoScale !== undefined) configValues['swarm.autoScale'] = sw.autoScale === 'true' || sw.autoScale === true;
-    }
-    if (diskConfig.memory && typeof diskConfig.memory === 'object') {
-      const mem = diskConfig.memory as Record<string, unknown>;
-      if (mem.backend) configValues['memory.backend'] = mem.backend;
-      if (mem.cacheSize) configValues['memory.cacheSize'] = parseInt(String(mem.cacheSize)) || (defaults['memory.cacheSize'] as number);
-    }
-    if (diskConfig.mcp && typeof diskConfig.mcp === 'object') {
-      const mcp = diskConfig.mcp as Record<string, unknown>;
-      if (mcp.transport) configValues['mcp.transport'] = mcp.transport;
-    }
-    if (diskConfig.version) {
-      configValues['version'] = diskConfig.version;
-    }
+    try {
+      if (!key) {
+        // Show all config
+        const configValues = configManager.getAll(ctx.cwd);
+        if (ctx.flags.format === 'json') {
+          output.printJson(configValues);
+          return { success: true, data: configValues };
+        }
 
-    if (!key) {
-      // Show all config
-      if (ctx.flags.format === 'json') {
-        output.printJson(configValues);
+        output.writeln();
+        output.writeln(output.bold('Current Configuration'));
+        output.writeln();
+
+        const flat = configManager.flatten(configValues);
+        output.printTable({
+          columns: [
+            { key: 'key', header: 'Key', width: 25 },
+            { key: 'value', header: 'Value', width: 30 }
+          ],
+          data: Object.entries(flat).map(([k, v]) => ({ key: k, value: String(v) }))
+        });
+
         return { success: true, data: configValues };
       }
 
-      output.writeln();
-      output.writeln(output.bold('Current Configuration'));
-      output.writeln();
+      const value = configManager.get(ctx.cwd, key);
 
-      output.printTable({
-        columns: [
-          { key: 'key', header: 'Key', width: 25 },
-          { key: 'value', header: 'Value', width: 30 }
-        ],
-        data: Object.entries(configValues).map(([k, v]) => ({ key: k, value: String(v) }))
-      });
+      if (value === undefined) {
+        output.printError(`Configuration key not found: ${key}`);
+        return { success: false, exitCode: 1 };
+      }
 
-      return { success: true, data: configValues };
-    }
+      if (ctx.flags.format === 'json') {
+        output.printJson({ key, value });
+      } else {
+        output.writeln(`${key} = ${value}`);
+      }
 
-    const value = configValues[key];
-
-    if (value === undefined) {
-      output.printError(`Configuration key not found: ${key}`);
+      return { success: true, data: { key, value } };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      output.printError(message);
       return { success: false, exitCode: 1 };
     }
-
-    if (ctx.flags.format === 'json') {
-      output.printJson({ key, value });
-    } else {
-      output.writeln(`${key} = ${value}`);
-    }
-
-    return { success: true, data: { key, value } };
   }
 };
 
@@ -249,10 +154,16 @@ const setCommand: Command = {
       return { success: false, exitCode: 1 };
     }
 
-    output.printInfo(`Setting ${key} = ${value}`);
-    output.printSuccess('Configuration updated');
-
-    return { success: true, data: { key, value } };
+    try {
+      const parsedValue = parseConfigValue(value);
+      configManager.set(ctx.cwd, key, parsedValue);
+      output.writeln(`Set ${key} = ${value}`);
+      return { success: true };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      output.printError(message);
+      return { success: false, exitCode: 1 };
+    }
   }
 };
 
@@ -341,25 +252,15 @@ const resetCommand: Command = {
     }
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
-    const force = ctx.flags.force as boolean;
-    const section = ctx.flags.section as string || 'all';
-
-    if (!force && ctx.interactive) {
-      const confirmed = await confirm({
-        message: `Reset ${section} configuration to defaults?`,
-        default: false
-      });
-
-      if (!confirmed) {
-        output.printInfo('Operation cancelled');
-        return { success: true };
-      }
+    try {
+      const configPath = configManager.reset(ctx.cwd);
+      output.writeln(`Configuration reset to defaults: ${configPath}`);
+      return { success: true };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      output.printError(message);
+      return { success: false, exitCode: 1 };
     }
-
-    output.printInfo(`Resetting ${section} configuration...`);
-    output.printSuccess('Configuration reset to defaults');
-
-    return { success: true, data: { section, reset: true } };
   }
 };
 
@@ -384,41 +285,17 @@ const exportCommand: Command = {
     }
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
-    const outputPath = ctx.flags.output as string || './claude-flow.config.export.json';
-
-    // CF-002: Start with defaults, merge config.json
-    const config = {
-      version: '3.0.0',
-      exportedAt: new Date().toISOString(),
-      agents: { defaultType: 'coder', maxConcurrent: 15 },
-      swarm: { topology: 'hierarchical-mesh' as string, maxAgents: 15 },
-      memory: { backend: 'hybrid' as string, cacheSize: 256 },
-      mcp: { transport: 'stdio' as string, tools: 'all' }
-    };
-    // Read config.json and merge
-    const diskCfg = readJsonConfig();
-    if (diskCfg.version) { config.version = String(diskCfg.version); }
-    if (diskCfg.swarm && typeof diskCfg.swarm === 'object') {
-      const sw = diskCfg.swarm as Record<string, unknown>;
-      if (sw.topology) config.swarm.topology = String(sw.topology);
-      if (sw.maxAgents) config.swarm.maxAgents = parseInt(String(sw.maxAgents)) || 15;
+    try {
+      const exportPath = (ctx.flags.output as string) || ctx.args[0] || 'claude-flow.config.export.json';
+      configManager.exportTo(ctx.cwd, exportPath);
+      const resolved = path.resolve(ctx.cwd, exportPath);
+      output.writeln(`Configuration exported to: ${resolved}`);
+      return { success: true };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      output.printError(message);
+      return { success: false, exitCode: 1 };
     }
-    if (diskCfg.memory && typeof diskCfg.memory === 'object') {
-      const mem = diskCfg.memory as Record<string, unknown>;
-      if (mem.backend) config.memory.backend = String(mem.backend);
-      if (mem.cacheSize) config.memory.cacheSize = parseInt(String(mem.cacheSize)) || 256;
-    }
-    if (diskCfg.mcp && typeof diskCfg.mcp === 'object') {
-      const mcp = diskCfg.mcp as Record<string, unknown>;
-      if (mcp.transport) config.mcp.transport = String(mcp.transport);
-    }
-
-    output.printInfo(`Exporting configuration to ${outputPath}...`);
-    output.printJson(config);
-    output.writeln();
-    output.printSuccess('Configuration exported');
-
-    return { success: true, data: { path: outputPath, config } };
   }
 };
 
@@ -443,24 +320,21 @@ const importCommand: Command = {
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
     const file = ctx.flags.file as string || ctx.args[0];
-    const merge = ctx.flags.merge as boolean;
 
     if (!file) {
       output.printError('File path is required');
       return { success: false, exitCode: 1 };
     }
 
-    output.printInfo(`Importing configuration from ${file}...`);
-
-    if (merge) {
-      output.writeln(output.dim('  Merging with existing configuration...'));
-    } else {
-      output.writeln(output.dim('  Replacing existing configuration...'));
+    try {
+      configManager.importFrom(ctx.cwd, file);
+      output.writeln(`Configuration imported from: ${path.resolve(ctx.cwd, file)}`);
+      return { success: true };
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      output.printError(message);
+      return { success: false, exitCode: 1 };
     }
-
-    output.printSuccess('Configuration imported');
-
-    return { success: true, data: { file, merge, imported: true } };
   }
 };
 

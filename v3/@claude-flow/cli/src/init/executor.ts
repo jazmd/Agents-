@@ -506,7 +506,7 @@ export async function executeUpgrade(targetDir: string, upgradeSettings = false)
         ddd: { progress: 0, modules: 0, totalFiles: 0, totalLines: 0 },
         swarm: { activeAgents: 0, maxAgents: 15, topology: 'hierarchical-mesh' },
         learning: { status: 'READY', patternsLearned: 0, sessionsCompleted: 0 },
-        _note: 'Metrics will update as you use Claude Flow'
+        _note: 'Metrics will update as you use Ruflo'
       };
       fs.writeFileSync(progressPath, JSON.stringify(progress, null, 2), 'utf-8');
       result.created.push('.claude-flow/metrics/v3-progress.json');
@@ -538,7 +538,7 @@ export async function executeUpgrade(targetDir: string, upgradeSettings = false)
         routing: { accuracy: 0, decisions: 0 },
         patterns: { shortTerm: 0, longTerm: 0, quality: 0 },
         sessions: { total: 0, current: null },
-        _note: 'Intelligence grows as you use Claude Flow'
+        _note: 'Intelligence grows as you use Ruflo'
       };
       fs.writeFileSync(learningPath, JSON.stringify(learning, null, 2), 'utf-8');
       result.created.push('.claude-flow/metrics/learning.json');
@@ -742,14 +742,54 @@ async function writeSettings(
   result: InitResult
 ): Promise<void> {
   const settingsPath = path.join(targetDir, '.claude', 'settings.json');
+  const generated = JSON.parse(generateSettingsJson(options));
 
   if (fs.existsSync(settingsPath) && !options.force) {
-    result.skipped.push('.claude/settings.json');
+    // Merge hooks/env/permissions into existing settings instead of skipping
+    try {
+      const existing = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+      let merged = false;
+
+      // Merge hooks (the critical missing piece — #1484)
+      if (generated.hooks && !existing.hooks) {
+        existing.hooks = generated.hooks;
+        merged = true;
+      }
+
+      // Merge env vars (for CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS etc.)
+      if (generated.env) {
+        existing.env = { ...(existing.env || {}), ...generated.env };
+        merged = true;
+      }
+
+      // Merge permissions (add ruflo allow rules)
+      if (generated.permissions?.allow) {
+        const existingAllow = existing.permissions?.allow || [];
+        const newRules = generated.permissions.allow.filter(
+          (r: string) => !existingAllow.includes(r)
+        );
+        if (newRules.length > 0) {
+          existing.permissions = existing.permissions || {};
+          existing.permissions.allow = [...existingAllow, ...newRules];
+          merged = true;
+        }
+      }
+
+      if (merged) {
+        fs.writeFileSync(settingsPath, JSON.stringify(existing, null, 2), 'utf-8');
+        result.created.files.push('.claude/settings.json (merged hooks)');
+      } else {
+        result.skipped.push('.claude/settings.json');
+      }
+    } catch {
+      // Existing file is corrupt — overwrite
+      fs.writeFileSync(settingsPath, JSON.stringify(generated, null, 2), 'utf-8');
+      result.created.files.push('.claude/settings.json');
+    }
     return;
   }
 
-  const content = generateSettingsJson(options);
-  fs.writeFileSync(settingsPath, content, 'utf-8');
+  fs.writeFileSync(settingsPath, JSON.stringify(generated, null, 2), 'utf-8');
   result.created.files.push('.claude/settings.json');
 }
 
@@ -926,10 +966,9 @@ async function copyAgents(
     if (fs.existsSync(sourcePath)) {
       if (!fs.existsSync(targetPath) || options.force) {
         copyDirRecursive(sourcePath, targetPath);
-        // Count agent files (.yaml and .md)
-        const yamlFiles = countFiles(sourcePath, '.yaml');
+        // Count agent files (.md only — .yaml agents were migrated to .md)
         const mdFiles = countFiles(sourcePath, '.md');
-        result.summary.agentsCount += yamlFiles + mdFiles;
+        result.summary.agentsCount += mdFiles;
         result.created.files.push(`.claude/agents/${agentCategory}`);
       } else {
         result.skipped.push(`.claude/agents/${agentCategory}`);
@@ -1149,17 +1188,15 @@ async function writeStatusline(
     }
   }
 
-  // ALWAYS generate statusline.cjs — settings.json references this path
-  // regardless of whether advanced statusline files were also copied.
+  // ALWAYS generate statusline.cjs — the generated version includes AgentDB
+  // vectors/size, tests, ADRs, hooks, and integration stats that the
+  // pre-installed static copy in the npm package lacks.
+  // This must overwrite any copy from writeHelpers() which copies the legacy file.
   const statuslineScript = generateStatuslineScript(options);
   const statuslinePath = path.join(helpersDir, 'statusline.cjs');
 
-  if (!fs.existsSync(statuslinePath) || options.force) {
-    fs.writeFileSync(statuslinePath, statuslineScript, 'utf-8');
-    result.created.files.push('.claude/helpers/statusline.cjs');
-  } else {
-    result.skipped.push('.claude/helpers/statusline.cjs');
-  }
+  fs.writeFileSync(statuslinePath, statuslineScript, 'utf-8');
+  result.created.files.push('.claude/helpers/statusline.cjs');
 }
 
 /**
@@ -1356,7 +1393,7 @@ async function writeInitialMetrics(
         patternsLearned: 0,
         sessionsCompleted: 0
       },
-      _note: 'Metrics will update as you use Claude Flow. Run: npx @claude-flow/cli@latest daemon start'
+      _note: 'Metrics will update as you use Ruflo. Run: npx ruflo@latest daemon start'
     };
     fs.writeFileSync(progressPath, JSON.stringify(progress, null, 2), 'utf-8');
     result.created.files.push('.claude-flow/metrics/v3-progress.json');
@@ -1405,7 +1442,7 @@ async function writeInitialMetrics(
         total: 0,
         current: null
       },
-      _note: 'Intelligence grows as you use Claude Flow'
+      _note: 'Intelligence grows as you use Ruflo'
     };
     fs.writeFileSync(learningPath, JSON.stringify(learning, null, 2), 'utf-8');
     result.created.files.push('.claude-flow/metrics/learning.json');
@@ -1428,7 +1465,7 @@ async function writeInitialMetrics(
 }
 
 /**
- * Write CAPABILITIES.md - comprehensive overview of all Claude Flow features
+ * Write CAPABILITIES.md - comprehensive overview of all Ruflo features
  */
 async function writeCapabilitiesDoc(
   targetDir: string,
@@ -1793,8 +1830,8 @@ npx @claude-flow/cli@latest hive-mind consensus --propose "task"
 
 ### MCP Server Setup
 \`\`\`bash
-# Add Claude Flow MCP
-claude mcp add claude-flow -- npx -y @claude-flow/cli@latest
+# Add Ruflo MCP
+claude mcp add ruflo -- npx -y ruflo@latest
 
 # Optional servers
 claude mcp add ruv-swarm -- npx -y ruv-swarm mcp start
@@ -1808,24 +1845,24 @@ claude mcp add flow-nexus -- npx -y flow-nexus@latest mcp start
 ### Essential Commands
 \`\`\`bash
 # Setup
-npx @claude-flow/cli@latest init --wizard
-npx @claude-flow/cli@latest daemon start
-npx @claude-flow/cli@latest doctor --fix
+npx ruflo@latest init --wizard
+npx ruflo@latest daemon start
+npx ruflo@latest doctor --fix
 
 # Swarm
-npx @claude-flow/cli@latest swarm init --topology hierarchical-mesh --max-agents 8
-npx @claude-flow/cli@latest swarm status
+npx ruflo@latest swarm init --topology hierarchical --max-agents 8
+npx ruflo@latest swarm status
 
 # Agents
-npx @claude-flow/cli@latest agent spawn -t coder
-npx @claude-flow/cli@latest agent list
+npx ruflo@latest agent spawn -t coder
+npx ruflo@latest agent list
 
 # Memory
-npx @claude-flow/cli@latest memory search --query "patterns"
+npx ruflo@latest memory search --query "patterns"
 
 # Hooks
-npx @claude-flow/cli@latest hooks pre-task --description "task"
-npx @claude-flow/cli@latest hooks worker dispatch --trigger optimize
+npx ruflo@latest hooks pre-task --description "task"
+npx ruflo@latest hooks worker dispatch --trigger optimize
 \`\`\`
 
 ### File Structure
@@ -1863,15 +1900,47 @@ async function writeClaudeMd(
 
   if (fs.existsSync(claudeMdPath) && !options.force) {
     result.skipped.push('CLAUDE.md');
-    return;
+  } else {
+    // Determine template: explicit option > infer from components > 'standard'
+    const inferredTemplate = (!options.components.commands && !options.components.agents) ? 'minimal' : undefined;
+    const content = generateClaudeMd(options, inferredTemplate);
+
+    fs.writeFileSync(claudeMdPath, content, 'utf-8');
+    result.created.files.push('CLAUDE.md');
   }
 
-  // Determine template: explicit option > infer from components > 'standard'
-  const inferredTemplate = (!options.components.commands && !options.components.agents) ? 'minimal' : undefined;
-  const content = generateClaudeMd(options, inferredTemplate);
+  // Also write/append global ~/.claude/CLAUDE.md so ruflo tools are used automatically (#1497)
+  const homeDir = process.env.HOME || process.env.USERPROFILE || '';
+  if (homeDir) {
+    const globalClaudeDir = path.join(homeDir, '.claude');
+    const globalClaudeMd = path.join(globalClaudeDir, 'CLAUDE.md');
+    const rufloBlock = [
+      '',
+      '# Ruflo Integration (auto-generated by ruflo init)',
+      'When working on multi-file tasks or complex features, use ToolSearch to find and invoke ruflo MCP tools.',
+      'Key tools: memory_store, memory_search, hooks_route, swarm_init, agent_spawn.',
+      'Check system-reminder tags for [INTELLIGENCE] pattern suggestions before starting work.',
+      '',
+    ].join('\n');
 
-  fs.writeFileSync(claudeMdPath, content, 'utf-8');
-  result.created.files.push('CLAUDE.md');
+    try {
+      if (!fs.existsSync(globalClaudeDir)) {
+        fs.mkdirSync(globalClaudeDir, { recursive: true });
+      }
+      if (fs.existsSync(globalClaudeMd)) {
+        const existing = fs.readFileSync(globalClaudeMd, 'utf-8');
+        if (!existing.includes('Ruflo Integration')) {
+          fs.appendFileSync(globalClaudeMd, rufloBlock);
+          result.created.files.push('~/.claude/CLAUDE.md (appended ruflo block)');
+        }
+      } else {
+        fs.writeFileSync(globalClaudeMd, rufloBlock.trimStart(), 'utf-8');
+        result.created.files.push('~/.claude/CLAUDE.md');
+      }
+    } catch {
+      // Non-critical — global CLAUDE.md is best-effort
+    }
+  }
 }
 
 /**

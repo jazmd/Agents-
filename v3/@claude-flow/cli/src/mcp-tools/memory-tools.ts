@@ -215,14 +215,22 @@ export const memoryTools: MCPTool[] = [
           }
         }
       } catch { /* scope controller unavailable — use unscoped key */ }
-      const namespace = input.namespace as string;
-      if (!namespace || namespace === 'all') {
-        throw new Error('Namespace is required (cannot be "all"). Use namespace: "patterns", "solutions", or "tasks"');
-      }
-      const value = typeof input.value === 'string' ? input.value : JSON.stringify(input.value);
+      const namespace = (input.namespace as string) || 'default';
+      const rawValue = input.value;
+      const value = typeof rawValue === 'string' ? rawValue : (rawValue !== undefined ? JSON.stringify(rawValue) : '');
       const tags = (input.tags as string[]) || [];
       const ttl = input.ttl as number | undefined;
       const upsert = (input.upsert as boolean) || false;
+
+      if (!value) {
+        return {
+          success: false,
+          key,
+          stored: false,
+          hasEmbedding: false,
+          error: 'Value is required and cannot be empty',
+        };
+      }
 
       validateMemoryInput(key, value);
 
@@ -299,6 +307,8 @@ export const memoryTools: MCPTool[] = [
       if (!namespace || namespace === 'all') {
         throw new Error('Namespace is required (cannot be "all"). Use namespace: "patterns", "solutions", or "tasks"');
       }
+
+      validateMemoryInput(key);
 
       try {
         const result = await getEntry({ key, namespace });
@@ -579,6 +589,8 @@ export const memoryTools: MCPTool[] = [
         throw new Error('Namespace is required (cannot be "all"). Use namespace: "patterns", "solutions", or "tasks"');
       }
 
+      validateMemoryInput(key);
+
       try {
         const result = await deleteEntry({ key, namespace });
 
@@ -587,6 +599,7 @@ export const memoryTools: MCPTool[] = [
           key,
           namespace,
           deleted: result.deleted,
+          hnswIndexInvalidated: result.deleted,
           backend: 'sql.js + HNSW',
         };
       } catch (error) {

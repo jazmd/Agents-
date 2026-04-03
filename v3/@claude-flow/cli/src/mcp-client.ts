@@ -37,6 +37,11 @@ import { coordinationTools } from './mcp-tools/coordination-tools.js';
 import { browserTools } from './mcp-tools/browser-tools.js';
 // Phase 6: AgentDB v3 controller tools
 import { agentdbTools } from './mcp-tools/agentdb-tools.js';
+// RuVector WASM tools
+import { ruvllmWasmTools } from './mcp-tools/ruvllm-tools.js';
+import { wasmAgentTools } from './mcp-tools/wasm-agent-tools.js';
+import { guidanceTools } from './mcp-tools/guidance-tools.js';
+import { autopilotTools } from './mcp-tools/autopilot-tools.js';
 
 /**
  * MCP Tool Registry
@@ -79,6 +84,13 @@ registerTools([
   ...browserTools,
   // Phase 6: AgentDB v3 controller tools
   ...agentdbTools,
+  // RuVector WASM tools
+  ...ruvllmWasmTools,
+  ...wasmAgentTools,
+  // Guidance & discovery tools
+  ...guidanceTools,
+  // Autopilot persistent completion tools
+  ...autopilotTools,
 ]);
 
 /**

@@ -50,11 +50,18 @@ const scanCommand: Command = {
         try {
           const packageJsonPath = path.resolve(target, 'package.json');
           if (fs.existsSync(packageJsonPath)) {
-            const auditResult = execSync('npm audit --json 2>/dev/null || true', {
-              cwd: path.resolve(target),
-              encoding: 'utf-8',
-              maxBuffer: 10 * 1024 * 1024,
-            });
+            let auditResult: string;
+            try {
+              auditResult = execSync('npm audit --json', {
+                cwd: path.resolve(target),
+                encoding: 'utf-8',
+                maxBuffer: 10 * 1024 * 1024,
+                stdio: ['pipe', 'pipe', 'pipe'],
+              });
+            } catch (auditErr: any) {
+              // npm audit exits non-zero when vulnerabilities found — stdout still has JSON
+              auditResult = auditErr.stdout || '{}';
+            }
 
             try {
               const audit = JSON.parse(auditResult);
@@ -217,7 +224,9 @@ const scanCommand: Command = {
         const fixSpinner = output.createSpinner({ text: 'Attempting to fix vulnerabilities...', spinner: 'dots' });
         fixSpinner.start();
         try {
-          execSync('npm audit fix 2>/dev/null || true', { cwd: path.resolve(target), encoding: 'utf-8' });
+          try {
+            execSync('npm audit fix', { cwd: path.resolve(target), encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] });
+          } catch { /* npm audit fix may exit non-zero */ }
           fixSpinner.succeed('Applied available fixes (run scan again to verify)');
         } catch {
           fixSpinner.fail('Some fixes could not be applied automatically');
@@ -351,21 +360,54 @@ const auditCommand: Command = {
     output.writeln(output.bold('Security Audit Log'));
     output.writeln(output.dim('─'.repeat(60)));
 
-    output.printTable({
-      columns: [
-        { key: 'timestamp', header: 'Timestamp', width: 22 },
-        { key: 'event', header: 'Event', width: 20 },
-        { key: 'user', header: 'User', width: 15 },
-        { key: 'status', header: 'Status', width: 12 },
-      ],
-      data: [
-        { timestamp: '2024-01-15 14:32:01', event: 'AUTH_LOGIN', user: 'admin', status: output.success('Success') },
-        { timestamp: '2024-01-15 14:30:45', event: 'CONFIG_CHANGE', user: 'system', status: output.success('Success') },
-        { timestamp: '2024-01-15 14:28:12', event: 'AUTH_FAILED', user: 'unknown', status: output.error('Failed') },
-        { timestamp: '2024-01-15 14:25:33', event: 'SCAN_COMPLETE', user: 'ci-bot', status: output.success('Success') },
-        { timestamp: '2024-01-15 14:20:00', event: 'KEY_ROTATE', user: 'admin', status: output.success('Success') },
-      ],
-    });
+    // Generate real audit entries from .swarm/ state and session history
+    const { existsSync, readFileSync, readdirSync, statSync } = await import('fs');
+    const { join } = await import('path');
+
+    const auditEntries: { timestamp: string; event: string; user: string; status: string }[] = [];
+    const swarmDir = join(process.cwd(), '.swarm');
+
+    // Check session files for real audit events
+    if (existsSync(swarmDir)) {
+      try {
+        const files = readdirSync(swarmDir).filter(f => f.endsWith('.json'));
+        for (const file of files.slice(-10)) {
+          try {
+            const stat = statSync(join(swarmDir, file));
+            const ts = stat.mtime.toISOString().replace('T', ' ').substring(0, 19);
+            auditEntries.push({
+              timestamp: ts,
+              event: file.includes('session') ? 'SESSION_UPDATE' :
+                     file.includes('swarm') ? 'SWARM_ACTIVITY' :
+                     file.includes('memory') ? 'MEMORY_WRITE' : 'CONFIG_CHANGE',
+              user: 'system',
+              status: output.success('Success')
+            });
+          } catch { /* skip */ }
+        }
+      } catch { /* ignore */ }
+    }
+
+    // Add current session entry
+    const now = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    auditEntries.push({ timestamp: now, event: 'AUDIT_RUN', user: 'cli', status: output.success('Success') });
+
+    // Sort by timestamp desc
+    auditEntries.sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+
+    if (auditEntries.length === 0) {
+      output.writeln(output.dim('No audit events found. Initialize a project first: claude-flow init'));
+    } else {
+      output.printTable({
+        columns: [
+          { key: 'timestamp', header: 'Timestamp', width: 22 },
+          { key: 'event', header: 'Event', width: 20 },
+          { key: 'user', header: 'User', width: 15 },
+          { key: 'status', header: 'Status', width: 12 },
+        ],
+        data: auditEntries.slice(0, parseInt(ctx.flags.limit as string || '20', 10)),
+      });
+    }
 
     return { success: true };
   },

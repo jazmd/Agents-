@@ -793,9 +793,9 @@ export async function bridgeSearchEntries(options: {
     if (rateCheck) return null;
 
   try {
-    // OPT-010: No default namespace — when unspecified, search across all namespaces
     const { query: queryStr, namespace, limit = 10, threshold: explicitThreshold } = options;
     const threshold = await _getAdaptiveThreshold(explicitThreshold);
+    const effectiveNamespace = namespace || 'all';
     const startTime = Date.now();
 
     // ADR-0030: Generate query embedding via memory-initializer (768-dim preferred)
@@ -854,8 +854,7 @@ export async function bridgeSearchEntries(options: {
     } catch { /* GuardedVectorBackend unavailable — fall through to regular path */ }
 
     // better-sqlite3: .prepare().all() returns array of objects
-    // OPT-010: Filter by namespace only when explicitly specified (not 'all' or undefined)
-    const nsFilter = (namespace && namespace !== 'all')
+    const nsFilter = effectiveNamespace !== 'all'
       ? `AND namespace = ?`
       : '';
 
@@ -867,7 +866,7 @@ export async function bridgeSearchEntries(options: {
         WHERE status = 'active' ${nsFilter}
         LIMIT 1000
       `);
-      rows = (namespace && namespace !== 'all') ? stmt.all(namespace) : stmt.all();
+      rows = effectiveNamespace !== 'all' ? stmt.all(effectiveNamespace) : stmt.all();
     } catch {
       return null;
     }
@@ -1662,13 +1661,14 @@ export async function bridgeSearchPatterns(options: {
   try {
     const reasoningBank = registry.get('reasoningBank');
 
-    // OPT-002: Probe for callable search method across binding patterns
-    const searchFn = getCallableMethod(reasoningBank, 'search', 'searchPattern', 'retrievePatterns', 'query', 'find');
-    if (searchFn) {
-      const results = await searchFn(options.query, {
-        topK: options.topK || 5,
-        minScore: options.minConfidence || 0.3,
-      });
+    // ReasoningBank may expose .searchPatterns() (agentdb) or .search() (legacy) (#1492 Bug 2)
+    if (reasoningBank && typeof (reasoningBank.searchPatterns ?? reasoningBank.search) === 'function') {
+      let results: any;
+      if (typeof reasoningBank.searchPatterns === 'function') {
+        results = await reasoningBank.searchPatterns({ task: options.query, k: options.topK || 5, threshold: options.minConfidence || 0.3 });
+      } else {
+        results = await reasoningBank.search(options.query, { topK: options.topK || 5, minScore: options.minConfidence || 0.3 });
+      }
       return {
         results: Array.isArray(results) ? results.map((r: any) => ({
           id: r.id || r.patternId || '',
