@@ -295,7 +295,7 @@ export const INIT_LEVELS: InitLevel[] = [
   // Level 3: Specialization
   { level: 3, controllers: ['skills', 'explainableRecall', 'reflexion', 'attestationLog', 'batchOperations', 'memoryConsolidation', 'enhancedEmbeddingService', 'auditLogger'] },
   // Level 4: Causal, routing, health
-  { level: 4, controllers: ['causalGraph', 'nightlyLearner', 'learningSystem', 'semanticRouter', 'indexHealthMonitor', 'federatedLearningManager', 'attentionMetrics'] },
+  { level: 4, controllers: ['causalGraph', 'causalRecall', 'nightlyLearner', 'learningSystem', 'semanticRouter', 'indexHealthMonitor', 'federatedLearningManager', 'attentionMetrics'] },
   // Level 5: Advanced services
   { level: 5, controllers: ['sonaTrajectory', 'contextSynthesizer', 'rvfOptimizer', 'mmrDiversityRanker', 'guardedVectorBackend'] },
   // Level 6: Session management
