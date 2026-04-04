@@ -1588,8 +1588,6 @@ export async function loadEmbeddingModel(options?: {
             }
         } catch { /* EM-001: embeddings.json may not exist — use defaults */ }
     }
-    // Models with org prefix (e.g. nomic-ai/...) keep their prefix; only bare names get Xenova/
-    const xenovaModel = modelName.includes('/') ? modelName : `Xenova/${modelName}`;
     // EM-002: Set TRANSFORMERS_CACHE to user-writable path to prevent EACCES on global installs
     if (!process.env.TRANSFORMERS_CACHE) {
       const os = await import('os');
@@ -1604,7 +1602,7 @@ export async function loadEmbeddingModel(options?: {
       }
 
       const { pipeline } = transformers;
-      const embedder = await pipeline('feature-extraction', xenovaModel);
+      const embedder = await pipeline('feature-extraction', modelName);
 
       embeddingModelState = {
         loaded: true,
