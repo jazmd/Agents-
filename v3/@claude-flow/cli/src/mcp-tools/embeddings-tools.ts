@@ -165,8 +165,8 @@ export const embeddingsTools: MCPTool[] = [
         model: {
           type: 'string',
           description: 'ONNX model ID',
-          enum: ['all-MiniLM-L6-v2', 'all-mpnet-base-v2'],
-          default: 'all-mpnet-base-v2',
+          enum: ['Xenova/all-MiniLM-L6-v2', 'Xenova/all-mpnet-base-v2'],
+          default: 'Xenova/all-mpnet-base-v2',
         },
         hyperbolic: {
           type: 'boolean',

@@ -695,8 +695,8 @@ export const wizardCommand: Command = {
           message: 'Select embedding model:',
           options: [
             { value: 'nomic-ai/nomic-embed-text-v1.5', label: 'Nomic Embed v1.5 (768d)', hint: '86% MTEB, 8K context (recommended)' },
-            { value: 'all-MiniLM-L6-v2', label: 'MiniLM L6 (384d)', hint: 'Fast, good quality' },
-            { value: 'all-mpnet-base-v2', label: 'MPNet Base (768d)', hint: 'Higher quality, more memory' },
+            { value: 'Xenova/all-MiniLM-L6-v2', label: 'MiniLM L6 (384d)', hint: 'Fast, good quality' },
+            { value: 'Xenova/all-mpnet-base-v2', label: 'MPNet Base (768d)', hint: 'Higher quality, more memory' },
           ],
         });
       }

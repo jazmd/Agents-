@@ -2137,10 +2137,10 @@ export const hooksIntelligence: MCPTool = {
         },
         embeddings: {
           provider: 'transformers',
-          model: 'all-MiniLM-L6-v2',
+          model: 'Xenova/all-MiniLM-L6-v2',
           dimension: EMBEDDING_DIM, // ADR-0052: matches embedding config default
           implemented: true,
-          note: 'Real ONNX embeddings via all-mpnet-base-v2',
+          note: 'Real ONNX embeddings via Xenova/all-mpnet-base-v2',
         },
       },
       realMetrics: {
