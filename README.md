@@ -774,6 +774,102 @@ After running `init`, add these entries to avoid committing ephemeral runtime da
 
 > **Team tip:** `.claude/settings.json` is merged (not replaced) when multiple developers run `init` independently, but it can still produce merge conflicts in version control if two people add different hooks at the same time. Designate one person to run `init` when onboarding the team, commit the result, and have everyone else pull.
 
+### Deploying Ruflo in Claude Code Projects
+
+This is the recommended deployment path for most developers. Ruflo is built around Claude Code and integrates at three levels: **hooks** (automatic background activity), **MCP** (tools available in every session), and **skills/agents** (slash commands and AI profiles).
+
+#### Complete setup (5 steps)
+
+```bash
+# Step 1 — Make sure Claude Code is installed
+npm install -g @anthropic-ai/claude-code  # skip if already installed
+
+# Step 2 — Run init in your project root (safe on any existing project)
+cd /path/to/your-project
+npx ruflo@latest init
+
+# Step 3 — Register Ruflo as an MCP server for Claude Code
+claude mcp add ruflo -- npx -y ruflo@latest mcp start
+
+# Step 4 — Verify the MCP server is registered
+claude mcp list
+# You should see:  ruflo   npx -y ruflo@latest mcp start
+
+# Step 5 — Verify the project is healthy
+npx ruflo@latest doctor
+```
+
+After step 2 the following is wired into `.claude/settings.json` automatically:
+
+| Hook event | Script invoked | What it does |
+|---|---|---|
+| `UserPromptSubmit` | `hook-handler.cjs route` | Intelligently routes your prompt to the right agent/model tier |
+| `PreToolUse` (Bash) | `hook-handler.cjs pre-bash` | Validates shell commands before execution |
+| `PreToolUse` (Write/Edit) | `hook-handler.cjs pre-edit` | Records edit intent; enables pattern learning |
+| `PostToolUse` (Write/Edit) | `hook-handler.cjs post-edit` | Records outcomes, trains SONA neural patterns |
+| `PostToolUse` (Bash) | `hook-handler.cjs post-bash` | Captures command results for session metrics |
+| `SessionStart` | `hook-handler.cjs session-restore` + auto-memory import | Restores last session context |
+| `SessionEnd` | `hook-handler.cjs session-end` | Persists session state |
+| `Stop` | auto-memory sync | Syncs memory before Claude Code exits |
+| `PreCompact` | `hook-handler.cjs compact-auto/manual` | Preserves context before compaction |
+| `SubagentStart/Stop` | `hook-handler.cjs status` / `post-task` | Tracks spawned agents and metrics |
+
+These hooks run silently — **you do not need to do anything extra**. Just use Claude Code normally.
+
+#### What works automatically after init
+
+- **Task routing** — simple edits go to the free Agent Booster (WASM); medium tasks use Haiku; complex reasoning uses Sonnet/Opus. Claude Code's token budget is stretched automatically.
+- **Session memory** — context from previous sessions is restored at the start of every new session.
+- **Pattern learning** — successful patterns are stored in the local vector store and reused in future sessions.
+- **Statusline** — a real-time status indicator shows agent activity, memory usage, and session metrics in Claude Code's UI.
+
+#### Using Ruflo tools inside a Claude Code session
+
+Once the MCP server is registered, all Ruflo MCP tools are available directly in Claude Code without leaving the chat. Examples:
+
+```
+# In Claude Code chat:
+Use swarm_init to start a 6-agent swarm for this feature
+
+Use agent_spawn to create a security reviewer
+
+Use memory_search to find patterns for authentication
+```
+
+Or via slash commands (installed to `.claude/commands/`):
+
+```
+/project:swarm "Implement the checkout flow with tests"
+/project:review "Security review of src/auth/"
+/project:hive "Refactor the payment module"
+```
+
+#### Verifying everything works
+
+```bash
+# Check MCP server is registered
+claude mcp list
+
+# Run system diagnostics (checks Node version, config, memory DB, MCP, disk)
+npx ruflo@latest doctor
+
+# Check the hooks handler is responsive
+node .claude/helpers/hook-handler.cjs stats
+
+# Check the intelligence system
+node .claude/helpers/intelligence.cjs stats --json
+```
+
+#### Updating Ruflo in a Claude Code project
+
+```bash
+# Update helpers and statusline (preserves all your data)
+npx ruflo@latest init upgrade
+
+# Update AND add any new skills/agents/commands from the latest release
+npx ruflo@latest init upgrade --add-missing
+```
+
 ### Claude Code MCP Integration
 
 Add ruflo as an MCP server for seamless integration:
