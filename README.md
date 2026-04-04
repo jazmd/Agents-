@@ -690,6 +690,90 @@ npx ruflo@latest init upgrade --add-missing
 
 The `--add-missing` flag automatically detects and installs new skills, agents, and commands that were added in newer versions, without overwriting your existing customizations.
 
+### Deploying to an Existing Project vs. a New Environment
+
+**Short answer: Ruflo works great with existing projects.** You do not need a clean environment. Run `npx ruflo@latest init` from the root of any existing project and Ruflo adds its configuration files alongside your own code without touching your source files, `package.json`, or any existing config.
+
+#### What `init` creates — and what it never touches
+
+| Path created | Purpose | Overwrites existing files? |
+|---|---|---|
+| `CLAUDE.md` | Swarm guidance & agent config | ❌ Skipped if present (use `--force` to overwrite) |
+| `.claude/settings.json` | Claude Code hooks & permissions | ❌ Merges new hooks into existing file |
+| `.claude/skills/` (137+ files) | Pre-built skill definitions | ❌ Only adds files that are missing |
+| `.claude/commands/` | Slash commands | ❌ Only adds files that are missing |
+| `.claude/agents/` | Agent definitions | ❌ Only adds files that are missing |
+| `.claude/helpers/` | Automation scripts | ⚠️ Always refreshed on `init`/`upgrade` — user modifications will be overwritten |
+| `.mcp.json` | MCP server config | ❌ Skipped if present |
+| `.claude-flow/config.yaml` | Ruflo runtime config | ❌ Skipped if present |
+| `.claude-flow/data/` | Local memory & vector store | ❌ Never overwritten |
+| `.claude-flow/logs/` | Runtime logs | ❌ Never overwritten |
+| `.claude-flow/sessions/` | Session state | ❌ Never overwritten |
+
+Your source code, `package.json`, lock files, and all existing project files are **never modified**.
+
+#### Adding Ruflo to an existing project
+
+```bash
+# 1. Go to your project root (no special setup needed)
+cd /path/to/your-project
+
+# 2. Add Ruflo (non-destructive — safe to run on any existing project)
+npx ruflo@latest init
+
+# 3. Register as a Claude Code MCP server
+claude mcp add ruflo -- npx -y ruflo@latest mcp start
+
+# 4. Start using agents
+npx ruflo@latest agent spawn -t coder --name my-coder
+npx ruflo@latest hive-mind spawn "Implement the next feature"
+```
+
+If Ruflo was already initialized, it will warn you and prompt before changing anything. Pass `--force` to reinitialize unconditionally.
+
+#### Starting fresh in a new environment
+
+A clean environment is only needed when you want a fully guided interactive setup or are deploying Ruflo as the primary tool in a brand-new project:
+
+```bash
+# Create and enter a new project directory
+mkdir my-new-project && cd my-new-project
+
+# Interactive wizard (recommended for new environments)
+npx ruflo@latest init --wizard
+
+# Or: full automated setup (global install + MCP + diagnostics + init)
+npx ruflo@latest init --full
+```
+
+#### Choosing the right init mode
+
+| Scenario | Recommended command | Notes |
+|---|---|---|
+| Add to an existing project | `npx ruflo@latest init` | Non-destructive; safe to run at any time |
+| Existing project, minimal footprint | `npm install ruflo@latest --omit=optional` then `ruflo init` | Skips ML/embeddings (~45 MB vs ~340 MB) |
+| New project with guided setup | `npx ruflo@latest init --wizard` | Interactive prompts for topology, agents, MCP |
+| New project, fully automated | `npx ruflo@latest init --full` | Global install + MCP + diagnostics |
+| CI/CD or scripted pipeline | `npx ruflo@latest init --yes` | Non-interactive; accepts all defaults |
+| OpenAI Codex users | `npx ruflo@latest init --codex` | Creates `AGENTS.md` and `.agents/` instead of `CLAUDE.md` |
+| Reinitialize after upgrade | `npx ruflo@latest init upgrade --add-missing` | Adds new assets, preserves existing data |
+
+#### Recommended `.gitignore` additions
+
+After running `init`, add these entries to avoid committing ephemeral runtime data while keeping shared configuration in version control:
+
+```gitignore
+# Ruflo runtime data (regenerated automatically — do not commit)
+.claude-flow/data/
+.claude-flow/logs/
+.claude-flow/sessions/
+.claude/helpers/*.db
+```
+
+**Do commit** `.claude/settings.json`, `.claude/skills/`, `.claude/agents/`, `.claude/commands/`, `CLAUDE.md`, and `.claude-flow/config.yaml` — these are shared agent configurations that your whole team benefits from.
+
+> **Team tip:** `.claude/settings.json` is merged (not replaced) when multiple developers run `init` independently, but it can still produce merge conflicts in version control if two people add different hooks at the same time. Designate one person to run `init` when onboarding the team, commit the result, and have everyone else pull.
+
 ### Claude Code MCP Integration
 
 Add ruflo as an MCP server for seamless integration:
