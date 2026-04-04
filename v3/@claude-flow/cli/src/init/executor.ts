@@ -1227,19 +1227,19 @@ async function writeRuntimeConfig(
     memory: {
       backend: options.runtime.memoryBackend || 'agentdb',
       enableHNSW: true,
-      cacheSize: options.runtime.cacheSize || 256,
+      cacheSize: options.runtime.cacheSize || 384,
       learningBridge: {
         enabled: !!(options.runtime.enableLearningBridge ?? options.runtime.enableNeural),
         sonaMode: options.runtime.sonaMode || 'balanced',
-        confidenceDecayRate: 0.005,
-        accessBoostAmount: options.runtime.accessBoostAmount ?? 0.03,
-        consolidationThreshold: 10,
+        confidenceDecayRate: 0.0008,
+        accessBoostAmount: options.runtime.accessBoostAmount ?? 0.05,
+        consolidationThreshold: 8,
       },
       memoryGraph: {
         enabled: !!(options.runtime.enableMemoryGraph ?? true),
-        pageRankDamping: 0.85,
-        maxNodes: options.runtime.maxNodes || 5000,
-        similarityThreshold: options.runtime.similarityThreshold || 0.65,
+        pageRankDamping: 0.82,
+        maxNodes: options.runtime.maxNodes || 10000,
+        similarityThreshold: options.runtime.similarityThreshold || 0.25,
       },
       agentScopes: {
         enabled: !!(options.runtime.enableAgentScopes ?? true),
@@ -1250,8 +1250,8 @@ async function writeRuntimeConfig(
         enableLearning: !!(options.runtime.enableLearning ?? true),
         learningPositiveThreshold: options.runtime.learningPositiveThreshold || 0.7,
         learningNegativeThreshold: options.runtime.learningNegativeThreshold || 0.3,
-        learningBatchSize: options.runtime.learningBatchSize || 128,
-        learningTickInterval: options.runtime.learningTickInterval || 15000,
+        learningBatchSize: options.runtime.learningBatchSize || 64,
+        learningTickInterval: options.runtime.learningTickInterval || 10000,
       },
     },
     neural: {

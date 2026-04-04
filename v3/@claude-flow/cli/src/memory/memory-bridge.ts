@@ -169,8 +169,8 @@ async function getRegistry(dbPath?: string): Promise<any | null> {
             dbPath: dbPath || getDbPath(),
             dimension: _embDimension,
             enableHNSW: _mem.enableHNSW !== false,
-            cacheSize: _mem.cacheSize || 256,
-            similarityThreshold: _mg.similarityThreshold || 0.65,
+            cacheSize: _mem.cacheSize || 384,
+            similarityThreshold: _mg.similarityThreshold || 0.25,
             controllers: {
               reasoningBank: true,
               learningBridge: _lb.enabled !== false,
@@ -182,17 +182,17 @@ async function getRegistry(dbPath?: string): Promise<any | null> {
             },
             memory: {
               enableHNSW: _mem.enableHNSW !== false,
-              cacheSize: _mem.cacheSize || 256,
+              cacheSize: _mem.cacheSize || 384,
               learningBridge: {
                 sonaMode: _lb.sonaMode || 'balanced',
-                confidenceDecayRate: _lb.confidenceDecayRate || 0.005,
-                accessBoostAmount: _lb.accessBoostAmount || 0.03,
-                consolidationThreshold: _lb.consolidationThreshold || 10,
+                confidenceDecayRate: _lb.confidenceDecayRate || 0.0008,
+                accessBoostAmount: _lb.accessBoostAmount || 0.05,
+                consolidationThreshold: _lb.consolidationThreshold || 8,
               },
               memoryGraph: {
-                pageRankDamping: _mg.pageRankDamping || 0.85,
-                maxNodes: _mg.maxNodes || 5000,
-                similarityThreshold: _mg.similarityThreshold || 0.65,
+                pageRankDamping: _mg.pageRankDamping || 0.82,
+                maxNodes: _mg.maxNodes || 10000,
+                similarityThreshold: _mg.similarityThreshold || 0.25,
               },
             },
           } as any);
