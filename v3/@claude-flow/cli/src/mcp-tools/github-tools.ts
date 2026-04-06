@@ -5,11 +5,12 @@
  * Falls back to local state management when CLI tools are unavailable.
  */
 
-import { type MCPTool, getProjectCwd } from './types.js';
+import { type MCPTool } from './types.js';
 import { validateIdentifier, validateText } from './validate-input.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
+import { getBaseCwd } from './cwd-helper.js';
 
 // Storage paths
 const STORAGE_DIR = '.claude-flow';
@@ -38,7 +39,7 @@ interface GitHubStore {
 }
 
 function getGitHubDir(): string {
-  return join(getProjectCwd(), STORAGE_DIR, GITHUB_DIR);
+  return join(getBaseCwd(), STORAGE_DIR, GITHUB_DIR);
 }
 
 function getGitHubPath(): string {
@@ -72,7 +73,7 @@ function saveGitHubStore(store: GitHubStore): void {
 /** Run a shell command, return stdout or null on failure */
 function run(cmd: string, cwd?: string): string | null {
   try {
-    return execSync(cmd, { encoding: 'utf-8', timeout: 15000, cwd: cwd || getProjectCwd(), stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    return execSync(cmd, { encoding: 'utf-8', timeout: 15000, cwd: cwd || getBaseCwd(), stdio: ['pipe', 'pipe', 'pipe'] }).trim();
   } catch {
     return null;
   }
@@ -104,7 +105,7 @@ export const githubTools: MCPTool[] = [
 
       const store = loadGitHubStore();
       const branch = (input.branch as string) || 'main';
-      const cwd = getProjectCwd();
+      const cwd = getBaseCwd();
 
       // Try real git analysis first
       const commitCount = run('git rev-list --count HEAD', cwd);
@@ -464,7 +465,7 @@ export const githubTools: MCPTool[] = [
 
       const metric = (input.metric as string) || 'all';
       const timeRange = (input.timeRange as string) || '30d';
-      const cwd = getProjectCwd();
+      const cwd = getBaseCwd();
 
       // Parse time range
       const days = parseInt(timeRange, 10) || 30;

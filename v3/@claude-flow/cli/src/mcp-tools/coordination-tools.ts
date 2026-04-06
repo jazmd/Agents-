@@ -9,10 +9,11 @@
  * - Useful for single-machine workflow orchestration
  */
 
-import { type MCPTool, getProjectCwd } from './types.js';
+import { type MCPTool } from './types.js';
 import { validateIdentifier, validateText } from './validate-input.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { getBaseCwd } from './cwd-helper.js';
 
 // Storage paths
 const STORAGE_DIR = '.claude-flow';
@@ -78,7 +79,7 @@ interface CoordinationStore {
 }
 
 function getCoordDir(): string {
-  return join(getProjectCwd(), STORAGE_DIR, COORD_DIR);
+  return join(getBaseCwd(), STORAGE_DIR, COORD_DIR);
 }
 
 function getCoordPath(): string {

@@ -5,8 +5,9 @@
 
 import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync, unlinkSync, readdirSync, rmSync } from 'fs';
 import { dirname, join, resolve } from 'path';
-import { type MCPTool, getProjectCwd } from './types.js';
+import type { MCPTool } from './types.js';
 import { validateIdentifier, validateText, validatePath } from './validate-input.js';
+import { getBaseCwd } from './cwd-helper.js';
 
 // Real vector search functions - lazy loaded to avoid circular imports
 let searchEntriesFn: ((options: {
@@ -1360,7 +1361,7 @@ export const hooksPostTask: MCPTool = {
 
     // Persist to auto-memory-store for statusline visibility
     try {
-      const dataDir = join(getProjectCwd(), '.claude-flow', 'data');
+      const dataDir = join(getBaseCwd(), '.claude-flow', 'data');
       if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
       const storePath = join(dataDir, 'auto-memory-store.json');
       let store: Array<Record<string, unknown>> = [];
@@ -1752,7 +1753,7 @@ export const hooksSessionStart: MCPTool = {
     // Auto-regenerate statusline if outdated (fixes older installs)
     // Checks for the old fake heuristic: "Math.floor(sizeKB / 2)"
     try {
-      const statuslinePath = join(getProjectCwd(), '.claude', 'helpers', 'statusline.cjs');
+      const statuslinePath = join(getBaseCwd(), '.claude', 'helpers', 'statusline.cjs');
       if (existsSync(statuslinePath)) {
         const content = readFileSync(statuslinePath, 'utf-8');
         if (content.includes('Math.floor(sizeKB / 2)') || content.includes('Maturity fallback')) {
@@ -1774,7 +1775,7 @@ export const hooksSessionStart: MCPTool = {
       try {
         // Dynamic import to avoid circular dependencies
         const { startDaemon } = await import('../services/worker-daemon.js');
-        const daemon = await startDaemon(getProjectCwd());
+        const daemon = await startDaemon(getBaseCwd());
         const status = daemon.getStatus();
         daemonStatus = {
           started: true,
@@ -1818,7 +1819,7 @@ export const hooksSessionStart: MCPTool = {
 
     // Persist session record to auto-memory-store for statusline visibility
     try {
-      const dataDir = join(getProjectCwd(), '.claude-flow', 'data');
+      const dataDir = join(getBaseCwd(), '.claude-flow', 'data');
       if (!existsSync(dataDir)) mkdirSync(dataDir, { recursive: true });
       const storePath = join(dataDir, 'auto-memory-store.json');
       let store: Array<Record<string, unknown>> = [];
@@ -2219,7 +2220,7 @@ export const hooksIntelligenceReset: MCPTool = {
     properties: {},
   },
   handler: async () => {
-    const cwd = getProjectCwd();
+    const cwd = getBaseCwd();
     const cleared = {
       trajectories: 0,
       patterns: 0,

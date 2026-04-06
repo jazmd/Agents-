@@ -12,10 +12,11 @@
  * Note: For production neural features, use @claude-flow/neural module
  */
 
-import { type MCPTool, getProjectCwd } from './types.js';
+import { type MCPTool } from './types.js';
 import { validateIdentifier, validateText } from './validate-input.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { getBaseCwd } from './cwd-helper.js';
 
 // Try to import real embeddings — prefer agentic-flow v3 ReasoningBank, then @claude-flow/embeddings
 let realEmbeddings: { embed: (text: string) => Promise<number[]> } | null = null;
@@ -122,7 +123,7 @@ interface NeuralStore {
 }
 
 function getNeuralDir(): string {
-  return join(getProjectCwd(), STORAGE_DIR, NEURAL_DIR);
+  return join(getBaseCwd(), STORAGE_DIR, NEURAL_DIR);
 }
 
 function getNeuralPath(): string {

@@ -12,11 +12,12 @@
  * Note: Some optimization suggestions are illustrative
  */
 
-import { type MCPTool, getProjectCwd } from './types.js';
+import { type MCPTool } from './types.js';
 import { validateIdentifier } from './validate-input.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import * as os from 'node:os';
+import { getBaseCwd } from './cwd-helper.js';
 
 // Storage paths
 const STORAGE_DIR = '.claude-flow';
@@ -53,7 +54,7 @@ interface PerfStore {
 }
 
 function getPerfDir(): string {
-  return join(getProjectCwd(), STORAGE_DIR, PERF_DIR);
+  return join(getBaseCwd(), STORAGE_DIR, PERF_DIR);
 }
 
 function getPerfPath(): string {

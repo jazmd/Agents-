@@ -6,8 +6,9 @@
 
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, unlinkSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { type MCPTool, getProjectCwd } from './types.js';
+import type { MCPTool } from './types.js';
 import { validateIdentifier, validateText } from './validate-input.js';
+import { getBaseCwd } from './cwd-helper.js';
 
 // Storage paths
 const STORAGE_DIR = '.claude-flow';
@@ -32,7 +33,7 @@ interface SessionRecord {
 }
 
 function getSessionDir(): string {
-  return join(getProjectCwd(), STORAGE_DIR, SESSION_DIR);
+  return join(getBaseCwd(), STORAGE_DIR, SESSION_DIR);
 }
 
 function getSessionPath(sessionId: string): string {
@@ -90,7 +91,7 @@ function loadRelatedStores(options: { includeMemory?: boolean; includeTasks?: bo
 
   if (options.includeMemory) {
     try {
-      const memoryPath = join(getProjectCwd(), STORAGE_DIR, 'memory', 'store.json');
+      const memoryPath = join(getBaseCwd(), STORAGE_DIR, 'memory', 'store.json');
       if (existsSync(memoryPath)) {
         data.memory = JSON.parse(readFileSync(memoryPath, 'utf-8'));
       }
@@ -99,7 +100,7 @@ function loadRelatedStores(options: { includeMemory?: boolean; includeTasks?: bo
 
   if (options.includeTasks) {
     try {
-      const taskPath = join(getProjectCwd(), STORAGE_DIR, 'tasks', 'store.json');
+      const taskPath = join(getBaseCwd(), STORAGE_DIR, 'tasks', 'store.json');
       if (existsSync(taskPath)) {
         data.tasks = JSON.parse(readFileSync(taskPath, 'utf-8'));
       }
@@ -108,7 +109,7 @@ function loadRelatedStores(options: { includeMemory?: boolean; includeTasks?: bo
 
   if (options.includeAgents) {
     try {
-      const agentPath = join(getProjectCwd(), STORAGE_DIR, 'agents', 'store.json');
+      const agentPath = join(getBaseCwd(), STORAGE_DIR, 'agents', 'store.json');
       if (existsSync(agentPath)) {
         data.agents = JSON.parse(readFileSync(agentPath, 'utf-8'));
       }
@@ -231,7 +232,7 @@ export const sessionTools: MCPTool[] = [
       if (session) {
         // Restore data to respective stores (legacy JSON for backward compat)
         if (session.data?.memory) {
-          const memoryDir = join(getProjectCwd(), STORAGE_DIR, 'memory');
+          const memoryDir = join(getBaseCwd(), STORAGE_DIR, 'memory');
           if (!existsSync(memoryDir)) mkdirSync(memoryDir, { recursive: true });
           writeFileSync(join(memoryDir, 'store.json'), JSON.stringify(session.data.memory, null, 2), 'utf-8');
 
@@ -258,12 +259,12 @@ export const sessionTools: MCPTool[] = [
           }
         }
         if (session.data?.tasks) {
-          const taskDir = join(getProjectCwd(), STORAGE_DIR, 'tasks');
+          const taskDir = join(getBaseCwd(), STORAGE_DIR, 'tasks');
           if (!existsSync(taskDir)) mkdirSync(taskDir, { recursive: true });
           writeFileSync(join(taskDir, 'store.json'), JSON.stringify(session.data.tasks, null, 2), 'utf-8');
         }
         if (session.data?.agents) {
-          const agentDir = join(getProjectCwd(), STORAGE_DIR, 'agents');
+          const agentDir = join(getBaseCwd(), STORAGE_DIR, 'agents');
           if (!existsSync(agentDir)) mkdirSync(agentDir, { recursive: true });
           writeFileSync(join(agentDir, 'store.json'), JSON.stringify(session.data.agents, null, 2), 'utf-8');
         }

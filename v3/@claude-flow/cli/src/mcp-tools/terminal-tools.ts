@@ -4,11 +4,12 @@
  * Terminal session management with real command execution.
  */
 
-import { type MCPTool, getProjectCwd } from './types.js';
+import { type MCPTool } from './types.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { validateIdentifier, validatePath, validateText } from './validate-input.js';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
+import { getBaseCwd } from './cwd-helper.js';
 
 // Storage paths
 const STORAGE_DIR = '.claude-flow';
@@ -32,7 +33,7 @@ interface TerminalStore {
 }
 
 function getTerminalDir(): string {
-  return join(getProjectCwd(), STORAGE_DIR, TERMINAL_DIR);
+  return join(getBaseCwd(), STORAGE_DIR, TERMINAL_DIR);
 }
 
 function getTerminalPath(): string {
@@ -96,7 +97,7 @@ export const terminalTools: MCPTool[] = [
         status: 'active',
         createdAt: new Date().toISOString(),
         lastActivity: new Date().toISOString(),
-        workingDir: (input.workingDir as string) || getProjectCwd(),
+        workingDir: (input.workingDir as string) || getBaseCwd(),
         history: [],
         env: (input.env as Record<string, string>) || {},
       };
@@ -153,7 +154,7 @@ export const terminalTools: MCPTool[] = [
           status: 'active',
           createdAt: new Date().toISOString(),
           lastActivity: new Date().toISOString(),
-          workingDir: getProjectCwd(),
+          workingDir: getBaseCwd(),
           history: [],
           env: {},
         };
@@ -161,7 +162,7 @@ export const terminalTools: MCPTool[] = [
       }
 
       const timeout = (input.timeout as number) || 30_000;
-      const cwd = session.workingDir || getProjectCwd();
+      const cwd = session.workingDir || getBaseCwd();
       const startTime = Date.now();
       let output: string;
       let exitCode: number;
