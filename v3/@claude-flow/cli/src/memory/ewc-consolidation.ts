@@ -23,6 +23,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { getBaseCwd } from './cwd-helper.js';
 
 // ============================================================================
 // Types
@@ -147,7 +148,7 @@ const DEFAULT_EWC_CONFIG: EWCConfig = {
   maxPatterns: 1000,
   fisherDecayRate: 0.01,
   importanceThreshold: 0.3,
-  storagePath: path.join(process.cwd(), '.swarm', 'ewc-fisher.json'),
+  storagePath: path.join(getBaseCwd(), '.swarm', 'ewc-fisher.json'),
   onlineMode: true,
   dimensions: 384
 };

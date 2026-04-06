@@ -19,6 +19,7 @@
 
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { getBaseCwd } from './cwd-helper.js';
 
 // ===== Lazy singleton =====
 
@@ -32,12 +33,12 @@ let bridgeAvailable: boolean | null = null;
  * or the special ':memory:' path.
  */
 function getDbPath(customPath?: string): string {
-  const swarmDir = path.resolve(process.cwd(), '.swarm');
+  const swarmDir = path.resolve(getBaseCwd(), '.swarm');
   if (!customPath) return path.join(swarmDir, 'memory.db');
   if (customPath === ':memory:') return ':memory:';
   const resolved = path.resolve(customPath);
   // Ensure the path doesn't escape the working directory
-  const cwd = process.cwd();
+  const cwd = getBaseCwd();
   if (!resolved.startsWith(cwd)) {
     return path.join(swarmDir, 'memory.db'); // fallback to safe default
   }

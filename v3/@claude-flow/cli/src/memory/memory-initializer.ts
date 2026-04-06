@@ -11,6 +11,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { getBaseCwd } from './cwd-helper.js';
 
 // ADR-053: Lazy import of AgentDB v3 bridge
 let _bridge: typeof import('./memory-bridge.js') | null | undefined;
@@ -389,7 +390,7 @@ export async function getHNSWIndex(options?: {
     const { VectorDb } = ruvectorCore;
 
     // Persistent storage paths — resolve to absolute to survive CWD changes
-    const swarmDir = path.resolve(process.cwd(), '.swarm');
+    const swarmDir = path.resolve(getBaseCwd(), '.swarm');
     if (!fs.existsSync(swarmDir)) {
       fs.mkdirSync(swarmDir, { recursive: true });
     }
@@ -498,7 +499,7 @@ function saveHNSWMetadata(): void {
   if (!hnswIndex?.entries) return;
 
   try {
-    const swarmDir = path.join(process.cwd(), '.swarm');
+    const swarmDir = path.join(getBaseCwd(), '.swarm');
     const metadataPath = path.join(swarmDir, 'hnsw.metadata.json');
     const metadata = Array.from(hnswIndex.entries.entries());
     fs.writeFileSync(metadataPath, JSON.stringify(metadata));
@@ -1052,10 +1053,10 @@ export async function checkAndMigrateLegacy(options: {
 
   // Check for legacy locations
   const legacyPaths = [
-    path.join(process.cwd(), 'memory.db'),
-    path.join(process.cwd(), '.claude/memory.db'),
-    path.join(process.cwd(), 'data/memory.db'),
-    path.join(process.cwd(), '.claude-flow/memory.db')
+    path.join(getBaseCwd(), 'memory.db'),
+    path.join(getBaseCwd(), '.claude/memory.db'),
+    path.join(getBaseCwd(), 'data/memory.db'),
+    path.join(getBaseCwd(), '.claude-flow/memory.db')
   ];
 
   for (const legacyPath of legacyPaths) {
@@ -1166,7 +1167,7 @@ export async function initializeMemoryDatabase(options: {
     migrate = true
   } = options;
 
-  const swarmDir = path.join(process.cwd(), '.swarm');
+  const swarmDir = path.join(getBaseCwd(), '.swarm');
   const dbPath = customPath || path.join(swarmDir, 'memory.db');
   const dbDir = path.dirname(dbPath);
 
@@ -1374,7 +1375,7 @@ export async function checkMemoryInitialization(dbPath?: string): Promise<{
   };
   tables?: string[];
 }> {
-  const swarmDir = path.join(process.cwd(), '.swarm');
+  const swarmDir = path.join(getBaseCwd(), '.swarm');
   const path_ = dbPath || path.join(swarmDir, 'memory.db');
 
   if (!fs.existsSync(path_)) {
@@ -1434,7 +1435,7 @@ export async function applyTemporalDecay(dbPath?: string): Promise<{
   patternsDecayed: number;
   error?: string;
 }> {
-  const swarmDir = path.join(process.cwd(), '.swarm');
+  const swarmDir = path.join(getBaseCwd(), '.swarm');
   const path_ = dbPath || path.join(swarmDir, 'memory.db');
 
   try {
@@ -2058,7 +2059,7 @@ export async function storeEntry(options: {
     upsert = false
   } = options;
 
-  const swarmDir = path.resolve(process.cwd(), '.swarm');
+  const swarmDir = path.resolve(getBaseCwd(), '.swarm');
   const dbPath = customPath ? path.resolve(customPath) : path.join(swarmDir, 'memory.db');
 
   try {
@@ -2187,7 +2188,7 @@ export async function searchEntries(options: {
   } = options;
   const effectiveNamespace = namespace || 'all';
 
-  const swarmDir = path.resolve(process.cwd(), '.swarm');
+  const swarmDir = path.resolve(getBaseCwd(), '.swarm');
   const dbPath = customPath ? path.resolve(customPath) : path.join(swarmDir, 'memory.db');
   const startTime = Date.now();
 
@@ -2359,7 +2360,7 @@ export async function listEntries(options: {
     dbPath: customPath
   } = options;
 
-  const swarmDir = path.join(process.cwd(), '.swarm');
+  const swarmDir = path.join(getBaseCwd(), '.swarm');
   const dbPath = customPath || path.join(swarmDir, 'memory.db');
 
   try {
@@ -2487,7 +2488,7 @@ export async function getEntry(options: {
     dbPath: customPath
   } = options;
 
-  const swarmDir = path.join(process.cwd(), '.swarm');
+  const swarmDir = path.join(getBaseCwd(), '.swarm');
   const dbPath = customPath || path.join(swarmDir, 'memory.db');
 
   try {
@@ -2621,7 +2622,7 @@ export async function deleteEntry(options: {
     dbPath: customPath
   } = options;
 
-  const swarmDir = path.join(process.cwd(), '.swarm');
+  const swarmDir = path.join(getBaseCwd(), '.swarm');
   const dbPath = customPath || path.join(swarmDir, 'memory.db');
 
   try {

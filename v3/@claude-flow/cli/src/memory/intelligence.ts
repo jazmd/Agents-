@@ -14,6 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
+import { getBaseCwd } from './cwd-helper.js';
 
 // ============================================================================
 // Persistence Configuration
@@ -25,7 +26,7 @@ import { dirname, join } from 'node:path';
  * falling back to home directory
  */
 function getDataDir(): string {
-  const cwd = process.cwd();
+  const cwd = getBaseCwd();
   const localDir = join(cwd, '.claude-flow', 'neural');
   const homeDir = join(homedir(), '.claude-flow', 'neural');
 

@@ -16,6 +16,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
+import { getBaseCwd } from './cwd-helper.js';
 
 // ============================================================================
 // Types
@@ -830,7 +831,7 @@ export class SONAOptimizer {
    */
   private loadFromDisk(): boolean {
     try {
-      const fullPath = join(process.cwd(), this.persistencePath);
+      const fullPath = join(getBaseCwd(), this.persistencePath);
       if (!existsSync(fullPath)) {
         return false;
       }
@@ -872,7 +873,7 @@ export class SONAOptimizer {
    */
   private saveToDisk(): boolean {
     try {
-      const fullPath = join(process.cwd(), this.persistencePath);
+      const fullPath = join(getBaseCwd(), this.persistencePath);
       const dir = dirname(fullPath);
 
       // Ensure directory exists
