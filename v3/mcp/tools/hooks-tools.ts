@@ -18,6 +18,7 @@
 
 import { z } from 'zod';
 import { MCPTool, ToolContext } from '../types.js';
+import { getBaseCwd } from './cwd-helper.js';
 import {
   ReasoningBank,
   createReasoningBank,
@@ -802,7 +803,7 @@ async function handlePretrain(
 ): Promise<PretrainResult> {
   const reasoningBank = await getReasoningBank();
   const startTime = performance.now();
-  const repositoryPath = input.repositoryPath || process.cwd();
+  const repositoryPath = input.repositoryPath || getBaseCwd();
 
   // Pattern extraction and trajectory analysis
   const trajectories: Trajectory[] = [];

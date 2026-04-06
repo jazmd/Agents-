@@ -291,7 +291,7 @@ show_quickstart() {
         echo -e "  ${BOLD}ruflo doctor${NC}"
         echo ""
         echo -e "  ${DIM}# Add as MCP server to Claude Code${NC}"
-        echo -e "  ${BOLD}claude mcp add ruflo -- ruflo mcp start${NC}"
+        echo -e "  ${BOLD}claude mcp add ruflo -e CLAUDE_FLOW_CWD=\"\$HOME\" -- ruflo mcp start${NC}"
     else
         echo -e "  ${DIM}# Initialize project${NC}"
         echo -e "  ${BOLD}npx ruflo@latest init --wizard${NC}"

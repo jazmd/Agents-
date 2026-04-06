@@ -12,11 +12,12 @@
 import { z } from 'zod';
 import { MCPTool, ToolContext } from '../types.js';
 import { resolve, normalize } from 'path';
+import { getBaseCwd } from './cwd-helper.js';
 
 /**
  * Validate and sanitize config file path to prevent path traversal
  */
-function validateConfigPath(inputPath: string, cwd: string = process.cwd()): string {
+function validateConfigPath(inputPath: string, cwd: string = getBaseCwd()): string {
   // Normalize the path to resolve .. and .
   const normalizedPath = normalize(inputPath);
 
