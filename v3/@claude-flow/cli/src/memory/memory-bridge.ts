@@ -20,6 +20,459 @@
 import * as path from 'path';
 import * as crypto from 'crypto';
 
+// ===== PostgreSQL direct backend (fallback when AgentDB unavailable) =====
+
+/** pg.Pool type alias — resolved via dynamic import */
+type PgPool = {
+  query(text: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>;
+  end(): Promise<void>;
+};
+
+let pgPoolPromise: Promise<PgPool | null> | null = null;
+let pgPoolInstance: PgPool | null = null;
+
+/**
+ * Lazily create a PostgreSQL connection pool.
+ * Activates when RUVECTOR_POSTGRES_URL or PGHOST env vars are set.
+ * Pool capped at 3 connections.
+ */
+async function getPgPool(): Promise<PgPool | null> {
+  if (pgPoolInstance) return pgPoolInstance;
+
+  if (pgPoolPromise) return pgPoolPromise;
+
+  pgPoolPromise = (async () => {
+    try {
+      const connStr = process.env.RUVECTOR_POSTGRES_URL;
+      const pgHost = process.env.PGHOST;
+
+      if (!connStr && !pgHost) return null;
+
+      const pgModule = await import('pg');
+      const Pool = pgModule.default?.Pool ?? pgModule.Pool;
+      if (!Pool) return null;
+
+      const pool: PgPool = connStr
+        ? new Pool({ connectionString: connStr, max: 3 })
+        : new Pool({
+            host: pgHost,
+            port: parseInt(process.env.PGPORT || '5432', 10),
+            database: process.env.PGDATABASE || 'claude_flow',
+            user: process.env.PGUSER || 'postgres',
+            password: process.env.PGPASSWORD,
+            max: 3,
+          });
+
+      // Verify connectivity
+      await pool.query('SELECT 1');
+      pgPoolInstance = pool;
+      return pool;
+    } catch {
+      pgPoolPromise = null;
+      return null;
+    }
+  })();
+
+  return pgPoolPromise;
+}
+
+/**
+ * Store an entry directly in PostgreSQL (claude_flow.memory_entries).
+ * Supports optional pre-computed embedding via _embedding / _embeddingDimensions / _embeddingModel.
+ */
+async function pgStoreEntry(options: {
+  key: string;
+  value: string;
+  namespace?: string;
+  tags?: string[];
+  ttl?: number;
+  upsert?: boolean;
+  _embedding?: number[];
+  _embeddingDimensions?: number;
+  _embeddingModel?: string;
+}): Promise<{
+  success: boolean;
+  id: string;
+  embedding?: { dimensions: number; model: string };
+  error?: string;
+} | null> {
+  const pool = await getPgPool();
+  if (!pool) return null;
+
+  try {
+    const { key, value, namespace = 'default', tags = [], ttl } = options;
+    const id = generateId('entry');
+    const now = new Date();
+    const expiresAt = ttl ? new Date(Date.now() + ttl * 1000) : null;
+
+    // Build metadata with optional embedding info
+    const metadata: Record<string, unknown> = {};
+    let embeddingLiteral: string | null = null;
+
+    if (options._embedding && options._embedding.length > 0) {
+      embeddingLiteral = `[${options._embedding.join(',')}]`;
+      metadata.embedding_model = options._embeddingModel || 'unknown';
+      metadata.embedding_dimensions = options._embeddingDimensions || options._embedding.length;
+    }
+
+    const upsertClause = options.upsert
+      ? `ON CONFLICT (key, namespace, project_id) DO UPDATE SET
+           value = EXCLUDED.value,
+           tags = EXCLUDED.tags,
+           metadata = EXCLUDED.metadata,
+           embedding = EXCLUDED.embedding,
+           updated_at = EXCLUDED.updated_at,
+           expires_at = EXCLUDED.expires_at`
+      : '';
+
+    if (embeddingLiteral) {
+      await pool.query(
+        `INSERT INTO claude_flow.memory_entries
+           (id, key, namespace, value, tags, metadata, embedding, created_at, updated_at, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, '${embeddingLiteral}'::ruvector, $7, $8, $9)
+         ${upsertClause}`,
+        [id, key, namespace, value, JSON.stringify(tags), JSON.stringify(metadata), now, now, expiresAt],
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO claude_flow.memory_entries
+           (id, key, namespace, value, tags, metadata, created_at, updated_at, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ${upsertClause}`,
+        [id, key, namespace, value, JSON.stringify(tags), JSON.stringify(metadata), now, now, expiresAt],
+      );
+    }
+
+    return {
+      success: true,
+      id,
+      embedding: options._embedding
+        ? {
+            dimensions: options._embeddingDimensions || options._embedding.length,
+            model: options._embeddingModel || 'unknown',
+          }
+        : undefined,
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, id: '', error: message };
+  }
+}
+
+/**
+ * Retrieve a single entry from PostgreSQL by key + namespace.
+ */
+async function pgGetEntry(options: {
+  key: string;
+  namespace?: string;
+}): Promise<{
+  success: boolean;
+  found: boolean;
+  entry?: {
+    id: string;
+    key: string;
+    namespace: string;
+    content: string;
+    accessCount: number;
+    createdAt: string;
+    updatedAt: string;
+    hasEmbedding: boolean;
+    tags: string[];
+  };
+  error?: string;
+} | null> {
+  const pool = await getPgPool();
+  if (!pool) return null;
+
+  try {
+    const { key, namespace = 'default' } = options;
+
+    const { rows } = await pool.query(
+      `SELECT id, key, namespace, value, tags, metadata, embedding,
+              access_count, created_at, updated_at
+       FROM claude_flow.memory_entries
+       WHERE key = $1 AND namespace = $2
+       LIMIT 1`,
+      [key, namespace],
+    );
+
+    if (rows.length === 0) {
+      return { success: true, found: false };
+    }
+
+    const row = rows[0];
+
+    // Bump access count
+    try {
+      await pool.query(
+        `UPDATE claude_flow.memory_entries
+         SET access_count = COALESCE(access_count, 0) + 1, last_accessed_at = NOW()
+         WHERE id = $1`,
+        [row.id],
+      );
+    } catch {
+      // Non-fatal
+    }
+
+    let tags: string[] = [];
+    if (row.tags) {
+      try { tags = typeof row.tags === 'string' ? JSON.parse(row.tags as string) : (row.tags as string[]); } catch { /* invalid */ }
+    }
+
+    return {
+      success: true,
+      found: true,
+      entry: {
+        id: String(row.id),
+        key: String(row.key),
+        namespace: String(row.namespace),
+        content: String(row.value ?? ''),
+        accessCount: (Number(row.access_count) || 0) + 1,
+        createdAt: row.created_at ? new Date(row.created_at as string).toISOString() : new Date().toISOString(),
+        updatedAt: row.updated_at ? new Date(row.updated_at as string).toISOString() : new Date().toISOString(),
+        hasEmbedding: row.embedding != null,
+        tags,
+      },
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, found: false, error: message };
+  }
+}
+
+/**
+ * Keyword ILIKE search across key and value columns in PostgreSQL.
+ * Returns results ranked by simple relevance scoring.
+ */
+async function pgSearchEntries(options: {
+  query: string;
+  namespace?: string;
+  limit?: number;
+  threshold?: number;
+}): Promise<{
+  success: boolean;
+  results: {
+    id: string;
+    key: string;
+    content: string;
+    score: number;
+    namespace: string;
+    provenance?: string;
+  }[];
+  searchTime: number;
+  searchMethod?: string;
+  error?: string;
+} | null> {
+  const pool = await getPgPool();
+  if (!pool) return null;
+
+  try {
+    const { query: queryStr, namespace, limit = 10 } = options;
+    const startTime = Date.now();
+
+    const terms = queryStr.toLowerCase().split(/\s+/).filter(t => t.length > 1);
+    if (terms.length === 0) {
+      return { success: true, results: [], searchTime: 0, searchMethod: 'pg-keyword' };
+    }
+
+    // Build ILIKE conditions: each term must match key OR value
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    let paramIdx = 1;
+
+    if (namespace && namespace !== 'all') {
+      conditions.push(`namespace = $${paramIdx}`);
+      params.push(namespace);
+      paramIdx++;
+    }
+
+    const termConditions: string[] = [];
+    for (const term of terms) {
+      const pattern = `%${term}%`;
+      termConditions.push(`(LOWER(key) LIKE $${paramIdx} OR LOWER(value) LIKE $${paramIdx + 1})`);
+      params.push(pattern, pattern);
+      paramIdx += 2;
+    }
+    conditions.push(`(${termConditions.join(' OR ')})`);
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const { rows } = await pool.query(
+      `SELECT id, key, namespace, value, embedding
+       FROM claude_flow.memory_entries
+       ${whereClause}
+       ORDER BY updated_at DESC
+       LIMIT $${paramIdx}`,
+      [...params, limit * 3], // fetch extra for scoring
+    );
+
+    // Score results by number of matching terms
+    const results: {
+      id: string;
+      key: string;
+      content: string;
+      score: number;
+      namespace: string;
+      provenance?: string;
+    }[] = [];
+
+    for (const row of rows) {
+      const combined = `${String(row.key)} ${String(row.value)}`.toLowerCase();
+      let matchCount = 0;
+      for (const term of terms) {
+        if (combined.includes(term)) matchCount++;
+      }
+      const score = matchCount / terms.length;
+
+      results.push({
+        id: String(row.id).substring(0, 12),
+        key: String(row.key) || String(row.id).substring(0, 15),
+        content: (String(row.value) || '').substring(0, 60) + ((String(row.value) || '').length > 60 ? '...' : ''),
+        score,
+        namespace: String(row.namespace) || 'default',
+        provenance: `pg-keyword:${score.toFixed(3)}`,
+      });
+    }
+
+    results.sort((a, b) => b.score - a.score);
+
+    return {
+      success: true,
+      results: results.slice(0, limit),
+      searchTime: Date.now() - startTime,
+      searchMethod: 'pg-keyword',
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, results: [], searchTime: 0, error: message };
+  }
+}
+
+/**
+ * Delete an entry from PostgreSQL by key + namespace.
+ */
+async function pgDeleteEntry(options: {
+  key: string;
+  namespace?: string;
+}): Promise<{
+  success: boolean;
+  deleted: boolean;
+  key: string;
+  namespace: string;
+  remainingEntries: number;
+  error?: string;
+} | null> {
+  const pool = await getPgPool();
+  if (!pool) return null;
+
+  try {
+    const { key, namespace = 'default' } = options;
+
+    const result = await pool.query(
+      `DELETE FROM claude_flow.memory_entries
+       WHERE key = $1 AND namespace = $2`,
+      [key, namespace],
+    );
+
+    const deleted = ((result as any).rowCount ?? 0) > 0;
+
+    let remaining = 0;
+    try {
+      const { rows } = await pool.query(`SELECT COUNT(*)::int AS cnt FROM claude_flow.memory_entries`);
+      remaining = (rows[0]?.cnt as number) ?? 0;
+    } catch {
+      // Non-fatal
+    }
+
+    return { success: true, deleted, key, namespace, remainingEntries: remaining };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, deleted: false, key: options.key, namespace: options.namespace || 'default', remainingEntries: 0, error: message };
+  }
+}
+
+/**
+ * List entries from PostgreSQL with optional namespace filter.
+ */
+async function pgListEntries(options: {
+  namespace?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{
+  success: boolean;
+  entries: {
+    id: string;
+    key: string;
+    namespace: string;
+    size: number;
+    accessCount: number;
+    createdAt: string;
+    updatedAt: string;
+    hasEmbedding: boolean;
+  }[];
+  total: number;
+  error?: string;
+} | null> {
+  const pool = await getPgPool();
+  if (!pool) return null;
+
+  try {
+    const { namespace, limit = 20, offset = 0 } = options;
+
+    const nsCondition = namespace ? `WHERE namespace = $1` : '';
+    const nsParams: unknown[] = namespace ? [namespace] : [];
+
+    // Count
+    const { rows: countRows } = await pool.query(
+      `SELECT COUNT(*)::int AS cnt FROM claude_flow.memory_entries ${nsCondition}`,
+      nsParams,
+    );
+    const total = (countRows[0]?.cnt as number) ?? 0;
+
+    // List
+    const paramOffset = namespace ? 2 : 1;
+    const { rows } = await pool.query(
+      `SELECT id, key, namespace, value, embedding, access_count, created_at, updated_at
+       FROM claude_flow.memory_entries
+       ${nsCondition}
+       ORDER BY updated_at DESC
+       LIMIT $${paramOffset} OFFSET $${paramOffset + 1}`,
+      [...nsParams, limit, offset],
+    );
+
+    const entries = rows.map((row) => ({
+      id: String(row.id).substring(0, 20),
+      key: String(row.key) || String(row.id).substring(0, 15),
+      namespace: String(row.namespace) || 'default',
+      size: (String(row.value) || '').length,
+      accessCount: Number(row.access_count) || 0,
+      createdAt: row.created_at ? new Date(row.created_at as string).toISOString() : new Date().toISOString(),
+      updatedAt: row.updated_at ? new Date(row.updated_at as string).toISOString() : new Date().toISOString(),
+      hasEmbedding: row.embedding != null,
+    }));
+
+    return { success: true, entries, total };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { success: false, entries: [], total: 0, error: message };
+  }
+}
+
+/**
+ * Shut down the PostgreSQL connection pool.
+ */
+async function shutdownPgPool(): Promise<void> {
+  if (pgPoolInstance) {
+    try {
+      await pgPoolInstance.end();
+    } catch {
+      // Best-effort
+    }
+    pgPoolInstance = null;
+    pgPoolPromise = null;
+  }
+}
+
 // ===== Lazy singleton =====
 
 let registryPromise: Promise<any> | null = null;
@@ -79,10 +532,12 @@ async function getRegistry(dbPath?: string): Promise<any | null> {
         };
 
         try {
+          const cfgModel = process.env.ONNX_EMBEDDING_MODEL || process.env.EMBEDDING_MODEL || 'Xenova/all-MiniLM-L6-v2';
+          const cfgDims = parseInt(process.env.ONNX_EMBEDDING_DIMS || process.env.EMBEDDING_DIMS || '384', 10);
           await (registry as any).initialize({
             dbPath: dbPath || getDbPath(),
-            embeddingModel: 'Xenova/all-MiniLM-L6-v2',
-            dimension: 384,
+            embeddingModel: cfgModel,
+            dimension: cfgDims,
             controllers: {
               reasoningBank: true,
               learningBridge: false,
@@ -369,10 +824,10 @@ export async function bridgeStoreEntry(options: {
   error?: string;
 } | null> {
   const registry = await getRegistry(options.dbPath);
-  if (!registry) return null;
+  if (!registry) return pgStoreEntry(options);
 
   const ctx = getDb(registry);
-  if (!ctx) return null;
+  if (!ctx) return pgStoreEntry(options);
 
   try {
     const { key, value, namespace = 'default', tags = [], ttl } = options;
@@ -477,10 +932,10 @@ export async function bridgeSearchEntries(options: {
   error?: string;
 } | null> {
   const registry = await getRegistry(options.dbPath);
-  if (!registry) return null;
+  if (!registry) return pgSearchEntries(options);
 
   const ctx = getDb(registry);
-  if (!ctx) return null;
+  if (!ctx) return pgSearchEntries(options);
 
   try {
     const { query: queryStr, namespace, limit = 10, threshold = 0.3 } = options;
@@ -605,10 +1060,10 @@ export async function bridgeListEntries(options: {
   error?: string;
 } | null> {
   const registry = await getRegistry(options.dbPath);
-  if (!registry) return null;
+  if (!registry) return pgListEntries(options);
 
   const ctx = getDb(registry);
-  if (!ctx) return null;
+  if (!ctx) return pgListEntries(options);
 
   try {
     const { namespace, limit = 20, offset = 0 } = options;
@@ -687,10 +1142,10 @@ export async function bridgeGetEntry(options: {
   error?: string;
 } | null> {
   const registry = await getRegistry(options.dbPath);
-  if (!registry) return null;
+  if (!registry) return pgGetEntry(options);
 
   const ctx = getDb(registry);
-  if (!ctx) return null;
+  if (!ctx) return pgGetEntry(options);
 
   try {
     const { key, namespace = 'default' } = options;
@@ -789,10 +1244,10 @@ export async function bridgeDeleteEntry(options: {
   error?: string;
 } | null> {
   const registry = await getRegistry(options.dbPath);
-  if (!registry) return null;
+  if (!registry) return pgDeleteEntry(options);
 
   const ctx = getDb(registry);
-  if (!ctx) return null;
+  if (!ctx) return pgDeleteEntry(options);
 
   try {
     const { key, namespace = 'default' } = options;
@@ -1152,6 +1607,7 @@ export async function shutdownBridge(): Promise<void> {
     registryPromise = null;
     bridgeAvailable = null;
   }
+  await shutdownPgPool();
 }
 
 // ===== Phase 3: ReasoningBank pattern operations =====

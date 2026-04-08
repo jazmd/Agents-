@@ -8,6 +8,7 @@ import type {
   SwarmConfig,
   MemoryConfig,
   MCPServerConfig,
+  RuvectorConfig,
   OrchestratorConfig,
   SystemConfig,
 } from './schema.js';
@@ -127,6 +128,20 @@ export const defaultOrchestratorConfig: OrchestratorConfig = {
 };
 
 /**
+ * Default RuVector (PostgreSQL) configuration
+ */
+export const defaultRuvectorConfig: RuvectorConfig = {
+  host: 'localhost',
+  port: 5432,
+  database: 'ruvector',
+  schema: 'claude_flow',
+  dimensions: 1536,
+  indexType: 'hnsw',
+  autoCreate: true,
+  migrateOnInit: true,
+};
+
+/**
  * Default full system configuration
  */
 export const defaultSystemConfig: SystemConfig = {
@@ -134,6 +149,7 @@ export const defaultSystemConfig: SystemConfig = {
   memory: defaultMemoryConfig,
   mcp: defaultMCPServerConfig,
   swarm: defaultSwarmConfigCore,
+  ruvector: defaultRuvectorConfig,
 };
 
 /**

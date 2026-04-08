@@ -155,6 +155,23 @@ export const OrchestratorConfigSchema = z.object({
 });
 
 /**
+ * RuVector (PostgreSQL) configuration schema
+ */
+export const RuvectorConfigSchema = z.object({
+  host: z.string().default('localhost'),
+  port: z.number().int().positive().default(5432),
+  database: z.string().default('ruvector'),
+  user: z.string().optional(),
+  password: z.string().optional(),
+  schema: z.string().default('claude_flow'),
+  dimensions: z.number().int().positive().default(1536),
+  indexType: z.enum(['hnsw', 'flat', 'ivf']).default('hnsw'),
+  autoCreate: z.boolean().default(true),
+  migrateOnInit: z.boolean().default(true),
+  connectionUrl: z.string().optional(),
+});
+
+/**
  * Full system configuration schema
  * Uses passthrough() to accept unknown extra keys from user configs
  * without failing validation (e.g., simple key-value pairs, custom fields).
@@ -164,6 +181,7 @@ export const SystemConfigSchema = z.object({
   memory: MemoryConfigSchema.optional(),
   mcp: MCPServerConfigSchema.optional(),
   swarm: SwarmConfigSchema.optional(),
+  ruvector: RuvectorConfigSchema.optional(),
 }).passthrough();
 
 /**
@@ -175,6 +193,7 @@ export type TaskConfig = z.output<typeof TaskConfigSchema>;
 export type SwarmConfig = z.output<typeof SwarmConfigSchema>;
 export type MemoryConfig = z.output<typeof MemoryConfigSchema>;
 export type MCPServerConfig = z.output<typeof MCPServerConfigSchema>;
+export type RuvectorConfig = z.output<typeof RuvectorConfigSchema>;
 export type OrchestratorConfig = z.output<typeof OrchestratorConfigSchema>;
 export type SystemConfig = z.output<typeof SystemConfigSchema>;
 
@@ -186,5 +205,6 @@ export type TaskConfigInput = z.input<typeof TaskConfigSchema>;
 export type SwarmConfigInput = z.input<typeof SwarmConfigSchema>;
 export type MemoryConfigInput = z.input<typeof MemoryConfigSchema>;
 export type MCPServerConfigInput = z.input<typeof MCPServerConfigSchema>;
+export type RuvectorConfigInput = z.input<typeof RuvectorConfigSchema>;
 export type OrchestratorConfigInput = z.input<typeof OrchestratorConfigSchema>;
 export type SystemConfigInput = z.input<typeof SystemConfigSchema>;

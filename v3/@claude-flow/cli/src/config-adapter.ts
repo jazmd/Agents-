@@ -187,13 +187,17 @@ function denormalizeTopology(
  */
 function normalizeMemoryBackend(
   backend: string | undefined
-): 'memory' | 'sqlite' | 'agentdb' | 'hybrid' {
-  switch (backend) {
+): 'memory' | 'sqlite' | 'agentdb' | 'hybrid' | 'postgres' {
+  const resolved = backend ?? process.env.CLAUDE_FLOW_MEMORY_BACKEND;
+  switch (resolved) {
     case 'memory':
     case 'sqlite':
     case 'agentdb':
     case 'hybrid':
-      return backend;
+    case 'postgres':
+      return resolved;
+    case 'ruvector':
+      return 'postgres';
     case 'redis':
       return 'memory'; // Redis maps to memory for CLI purposes
     default:
@@ -205,7 +209,7 @@ function normalizeMemoryBackend(
  * Denormalize memory backend from V3Config to SystemConfig
  */
 function denormalizeMemoryBackend(
-  backend: 'memory' | 'sqlite' | 'agentdb' | 'hybrid'
-): 'memory' | 'sqlite' | 'agentdb' | 'hybrid' | 'redis' {
+  backend: 'memory' | 'sqlite' | 'agentdb' | 'hybrid' | 'postgres'
+): 'memory' | 'sqlite' | 'agentdb' | 'hybrid' | 'redis' | 'postgres' {
   return backend;
 }
