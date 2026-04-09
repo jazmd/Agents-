@@ -486,6 +486,13 @@ export class AutoMemoryBridge extends EventEmitter {
         .filter((cat) => sections[cat]);
     }
 
+    // If no topic files matched, leave existing MEMORY.md untouched.
+    // This prevents overwriting hand-curated or native-convention indexes
+    // when the topic mapping doesn't match the filesystem layout. (#1556)
+    if (Object.keys(sections).length === 0) {
+      return;
+    }
+
     // Prune sections before building the index to avoid O(n^2) rebuild loop
     const budget = this.config.maxIndexLines;
     pruneSectionsToFit(sections, budget, this.config.pruneStrategy);

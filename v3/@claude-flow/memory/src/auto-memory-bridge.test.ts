@@ -911,7 +911,12 @@ Already in DB
   });
 
   describe('curateIndex - edge cases', () => {
-    it('should handle empty topic files', async () => {
+    it('should not overwrite MEMORY.md when topic files have no summaries', async () => {
+      // Write an existing MEMORY.md
+      const indexPath = bridge.getIndexPath();
+      fsSync.writeFileSync(indexPath, '# Existing content\n', 'utf-8');
+
+      // Topic file exists but has no bullet-point summaries
       fsSync.writeFileSync(
         path.join(testDir, 'debugging.md'),
         '# Debugging\n\n',
@@ -919,9 +924,9 @@ Already in DB
       );
 
       await bridge.curateIndex();
-      const content = fsSync.readFileSync(bridge.getIndexPath(), 'utf-8');
-      // Should not include empty section
-      expect(content).not.toContain('Debugging');
+      // Empty sections should leave MEMORY.md untouched (#1556)
+      const content = fsSync.readFileSync(indexPath, 'utf-8');
+      expect(content).toBe('# Existing content\n');
     });
 
     it('should emit index:curated event', async () => {
@@ -938,6 +943,20 @@ Already in DB
       expect(handler).toHaveBeenCalledWith(expect.objectContaining({
         lines: expect.any(Number),
       }));
+    });
+
+    it('should not overwrite MEMORY.md when no topic files match (#1556)', async () => {
+      // Write a hand-curated MEMORY.md
+      const indexPath = bridge.getIndexPath();
+      const handCurated = '# My Project Memory\n\n- [User Role](user_role.md) — Senior engineer\n- [Feedback](feedback_testing.md) — Prefer TDD\n';
+      fsSync.writeFileSync(indexPath, handCurated, 'utf-8');
+
+      // No topic files exist (user uses native <type>_<topic>.md convention)
+      // curateIndex should leave MEMORY.md untouched
+      await bridge.curateIndex();
+
+      const content = fsSync.readFileSync(indexPath, 'utf-8');
+      expect(content).toBe(handCurated);
     });
 
     it('should handle pruneStrategy=lru same as fifo', async () => {
