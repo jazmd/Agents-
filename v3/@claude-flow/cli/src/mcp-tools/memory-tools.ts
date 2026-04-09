@@ -13,6 +13,7 @@
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
 import { join, resolve } from 'path';
 import type { MCPTool } from './types.js';
+import { getBaseCwd } from './cwd-helper.js';
 import { validateIdentifier } from './validate-input.js';
 
 // Legacy JSON store interface (for migration)
@@ -633,7 +634,7 @@ export const memoryTools: MCPTool[] = [
         }
       } else {
         // Current project only — find by CWD hash
-        const cwd = process.cwd();
+        const cwd = getBaseCwd();
         const projectHash = cwd.replace(/\//g, '-');
         const memDir = join(claudeProjectsDir, projectHash, 'memory');
         if (existsSync(memDir)) {
