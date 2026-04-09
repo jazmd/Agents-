@@ -63,8 +63,34 @@ function classifyPgError(err: unknown): string {
 /**
  * Schema definition for claude_flow.memory_entries.
  * Used by ensureSchema() when creating the table from scratch on a fresh DB.
+ *
+ * The embedding column dimension is resolved from (in order):
+ *   1. RUVECTOR_EMBEDDING_DIMS env var (explicit override)
+ *   2. EMBEDDING_DIMS env var (shared with embedding provider config)
+ *   3. 1536 (default — matches OpenAI text-embedding-3-small)
+ *
+ * Supported models and their dimensions:
+ *   - OpenAI text-embedding-3-small: 1536 (default)
+ *   - OpenAI text-embedding-3-large: 3072
+ *   - Xenova/all-MiniLM-L6-v2: 384
+ *   - Xenova/all-mpnet-base-v2: 768
+ *   - Xenova/bge-base-en-v1.5: 768
+ *
+ * If the live embedding dimension differs from what's configured here, the
+ * first INSERT will fail with a dimension mismatch error. Set the env var
+ * to match your embedding provider's output dimension before first use.
  */
-const SCHEMA_INIT_SQL = `
+function getConfiguredDimensions(): number {
+  const explicit = process.env.RUVECTOR_EMBEDDING_DIMS || process.env.EMBEDDING_DIMS;
+  if (explicit) {
+    const n = parseInt(explicit, 10);
+    if (Number.isFinite(n) && n > 0 && n <= 16384) return n;
+  }
+  return 1536;
+}
+
+function buildSchemaInitSql(dimensions: number): string {
+  return `
   CREATE EXTENSION IF NOT EXISTS pgcrypto;
   CREATE SCHEMA IF NOT EXISTS claude_flow;
 
@@ -76,7 +102,7 @@ const SCHEMA_INIT_SQL = `
     value            TEXT NOT NULL,
     tags             JSONB NOT NULL DEFAULT '[]'::jsonb,
     metadata         JSONB NOT NULL DEFAULT '{}'::jsonb,
-    embedding        ruvector(1536),
+    embedding        ruvector(${dimensions}),
     access_count     INTEGER NOT NULL DEFAULT 0,
     last_accessed_at TIMESTAMPTZ,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -90,6 +116,7 @@ const SCHEMA_INIT_SQL = `
   CREATE INDEX IF NOT EXISTS idx_memory_entries_key       ON claude_flow.memory_entries(key);
   CREATE INDEX IF NOT EXISTS idx_memory_entries_updated   ON claude_flow.memory_entries(updated_at DESC);
 `;
+}
 
 /** Columns the memory bridge depends on. */
 const REQUIRED_COLUMNS = [
@@ -114,7 +141,7 @@ const REQUIRED_COLUMNS = [
  * Runs once per pool. Skipped when RUVECTOR_MIGRATE_ON_INIT=false.
  *
  * Behavior:
- *   - Fresh DB (no table)        → CREATE TABLE from SCHEMA_INIT_SQL
+ *   - Fresh DB (no table)        → CREATE TABLE via buildSchemaInitSql(dims)
  *   - Fully migrated DB           → no-op (cheap column check)
  *   - Pre-existing partial schema → ALTER TABLE to add the missing columns
  *
@@ -140,14 +167,15 @@ async function ensureSchema(pool: PgPool): Promise<void> {
 
   // Fresh DB — create everything from scratch
   if (existing.length === 0) {
+    const dims = getConfiguredDimensions();
     await pool.query('BEGIN');
     try {
-      await pool.query(SCHEMA_INIT_SQL);
+      await pool.query(buildSchemaInitSql(dims));
       await pool.query('COMMIT');
     } catch (err) {
       await pool.query('ROLLBACK').catch(() => {});
       const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`Failed to create claude_flow.memory_entries schema: ${msg}`);
+      throw new Error(`Failed to create claude_flow.memory_entries schema (dims=${dims}): ${msg}`);
     }
     return;
   }

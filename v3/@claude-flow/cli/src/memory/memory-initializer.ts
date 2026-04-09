@@ -584,9 +584,10 @@ export async function searchHNSWIndex(
       // Cosine distance from @ruvector/core: 0 = identical, 2 = opposite
       const score = 1 - (result.score / 2);
 
+      const entryIdStr = String(entry.id);
       filtered.push({
-        id: entry.id.substring(0, 12),
-        key: entry.key || entry.id.substring(0, 15),
+        id: entryIdStr.substring(0, 12),
+        key: entry.key || entryIdStr.substring(0, 15),
         content: entry.content.substring(0, 60) + (entry.content.length > 60 ? '...' : ''),
         score,
         namespace: entry.namespace
@@ -2390,9 +2391,10 @@ export async function searchEntries(options: {
         }
 
         if (score >= threshold) {
+          const idStr = String(id);
           results.push({
-            id: id.substring(0, 12),
-            key: key || id.substring(0, 15),
+            id: idStr.substring(0, 12),
+            key: key || idStr.substring(0, 15),
             content: (content || '').substring(0, 60) + ((content || '').length > 60 ? '...' : ''),
             score,
             namespace: ns || 'default'
