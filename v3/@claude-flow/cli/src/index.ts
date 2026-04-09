@@ -61,6 +61,26 @@ export class CLI {
     for (const cmd of commands) {
       this.parser.registerCommand(cmd);
     }
+
+    // Register placeholders for lazy-loaded commands so the parser recognizes
+    // their names during argv parsing. Without this, running e.g.
+    // `ruflo daemon start` causes the parser's greedy first-match in Pass 1
+    // (parser.ts) to skip the unknown `daemon` and pick `start` as the
+    // command, silently routing to the top-level start command. Placeholders
+    // reserve the name; the real command is resolved on demand in run() via
+    // getCommandAsync().
+    for (const name of getCommandNames()) {
+      if (!this.parser.getCommand(name)) {
+        const placeholder: Command & { __lazyPlaceholder: true } = {
+          name,
+          description: '',
+          action: async () => ({ success: false }),
+          // Marker consumed by run() to force lazy resolution of the real command.
+          __lazyPlaceholder: true,
+        };
+        this.parser.registerCommand(placeholder);
+      }
+    }
   }
 
   /**
@@ -135,8 +155,16 @@ export class CLI {
       // Find and execute command
       const commandName = commandPath[0];
       // First check the parser's registry (for dynamically registered commands)
-      // Then fall back to the static registry, then try lazy loading
-      let command = this.parser.getCommand(commandName) || getCommand(commandName);
+      // Then fall back to the static registry, then try lazy loading.
+      // Skip __lazyPlaceholder stubs installed in the constructor — those only
+      // exist so Pass 1 of the parser recognizes the command name. The real
+      // command with its subcommands/options is loaded below via getCommandAsync.
+      const parserCmd = this.parser.getCommand(commandName);
+      const isLazyPlaceholder =
+        parserCmd !== undefined &&
+        (parserCmd as Command & { __lazyPlaceholder?: boolean }).__lazyPlaceholder === true;
+      let command: Command | undefined = isLazyPlaceholder ? undefined : parserCmd;
+      if (!command) command = getCommand(commandName);
 
       // If not found in sync registry, try lazy loading
       if (!command && hasCommand(commandName)) {
