@@ -1,5 +1,5 @@
 /**
- * Shared working-directory helper for MCP tools.
+ * Shared working-directory helper for MCP tools (compiled).
  *
  * When ruflo is installed globally and the MCP server is registered without
  * an explicit cwd, macOS (and some Linux setups) spawn the stdio process at
@@ -17,7 +17,7 @@
  * 1. CLAUDE_FLOW_CWD environment variable (set by the install script)
  * 2. process.cwd()
  */
-export function getBaseCwd(): string {
+export function getBaseCwd() {
   const cwd = process.env.CLAUDE_FLOW_CWD || process.cwd();
   if (cwd === '/') {
     console.warn('[ruflo] Warning: CWD resolved to root (/). Set CLAUDE_FLOW_CWD to your project directory.');

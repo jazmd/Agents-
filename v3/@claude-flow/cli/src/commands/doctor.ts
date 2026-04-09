@@ -408,6 +408,21 @@ async function installClaudeCode(): Promise<boolean> {
   }
 }
 
+// Check CWD resolution (global install root filesystem issue — #1532)
+async function checkCwd(): Promise<HealthCheck> {
+  const cwd = process.env.CLAUDE_FLOW_CWD || process.cwd();
+  if (cwd === '/') {
+    return {
+      name: 'Working Directory',
+      status: 'fail',
+      message: 'CWD resolved to root (/). File operations will fail on macOS global installs.',
+      fix: 'export CLAUDE_FLOW_CWD="$HOME" or set -e CLAUDE_FLOW_CWD in MCP server registration'
+    };
+  }
+  const source = process.env.CLAUDE_FLOW_CWD ? 'CLAUDE_FLOW_CWD' : 'process.cwd()';
+  return { name: 'Working Directory', status: 'pass', message: `${cwd} (via ${source})` };
+}
+
 // Check agentic-flow v3 integration (filesystem-based to avoid slow WASM/DB init)
 async function checkAgenticFlow(): Promise<HealthCheck> {
   try {
@@ -476,7 +491,7 @@ export const doctorCommand: Command = {
     {
       name: 'component',
       short: 'c',
-      description: 'Check specific component (version, node, npm, config, daemon, memory, api, git, mcp, claude, disk, typescript)',
+      description: 'Check specific component (version, node, npm, config, daemon, memory, api, git, mcp, claude, disk, typescript, cwd)',
       type: 'string'
     },
     {
@@ -518,6 +533,7 @@ export const doctorCommand: Command = {
       checkMemoryDatabase,
       checkApiKeys,
       checkMcpServers,
+      checkCwd,
       checkDiskSpace,
       checkBuildTools,
       checkAgenticFlow
@@ -537,7 +553,8 @@ export const doctorCommand: Command = {
       'mcp': checkMcpServers,
       'disk': checkDiskSpace,
       'typescript': checkBuildTools,
-      'agentic-flow': checkAgenticFlow
+      'agentic-flow': checkAgenticFlow,
+      'cwd': checkCwd
     };
 
     let checksToRun = allChecks;

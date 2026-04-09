@@ -18,5 +18,9 @@
  * 2. process.cwd()
  */
 export function getBaseCwd(): string {
-  return process.env.CLAUDE_FLOW_CWD || process.cwd();
+  const cwd = process.env.CLAUDE_FLOW_CWD || process.cwd();
+  if (cwd === '/') {
+    console.warn('[ruflo] Warning: CWD resolved to root (/). Set CLAUDE_FLOW_CWD to your project directory.');
+  }
+  return cwd;
 }

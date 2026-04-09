@@ -17,6 +17,7 @@
  */
 import { z } from 'zod';
 import { createReasoningBank, } from '../../@claude-flow/neural/src/index.js';
+import { getBaseCwd } from './cwd-helper.js';
 // ============================================================================
 // Singleton ReasoningBank Instance
 // ============================================================================
@@ -493,7 +494,7 @@ async function handleExplain(input, context) {
 async function handlePretrain(input, context) {
     const reasoningBank = await getReasoningBank();
     const startTime = performance.now();
-    const repositoryPath = input.repositoryPath || process.cwd();
+    const repositoryPath = input.repositoryPath || getBaseCwd();
     // Simulate analysis with real pattern extraction
     const trajectories = [];
     // Create sample trajectories for different domains

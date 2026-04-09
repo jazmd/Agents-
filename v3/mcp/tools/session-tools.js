@@ -12,6 +12,7 @@ import { z } from 'zod';
 import { randomBytes, createHash } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { getBaseCwd } from './cwd-helper.js';
 // Secure ID generation helper
 function generateSecureSessionId() {
     const timestamp = Date.now().toString(36);
@@ -108,7 +109,7 @@ function getSessionPath(sessionId) {
     if (!validateSessionId(sessionId)) {
         throw new Error('Invalid session ID: must contain only alphanumeric characters, hyphens, and underscores');
     }
-    const sessionDir = path.join(process.cwd(), DEFAULT_SESSION_DIR);
+    const sessionDir = path.join(getBaseCwd(), DEFAULT_SESSION_DIR);
     const sessionPath = path.join(sessionDir, `${sessionId}.json`);
     // Ensure the resolved path is within the session directory (defense in depth)
     const resolvedPath = path.resolve(sessionPath);
@@ -122,7 +123,7 @@ function getSessionPath(sessionId) {
  * Ensure session directory exists
  */
 async function ensureSessionDir() {
-    const dir = path.join(process.cwd(), DEFAULT_SESSION_DIR);
+    const dir = path.join(getBaseCwd(), DEFAULT_SESSION_DIR);
     await fs.mkdir(dir, { recursive: true });
 }
 // ============================================================================
@@ -435,7 +436,7 @@ async function handleListSessions(input, context) {
     }
     // Try to load sessions from file system
     try {
-        const dir = path.join(process.cwd(), DEFAULT_SESSION_DIR);
+        const dir = path.join(getBaseCwd(), DEFAULT_SESSION_DIR);
         const files = await fs.readdir(dir);
         for (const file of files) {
             if (!file.endsWith('.json'))
