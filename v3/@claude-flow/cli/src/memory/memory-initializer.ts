@@ -584,9 +584,10 @@ export async function searchHNSWIndex(
       // Cosine distance from @ruvector/core: 0 = identical, 2 = opposite
       const score = 1 - (result.score / 2);
 
+      const entryIdStr = String(entry.id);
       filtered.push({
-        id: entry.id.substring(0, 12),
-        key: entry.key || entry.id.substring(0, 15),
+        id: entryIdStr.substring(0, 12),
+        key: entry.key || entryIdStr.substring(0, 15),
         content: entry.content.substring(0, 60) + (entry.content.length > 60 ? '...' : ''),
         score,
         namespace: entry.namespace
@@ -1491,6 +1492,47 @@ interface EmbeddingModel {
 
 let embeddingModelState: EmbeddingModel | null = null;
 
+/** Cached OpenAI embedding service from @claude-flow/embeddings */
+let _openaiService: { embed(text: string): Promise<{ embedding: Float32Array | number[]; latencyMs: number }> } | null = null;
+
+/** Well-known ONNX model dimension map for auto-detection */
+const KNOWN_DIMS: Record<string, number> = {
+  'Xenova/all-MiniLM-L6-v2': 384,
+  'Xenova/all-MiniLM-L12-v2': 384,
+  'Xenova/all-mpnet-base-v2': 768,
+  'Xenova/bge-small-en-v1.5': 384,
+  'Xenova/bge-base-en-v1.5': 768,
+  'Xenova/gte-small': 384,
+  'Xenova/gte-base': 768,
+  'Xenova/e5-small-v2': 384,
+  'Xenova/e5-base-v2': 768,
+};
+
+/**
+ * Load optional file-based embedding config from .claude-flow/embeddings.json
+ * Returns null if not found or invalid.
+ */
+function loadEmbeddingsConfig(): {
+  provider?: string;
+  model?: string;
+  dimensions?: number;
+  apiKey?: string;
+} | null {
+  try {
+    const configPath = path.join(process.cwd(), '.claude-flow', 'embeddings.json');
+    if (fs.existsSync(configPath)) {
+      const raw = fs.readFileSync(configPath, 'utf-8');
+      return JSON.parse(raw) as {
+        provider?: string;
+        model?: string;
+        dimensions?: number;
+        apiKey?: string;
+      };
+    }
+  } catch { /* ignore invalid config */ }
+  return null;
+}
+
 /**
  * Lazy load ONNX embedding model
  * Only loads when first embedding is requested
@@ -1534,30 +1576,72 @@ export async function loadEmbeddingModel(options?: {
     }
   }
 
+  // Load optional file-based config (.claude-flow/embeddings.json)
+  const fileConfig = loadEmbeddingsConfig();
+
+  // Determine OpenAI API key: env var > file config
+  const openaiApiKey = process.env.OPENAI_API_KEY || fileConfig?.apiKey;
+
+  // OpenAI embeddings (when OPENAI_API_KEY is set or configured in embeddings.json)
+  if (openaiApiKey && (!fileConfig?.provider || fileConfig.provider === 'openai')) {
+    try {
+      // Resolve @claude-flow/embeddings sibling package
+      const embeddingsPath = '@claude-flow/embeddings';
+      const { createEmbeddingService } = await import(embeddingsPath);
+      const model = process.env.EMBEDDING_MODEL || fileConfig?.model || 'text-embedding-3-small';
+      const dims = parseInt(process.env.EMBEDDING_DIMS || String(fileConfig?.dimensions || 1536), 10);
+      const service = createEmbeddingService({
+        provider: 'openai' as const,
+        apiKey: openaiApiKey,
+        model,
+        dimensions: dims,
+      });
+      // Probe to verify connectivity
+      const probe = await service.embed('test');
+      const probeVec = probe?.embedding;
+      const probeLen = probeVec ? (probeVec.length ?? 0) : 0;
+      if (probeVec && probeLen === dims) {
+        // Cache the service instance
+        embeddingModelState = {
+          loaded: true,
+          model: '__openai__' as unknown,
+          tokenizer: null,
+          dimensions: dims,
+        };
+        // Store service ref for generateEmbedding()
+        _openaiService = service;
+        return { success: true, dimensions: dims, modelName: `openai/${model}`, loadTime: Date.now() - startTime };
+      }
+    } catch { /* fall through to ONNX */ }
+  }
+
   try {
     // Try to import @xenova/transformers for ONNX embeddings
     const transformers = await import('@xenova/transformers').catch(() => null);
 
     if (transformers) {
+      const onnxModel = process.env.ONNX_EMBEDDING_MODEL || 'Xenova/all-MiniLM-L6-v2';
+      const onnxDims = KNOWN_DIMS[onnxModel] ?? parseInt(process.env.ONNX_EMBEDDING_DIMS || '384', 10);
+
       if (verbose) {
-        console.log('Loading ONNX embedding model (all-MiniLM-L6-v2)...');
+        console.log(`Loading ONNX embedding model (${onnxModel})...`);
       }
 
-      // Use small, fast model for local embeddings
+      // Use configured or default ONNX model
       const { pipeline } = transformers;
-      const embedder = await pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+      const embedder = await pipeline('feature-extraction', onnxModel);
 
       embeddingModelState = {
         loaded: true,
         model: embedder,
         tokenizer: null,
-        dimensions: 384 // MiniLM-L6 produces 384-dim vectors
+        dimensions: onnxDims
       };
 
       return {
         success: true,
-        dimensions: 384,
-        modelName: 'Xenova/all-MiniLM-L6-v2',
+        dimensions: onnxDims,
+        modelName: onnxModel,
         loadTime: Date.now() - startTime
       };
     }
@@ -1692,6 +1776,24 @@ export async function generateEmbedding(text: string): Promise<{
   }
 
   const state = embeddingModelState!;
+
+  // Use OpenAI service if loaded
+  if (state.model === ('__openai__' as unknown) && _openaiService) {
+    try {
+      const result = await _openaiService.embed(text);
+      const vec = result.embedding;
+      const embedding = vec instanceof Float32Array ? Array.from(vec) : vec as number[];
+      if (embedding && embedding.length > 0) {
+        return {
+          embedding,
+          dimensions: embedding.length,
+          model: 'openai'
+        };
+      }
+    } catch {
+      // Fall through to ONNX/hash fallback
+    }
+  }
 
   // Use ONNX model if available
   if (state.model && typeof (state.model as any) === 'function') {
@@ -2033,12 +2135,30 @@ export async function storeEntry(options: {
   ttl?: number;
   dbPath?: string;
   upsert?: boolean;
+  /** Pre-computed embedding vector (skip generation if provided) */
+  _embedding?: number[];
+  /** Dimensions of the pre-computed embedding */
+  _embeddingDimensions?: number;
+  /** Model name that produced the pre-computed embedding */
+  _embeddingModel?: string;
 }): Promise<{
   success: boolean;
   id: string;
   embedding?: { dimensions: number; model: string };
   error?: string;
 }> {
+  // Pre-generate embedding before bridge call so ALL backends receive it
+  if (!options._embedding && options.generateEmbeddingFlag !== false && options.value?.length > 0) {
+    try {
+      const embResult = await generateEmbedding(options.value);
+      if (embResult?.embedding) {
+        options._embedding = embResult.embedding;
+        options._embeddingDimensions = embResult.dimensions;
+        options._embeddingModel = embResult.model;
+      }
+    } catch { /* proceed without embedding */ }
+  }
+
   // ADR-053: Try AgentDB v3 bridge first
   const bridge = await getBridge();
   if (bridge) {
@@ -2078,12 +2198,17 @@ export async function storeEntry(options: {
     const id = `entry_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     const now = Date.now();
 
-    // Generate embedding if requested
+    // Use pre-computed embedding or generate if requested
     let embeddingJson: string | null = null;
     let embeddingDimensions: number | null = null;
     let embeddingModel: string | null = null;
 
-    if (generateEmbeddingFlag && value.length > 0) {
+    if (options._embedding) {
+      // Reuse embedding that was pre-generated before bridge call
+      embeddingJson = JSON.stringify(options._embedding);
+      embeddingDimensions = options._embeddingDimensions ?? options._embedding.length;
+      embeddingModel = options._embeddingModel ?? 'unknown';
+    } else if (generateEmbeddingFlag && value.length > 0) {
       const embResult = await generateEmbedding(value);
       embeddingJson = JSON.stringify(embResult.embedding);
       embeddingDimensions = embResult.dimensions;
@@ -2266,9 +2391,10 @@ export async function searchEntries(options: {
         }
 
         if (score >= threshold) {
+          const idStr = String(id);
           results.push({
-            id: id.substring(0, 12),
-            key: key || id.substring(0, 15),
+            id: idStr.substring(0, 12),
+            key: key || idStr.substring(0, 15),
             content: (content || '').substring(0, 60) + ((content || '').length > 60 ? '...' : ''),
             score,
             namespace: ns || 'default'

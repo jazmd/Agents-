@@ -185,7 +185,7 @@ export interface RuntimeConfig {
   /** Maximum agents */
   maxAgents: number;
   /** Memory backend */
-  memoryBackend: 'memory' | 'sqlite' | 'agentdb' | 'hybrid';
+  memoryBackend: 'memory' | 'sqlite' | 'agentdb' | 'hybrid' | 'postgres';
   /** Enable HNSW indexing */
   enableHNSW: boolean;
   /** Enable neural learning */

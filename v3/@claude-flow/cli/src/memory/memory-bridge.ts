@@ -20,6 +20,811 @@
 import * as path from 'path';
 import * as crypto from 'crypto';
 
+// ===== PostgreSQL direct backend (fallback when AgentDB unavailable) =====
+
+/** pg.Pool type alias — resolved via dynamic import */
+type PgPool = {
+  query(text: string, params?: unknown[]): Promise<{ rows: Record<string, unknown>[] }>;
+  end(): Promise<void>;
+  on(event: 'error', listener: (err: Error) => void): void;
+};
+
+let pgPoolPromise: Promise<PgPool | null> | null = null;
+let pgPoolInstance: PgPool | null = null;
+
+/**
+ * Tracks whether the pool init failure has already been logged in this
+ * process. Used by getPgPool() to suppress repeat warnings on every call,
+ * since the failure is sticky for the life of the process. Reset by
+ * shutdownPgPool() so a fresh pool attempt re-logs.
+ */
+let pgPoolErrorLogged = false;
+
+/**
+ * Convert an arbitrary thrown value into a short, human-readable reason
+ * suitable for a one-line warning. Recognizes common pg error codes so
+ * users get actionable hints (auth failed, schema missing, host unreachable)
+ * without needing to parse a stack trace.
+ */
+function classifyPgError(err: unknown): string {
+  const e = err as { code?: string; message?: string } | null | undefined;
+  if (!e) return 'unknown error';
+  if (e.code === 'ECONNREFUSED') return 'ECONNREFUSED (Postgres not running?)';
+  if (e.code === '28P01') return 'auth failed (bad password)';
+  if (e.code === '28000') return 'auth failed (invalid auth)';
+  if (e.code === '3D000') return 'database does not exist';
+  if (e.code === '42P01') return 'schema/table missing (run migrations?)';
+  if (e.code === '42703') return 'column does not exist (schema mismatch)';
+  if (e.code === 'ENOTFOUND') return 'host not found (check PGHOST)';
+  if (e.code === 'ETIMEDOUT') return 'connection timeout';
+  return e.code ? `pg error ${e.code}: ${e.message}` : (e.message || 'unknown');
+}
+
+/**
+ * Schema definition for claude_flow.memory_entries.
+ * Used by ensureSchema() when creating the table from scratch on a fresh DB.
+ *
+ * The embedding column dimension is resolved from (in order):
+ *   1. RUVECTOR_EMBEDDING_DIMS env var (explicit override)
+ *   2. EMBEDDING_DIMS env var (shared with embedding provider config)
+ *   3. 1536 (default — matches OpenAI text-embedding-3-small)
+ *
+ * Supported models and their dimensions:
+ *   - OpenAI text-embedding-3-small: 1536 (default)
+ *   - OpenAI text-embedding-3-large: 3072
+ *   - Xenova/all-MiniLM-L6-v2: 384
+ *   - Xenova/all-mpnet-base-v2: 768
+ *   - Xenova/bge-base-en-v1.5: 768
+ *
+ * If the live embedding dimension differs from what's configured here, the
+ * first INSERT will fail with a dimension mismatch error. Set the env var
+ * to match your embedding provider's output dimension before first use.
+ */
+function getConfiguredDimensions(): number {
+  const explicit = process.env.RUVECTOR_EMBEDDING_DIMS || process.env.EMBEDDING_DIMS;
+  if (explicit) {
+    const n = parseInt(explicit, 10);
+    if (Number.isFinite(n) && n > 0 && n <= 16384) return n;
+  }
+  return 1536;
+}
+
+function buildSchemaInitSql(dimensions: number): string {
+  return `
+  CREATE EXTENSION IF NOT EXISTS pgcrypto;
+  CREATE SCHEMA IF NOT EXISTS claude_flow;
+
+  CREATE TABLE IF NOT EXISTS claude_flow.memory_entries (
+    id               TEXT PRIMARY KEY,
+    key              VARCHAR(512) NOT NULL,
+    namespace        VARCHAR(128) NOT NULL DEFAULT 'default',
+    project_id       VARCHAR(256) NOT NULL DEFAULT '__default__',
+    value            TEXT NOT NULL,
+    tags             JSONB NOT NULL DEFAULT '[]'::jsonb,
+    metadata         JSONB NOT NULL DEFAULT '{}'::jsonb,
+    embedding        ruvector(${dimensions}),
+    access_count     INTEGER NOT NULL DEFAULT 0,
+    last_accessed_at TIMESTAMPTZ,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at       TIMESTAMPTZ,
+    CONSTRAINT memory_entries_unique_key UNIQUE (key, namespace, project_id)
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_memory_entries_namespace ON claude_flow.memory_entries(namespace);
+  CREATE INDEX IF NOT EXISTS idx_memory_entries_project   ON claude_flow.memory_entries(project_id);
+  CREATE INDEX IF NOT EXISTS idx_memory_entries_key       ON claude_flow.memory_entries(key);
+  CREATE INDEX IF NOT EXISTS idx_memory_entries_updated   ON claude_flow.memory_entries(updated_at DESC);
+`;
+}
+
+/** Columns the memory bridge depends on. */
+const REQUIRED_COLUMNS = [
+  'id',
+  'key',
+  'namespace',
+  'project_id',
+  'value',
+  'tags',
+  'metadata',
+  'embedding',
+  'access_count',
+  'last_accessed_at',
+  'created_at',
+  'updated_at',
+  'expires_at',
+] as const;
+
+/**
+ * Idempotent schema migration for claude_flow.memory_entries.
+ *
+ * Runs once per pool. Skipped when RUVECTOR_MIGRATE_ON_INIT=false.
+ *
+ * Behavior:
+ *   - Fresh DB (no table)        → CREATE TABLE via buildSchemaInitSql(dims)
+ *   - Fully migrated DB           → no-op (cheap column check)
+ *   - Pre-existing partial schema → ALTER TABLE to add the missing columns
+ *
+ * The pre-existing schema (uuid id, key+namespace unique constraint, ttl column)
+ * also needs its primary key and unique constraint upgraded so the bridge's
+ * INSERT (TEXT id) and ON CONFLICT (key, namespace, project_id) work.
+ *
+ * All schema changes are wrapped in a transaction so a failure leaves the
+ * table untouched. Errors are rethrown with a descriptive message so the
+ * connection setup fails loudly rather than producing silent runtime errors
+ * later when the bridge tries to write to a half-migrated table.
+ */
+async function ensureSchema(pool: PgPool): Promise<void> {
+  if (process.env.RUVECTOR_MIGRATE_ON_INIT === 'false') return;
+
+  // Discover existing columns (cheap)
+  const colCheck = await pool.query(
+    `SELECT array_agg(column_name::text) AS cols
+       FROM information_schema.columns
+      WHERE table_schema = 'claude_flow' AND table_name = 'memory_entries'`,
+  );
+  const existing = (colCheck.rows[0]?.cols as string[] | null) ?? [];
+
+  // Fresh DB — create everything from scratch
+  if (existing.length === 0) {
+    const dims = getConfiguredDimensions();
+    await pool.query('BEGIN');
+    try {
+      await pool.query(buildSchemaInitSql(dims));
+      await pool.query('COMMIT');
+    } catch (err) {
+      await pool.query('ROLLBACK').catch(() => {});
+      const msg = err instanceof Error ? err.message : String(err);
+      throw new Error(`Failed to create claude_flow.memory_entries schema (dims=${dims}): ${msg}`);
+    }
+    return;
+  }
+
+  // Already fully migrated — also confirm the unique constraint matches
+  const missing = REQUIRED_COLUMNS.filter((c) => !existing.includes(c));
+  if (missing.length === 0) {
+    // Verify the unique key exists with project_id; if not, upgrade it
+    const constraintCheck = await pool.query(
+      `SELECT 1
+         FROM pg_constraint
+        WHERE conname = 'memory_entries_unique_key'
+          AND conrelid = 'claude_flow.memory_entries'::regclass
+        LIMIT 1`,
+    );
+    if (constraintCheck.rows.length > 0) return;
+  }
+
+  // Existing partial schema — ALTER to add missing columns + upgrade constraints
+  await pool.query('BEGIN');
+  try {
+    // 1. Add missing columns (NOT NULL DEFAULT so backfill is automatic)
+    if (!existing.includes('project_id')) {
+      await pool.query(
+        `ALTER TABLE claude_flow.memory_entries
+           ADD COLUMN project_id VARCHAR(256) NOT NULL DEFAULT '__default__'`,
+      );
+    }
+    if (!existing.includes('tags')) {
+      await pool.query(
+        `ALTER TABLE claude_flow.memory_entries
+           ADD COLUMN tags JSONB NOT NULL DEFAULT '[]'::jsonb`,
+      );
+    }
+    if (!existing.includes('access_count')) {
+      await pool.query(
+        `ALTER TABLE claude_flow.memory_entries
+           ADD COLUMN access_count INTEGER NOT NULL DEFAULT 0`,
+      );
+    }
+    if (!existing.includes('last_accessed_at')) {
+      await pool.query(
+        `ALTER TABLE claude_flow.memory_entries
+           ADD COLUMN last_accessed_at TIMESTAMPTZ`,
+      );
+    }
+    if (!existing.includes('expires_at')) {
+      // Backfill from legacy `ttl` column when present
+      const hasTtl = existing.includes('ttl');
+      await pool.query(
+        `ALTER TABLE claude_flow.memory_entries
+           ADD COLUMN expires_at TIMESTAMPTZ`,
+      );
+      if (hasTtl) {
+        await pool.query(
+          `UPDATE claude_flow.memory_entries
+              SET expires_at = ttl
+            WHERE expires_at IS NULL AND ttl IS NOT NULL`,
+        );
+      }
+    }
+
+    // 2. Upgrade `id` from uuid → text so the bridge's TEXT ids fit.
+    // Preserve a working default (`gen_random_uuid()::text`) so any caller that
+    // omits the id (legacy compiled code paths) still works.
+    const idTypeRow = await pool.query(
+      `SELECT data_type
+         FROM information_schema.columns
+        WHERE table_schema = 'claude_flow'
+          AND table_name = 'memory_entries'
+          AND column_name = 'id'`,
+    );
+    const idType = idTypeRow.rows[0]?.data_type;
+    if (idType && idType !== 'text') {
+      await pool.query(
+        `ALTER TABLE claude_flow.memory_entries ALTER COLUMN id DROP DEFAULT`,
+      );
+      await pool.query(
+        `ALTER TABLE claude_flow.memory_entries ALTER COLUMN id TYPE TEXT USING id::text`,
+      );
+      await pool.query(
+        `ALTER TABLE claude_flow.memory_entries ALTER COLUMN id SET DEFAULT gen_random_uuid()::text`,
+      );
+    }
+
+    // 3. Add the new unique constraint (key, namespace, project_id) used by
+    // the bridge's INSERT ... ON CONFLICT. Any legacy (key, namespace) unique
+    // constraint is left in place so older compiled code paths that still use
+    // ON CONFLICT (key, namespace) keep working during the rollout.
+    const constraintRows = await pool.query(
+      `SELECT conname
+         FROM pg_constraint
+        WHERE conrelid = 'claude_flow.memory_entries'::regclass
+          AND contype = 'u'`,
+    );
+    const constraintNames = (constraintRows.rows as Array<{ conname: string }>).map(
+      (r) => r.conname,
+    );
+    const hasNewUnique = constraintNames.includes('memory_entries_unique_key');
+    if (!hasNewUnique) {
+      await pool.query(
+        `ALTER TABLE claude_flow.memory_entries
+           ADD CONSTRAINT memory_entries_unique_key UNIQUE (key, namespace, project_id)`,
+      );
+    }
+
+    // 4. Make sure indexes used by recall/list exist
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_memory_entries_project ON claude_flow.memory_entries(project_id)`,
+    );
+    await pool.query(
+      `CREATE INDEX IF NOT EXISTS idx_memory_entries_updated ON claude_flow.memory_entries(updated_at DESC)`,
+    );
+
+    await pool.query('COMMIT');
+  } catch (err) {
+    await pool.query('ROLLBACK').catch(() => {});
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`Failed to migrate claude_flow.memory_entries schema: ${msg}`);
+  }
+}
+
+/**
+ * Lazily create a PostgreSQL connection pool.
+ * Activates when RUVECTOR_POSTGRES_URL or PGHOST env vars are set.
+ * Pool capped at 3 connections.
+ */
+async function getPgPool(): Promise<PgPool | null> {
+  if (pgPoolInstance) return pgPoolInstance;
+
+  if (pgPoolPromise) return pgPoolPromise;
+
+  pgPoolPromise = (async () => {
+    try {
+      const connStr = process.env.RUVECTOR_POSTGRES_URL;
+      const pgHost = process.env.PGHOST;
+
+      if (!connStr && !pgHost) return null;
+
+      const pgModule = await import('pg');
+      const Pool = pgModule.default?.Pool ?? pgModule.Pool;
+      if (!Pool) return null;
+
+      const baseConfig = {
+        max: 3,
+        min: 0,
+        connectionTimeoutMillis: 5_000,
+        idleTimeoutMillis: 30_000,
+        statement_timeout: 30_000,
+        query_timeout: 30_000,
+        application_name: 'ruflo-memory-bridge',
+        allowExitOnIdle: true,
+        keepAlive: true,
+        keepAliveInitialDelayMillis: 10_000,
+      };
+
+      const pool: PgPool = connStr
+        ? new Pool({ connectionString: connStr, ...baseConfig })
+        : new Pool({
+            host: pgHost,
+            port: parseInt(process.env.PGPORT || '5432', 10),
+            database: process.env.PGDATABASE || 'claude_flow',
+            user: process.env.PGUSER || 'postgres',
+            password: process.env.PGPASSWORD,
+            ...baseConfig,
+          });
+
+      // CRITICAL: prevent idle client errors from crashing the process
+      pool.on('error', (err) => {
+        if (process.env.RUFLO_DEBUG) {
+          console.error('[memory-bridge] pg pool client error:', err.message);
+        }
+      });
+
+      // Verify connectivity
+      await pool.query('SELECT 1');
+
+      // Ensure schema is migrated before any bridge operation runs
+      await ensureSchema(pool);
+
+      pgPoolInstance = pool;
+      return pool;
+    } catch (err) {
+      if (!pgPoolErrorLogged) {
+        const reason = classifyPgError(err);
+        console.warn(`[memory-bridge] Postgres pool init failed: ${reason}. Falling back to AgentDB. Set RUFLO_DEBUG=1 for full trace.`);
+        if (process.env.RUFLO_DEBUG) console.warn(err);
+        pgPoolErrorLogged = true;
+      }
+      pgPoolPromise = null;
+      return null;
+    }
+  })();
+
+  return pgPoolPromise;
+}
+
+/**
+ * Store an entry directly in PostgreSQL (claude_flow.memory_entries).
+ * Supports optional pre-computed embedding via _embedding / _embeddingDimensions / _embeddingModel.
+ */
+async function pgStoreEntry(options: {
+  key: string;
+  value: string;
+  namespace?: string;
+  tags?: string[];
+  ttl?: number;
+  upsert?: boolean;
+  _embedding?: number[];
+  _embeddingDimensions?: number;
+  _embeddingModel?: string;
+}): Promise<{
+  success: boolean;
+  id: string;
+  embedding?: { dimensions: number; model: string };
+  error?: string;
+} | null> {
+  const pool = await getPgPool();
+  if (!pool) return null;
+
+  try {
+    const { key, value, namespace = 'default', tags = [], ttl } = options;
+    const id = generateId('entry');
+    const now = new Date();
+    const expiresAt = ttl ? new Date(Date.now() + ttl * 1000) : null;
+
+    // Build metadata with optional embedding info
+    const metadata: Record<string, unknown> = {};
+    let embeddingLiteral: string | null = null;
+
+    if (options._embedding && options._embedding.length > 0) {
+      // Defense in depth: refuse non-numeric or non-finite elements before
+      // building any SQL literal. This prevents SQL injection via crafted
+      // _embedding arrays containing strings or other non-numeric values.
+      const cleaned: number[] = [];
+      for (const v of options._embedding) {
+        if (typeof v !== 'number' || !Number.isFinite(v)) {
+          return {
+            success: false,
+            id: '',
+            error: 'Invalid embedding: non-numeric or non-finite element',
+          };
+        }
+        cleaned.push(v);
+      }
+      embeddingLiteral = `[${cleaned.join(',')}]`;
+      metadata.embedding_model = options._embeddingModel || 'unknown';
+      metadata.embedding_dimensions = options._embeddingDimensions || cleaned.length;
+    }
+
+    const upsertClause = options.upsert
+      ? `ON CONFLICT (key, namespace, project_id) DO UPDATE SET
+           value = EXCLUDED.value,
+           tags = EXCLUDED.tags,
+           metadata = EXCLUDED.metadata,
+           embedding = EXCLUDED.embedding,
+           updated_at = EXCLUDED.updated_at,
+           expires_at = EXCLUDED.expires_at`
+      : '';
+
+    if (embeddingLiteral) {
+      // Pass the embedding literal as a bound parameter ($10) and cast it
+      // server-side to ruvector. The pg driver sends the value as text, the
+      // server performs the cast — there is no string interpolation in the
+      // SQL, so injection via _embedding is impossible.
+      await pool.query(
+        `INSERT INTO claude_flow.memory_entries
+           (id, key, namespace, value, tags, metadata, embedding, created_at, updated_at, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $10::ruvector, $7, $8, $9)
+         ${upsertClause}`,
+        [
+          id,
+          key,
+          namespace,
+          value,
+          JSON.stringify(tags),
+          JSON.stringify(metadata),
+          now,
+          now,
+          expiresAt,
+          embeddingLiteral,
+        ],
+      );
+    } else {
+      await pool.query(
+        `INSERT INTO claude_flow.memory_entries
+           (id, key, namespace, value, tags, metadata, created_at, updated_at, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         ${upsertClause}`,
+        [id, key, namespace, value, JSON.stringify(tags), JSON.stringify(metadata), now, now, expiresAt],
+      );
+    }
+
+    return {
+      success: true,
+      id,
+      embedding: options._embedding
+        ? {
+            dimensions: options._embeddingDimensions || options._embedding.length,
+            model: options._embeddingModel || 'unknown',
+          }
+        : undefined,
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    const reason = classifyPgError(err);
+    console.warn(`[memory-bridge] pgStoreEntry failed: ${reason}`);
+    if (process.env.RUFLO_DEBUG) console.warn(err);
+    return { success: false, id: '', error: message };
+  }
+}
+
+/**
+ * Retrieve a single entry from PostgreSQL by key + namespace.
+ */
+async function pgGetEntry(options: {
+  key: string;
+  namespace?: string;
+}): Promise<{
+  success: boolean;
+  found: boolean;
+  entry?: {
+    id: string;
+    key: string;
+    namespace: string;
+    content: string;
+    accessCount: number;
+    createdAt: string;
+    updatedAt: string;
+    hasEmbedding: boolean;
+    tags: string[];
+  };
+  error?: string;
+} | null> {
+  const pool = await getPgPool();
+  if (!pool) return null;
+
+  try {
+    const { key, namespace = 'default' } = options;
+
+    const { rows } = await pool.query(
+      `SELECT id, key, namespace, value, tags, metadata, embedding,
+              access_count, created_at, updated_at
+       FROM claude_flow.memory_entries
+       WHERE key = $1 AND namespace = $2
+       LIMIT 1`,
+      [key, namespace],
+    );
+
+    if (rows.length === 0) {
+      return { success: true, found: false };
+    }
+
+    const row = rows[0];
+
+    // Bump access count
+    try {
+      await pool.query(
+        `UPDATE claude_flow.memory_entries
+         SET access_count = COALESCE(access_count, 0) + 1, last_accessed_at = NOW()
+         WHERE id = $1`,
+        [row.id],
+      );
+    } catch (err) {
+      if (process.env.RUFLO_DEBUG) {
+        console.warn('[memory-bridge] non-fatal: access_count UPDATE failed:', err);
+      }
+    }
+
+    let tags: string[] = [];
+    if (row.tags) {
+      try {
+        tags = typeof row.tags === 'string' ? JSON.parse(row.tags as string) : (row.tags as string[]);
+      } catch (err) {
+        if (process.env.RUFLO_DEBUG) {
+          console.warn('[memory-bridge] non-fatal: tags JSON.parse failed:', err);
+        }
+      }
+    }
+
+    return {
+      success: true,
+      found: true,
+      entry: {
+        id: String(row.id),
+        key: String(row.key),
+        namespace: String(row.namespace),
+        content: String(row.value ?? ''),
+        accessCount: (Number(row.access_count) || 0) + 1,
+        createdAt: row.created_at ? new Date(row.created_at as string).toISOString() : new Date().toISOString(),
+        updatedAt: row.updated_at ? new Date(row.updated_at as string).toISOString() : new Date().toISOString(),
+        hasEmbedding: row.embedding != null,
+        tags,
+      },
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    const reason = classifyPgError(err);
+    console.warn(`[memory-bridge] pgGetEntry failed: ${reason}`);
+    if (process.env.RUFLO_DEBUG) console.warn(err);
+    return { success: false, found: false, error: message };
+  }
+}
+
+/**
+ * Keyword ILIKE search across key and value columns in PostgreSQL.
+ * Returns results ranked by simple relevance scoring.
+ */
+async function pgSearchEntries(options: {
+  query: string;
+  namespace?: string;
+  limit?: number;
+  threshold?: number;
+}): Promise<{
+  success: boolean;
+  results: {
+    id: string;
+    key: string;
+    content: string;
+    score: number;
+    namespace: string;
+    provenance?: string;
+  }[];
+  searchTime: number;
+  searchMethod?: string;
+  error?: string;
+} | null> {
+  const pool = await getPgPool();
+  if (!pool) return null;
+
+  try {
+    const { query: queryStr, namespace, limit = 10 } = options;
+    const startTime = Date.now();
+
+    const terms = queryStr.toLowerCase().split(/\s+/).filter(t => t.length > 1);
+    if (terms.length === 0) {
+      return { success: true, results: [], searchTime: 0, searchMethod: 'pg-keyword' };
+    }
+
+    // Build ILIKE conditions: each term must match key OR value
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    let paramIdx = 1;
+
+    if (namespace && namespace !== 'all') {
+      conditions.push(`namespace = $${paramIdx}`);
+      params.push(namespace);
+      paramIdx++;
+    }
+
+    const termConditions: string[] = [];
+    for (const term of terms) {
+      const pattern = `%${term}%`;
+      termConditions.push(`(LOWER(key) LIKE $${paramIdx} OR LOWER(value) LIKE $${paramIdx + 1})`);
+      params.push(pattern, pattern);
+      paramIdx += 2;
+    }
+    conditions.push(`(${termConditions.join(' OR ')})`);
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const { rows } = await pool.query(
+      `SELECT id, key, namespace, value, embedding
+       FROM claude_flow.memory_entries
+       ${whereClause}
+       ORDER BY updated_at DESC
+       LIMIT $${paramIdx}`,
+      [...params, limit * 3], // fetch extra for scoring
+    );
+
+    // Score results by number of matching terms
+    const results: {
+      id: string;
+      key: string;
+      content: string;
+      score: number;
+      namespace: string;
+      provenance?: string;
+    }[] = [];
+
+    for (const row of rows) {
+      const combined = `${String(row.key)} ${String(row.value)}`.toLowerCase();
+      let matchCount = 0;
+      for (const term of terms) {
+        if (combined.includes(term)) matchCount++;
+      }
+      const score = matchCount / terms.length;
+
+      results.push({
+        id: String(row.id).substring(0, 12),
+        key: String(row.key) || String(row.id).substring(0, 15),
+        content: (String(row.value) || '').substring(0, 60) + ((String(row.value) || '').length > 60 ? '...' : ''),
+        score,
+        namespace: String(row.namespace) || 'default',
+        provenance: `pg-keyword:${score.toFixed(3)}`,
+      });
+    }
+
+    results.sort((a, b) => b.score - a.score);
+
+    return {
+      success: true,
+      results: results.slice(0, limit),
+      searchTime: Date.now() - startTime,
+      searchMethod: 'pg-keyword',
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    const reason = classifyPgError(err);
+    console.warn(`[memory-bridge] pgSearchEntries failed: ${reason}`);
+    if (process.env.RUFLO_DEBUG) console.warn(err);
+    return { success: false, results: [], searchTime: 0, error: message };
+  }
+}
+
+/**
+ * Delete an entry from PostgreSQL by key + namespace.
+ */
+async function pgDeleteEntry(options: {
+  key: string;
+  namespace?: string;
+}): Promise<{
+  success: boolean;
+  deleted: boolean;
+  key: string;
+  namespace: string;
+  remainingEntries: number;
+  error?: string;
+} | null> {
+  const pool = await getPgPool();
+  if (!pool) return null;
+
+  try {
+    const { key, namespace = 'default' } = options;
+
+    const result = await pool.query(
+      `DELETE FROM claude_flow.memory_entries
+       WHERE key = $1 AND namespace = $2`,
+      [key, namespace],
+    );
+
+    const deleted = ((result as any).rowCount ?? 0) > 0;
+
+    let remaining = 0;
+    try {
+      const { rows } = await pool.query(`SELECT COUNT(*)::int AS cnt FROM claude_flow.memory_entries`);
+      remaining = (rows[0]?.cnt as number) ?? 0;
+    } catch (err) {
+      if (process.env.RUFLO_DEBUG) {
+        console.warn('[memory-bridge] non-fatal: COUNT(*) after delete failed:', err);
+      }
+    }
+
+    return { success: true, deleted, key, namespace, remainingEntries: remaining };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    const reason = classifyPgError(err);
+    console.warn(`[memory-bridge] pgDeleteEntry failed: ${reason}`);
+    if (process.env.RUFLO_DEBUG) console.warn(err);
+    return { success: false, deleted: false, key: options.key, namespace: options.namespace || 'default', remainingEntries: 0, error: message };
+  }
+}
+
+/**
+ * List entries from PostgreSQL with optional namespace filter.
+ */
+async function pgListEntries(options: {
+  namespace?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<{
+  success: boolean;
+  entries: {
+    id: string;
+    key: string;
+    namespace: string;
+    size: number;
+    accessCount: number;
+    createdAt: string;
+    updatedAt: string;
+    hasEmbedding: boolean;
+  }[];
+  total: number;
+  error?: string;
+} | null> {
+  const pool = await getPgPool();
+  if (!pool) return null;
+
+  try {
+    const { namespace, limit = 20, offset = 0 } = options;
+
+    const nsCondition = namespace ? `WHERE namespace = $1` : '';
+    const nsParams: unknown[] = namespace ? [namespace] : [];
+
+    // Count
+    const { rows: countRows } = await pool.query(
+      `SELECT COUNT(*)::int AS cnt FROM claude_flow.memory_entries ${nsCondition}`,
+      nsParams,
+    );
+    const total = (countRows[0]?.cnt as number) ?? 0;
+
+    // List
+    const paramOffset = namespace ? 2 : 1;
+    const { rows } = await pool.query(
+      `SELECT id, key, namespace, value, embedding, access_count, created_at, updated_at
+       FROM claude_flow.memory_entries
+       ${nsCondition}
+       ORDER BY updated_at DESC
+       LIMIT $${paramOffset} OFFSET $${paramOffset + 1}`,
+      [...nsParams, limit, offset],
+    );
+
+    const entries = rows.map((row) => ({
+      id: String(row.id).substring(0, 20),
+      key: String(row.key) || String(row.id).substring(0, 15),
+      namespace: String(row.namespace) || 'default',
+      size: (String(row.value) || '').length,
+      accessCount: Number(row.access_count) || 0,
+      createdAt: row.created_at ? new Date(row.created_at as string).toISOString() : new Date().toISOString(),
+      updatedAt: row.updated_at ? new Date(row.updated_at as string).toISOString() : new Date().toISOString(),
+      hasEmbedding: row.embedding != null,
+    }));
+
+    return { success: true, entries, total };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
+    const reason = classifyPgError(err);
+    console.warn(`[memory-bridge] pgListEntries failed: ${reason}`);
+    if (process.env.RUFLO_DEBUG) console.warn(err);
+    return { success: false, entries: [], total: 0, error: message };
+  }
+}
+
+/**
+ * Shut down the PostgreSQL connection pool.
+ */
+async function shutdownPgPool(): Promise<void> {
+  if (pgPoolInstance) {
+    try {
+      await pgPoolInstance.end();
+    } catch (err) {
+      if (process.env.RUFLO_DEBUG) console.warn('[memory-bridge] pool.end() failed:', err);
+    }
+  }
+  pgPoolInstance = null;
+  pgPoolPromise = null;
+  pgPoolErrorLogged = false;
+}
+
 // ===== Lazy singleton =====
 
 let registryPromise: Promise<any> | null = null;
@@ -79,10 +884,12 @@ async function getRegistry(dbPath?: string): Promise<any | null> {
         };
 
         try {
+          const cfgModel = process.env.ONNX_EMBEDDING_MODEL || process.env.EMBEDDING_MODEL || 'Xenova/all-MiniLM-L6-v2';
+          const cfgDims = parseInt(process.env.ONNX_EMBEDDING_DIMS || process.env.EMBEDDING_DIMS || '384', 10);
           await (registry as any).initialize({
             dbPath: dbPath || getDbPath(),
-            embeddingModel: 'Xenova/all-MiniLM-L6-v2',
-            dimension: 384,
+            embeddingModel: cfgModel,
+            dimension: cfgDims,
             controllers: {
               reasoningBank: true,
               learningBridge: false,
@@ -369,10 +1176,10 @@ export async function bridgeStoreEntry(options: {
   error?: string;
 } | null> {
   const registry = await getRegistry(options.dbPath);
-  if (!registry) return null;
+  if (!registry) return pgStoreEntry(options);
 
   const ctx = getDb(registry);
-  if (!ctx) return null;
+  if (!ctx) return pgStoreEntry(options);
 
   try {
     const { key, value, namespace = 'default', tags = [], ttl } = options;
@@ -477,10 +1284,10 @@ export async function bridgeSearchEntries(options: {
   error?: string;
 } | null> {
   const registry = await getRegistry(options.dbPath);
-  if (!registry) return null;
+  if (!registry) return pgSearchEntries(options);
 
   const ctx = getDb(registry);
-  if (!ctx) return null;
+  if (!ctx) return pgSearchEntries(options);
 
   try {
     const { query: queryStr, namespace, limit = 10, threshold = 0.3 } = options;
@@ -605,10 +1412,10 @@ export async function bridgeListEntries(options: {
   error?: string;
 } | null> {
   const registry = await getRegistry(options.dbPath);
-  if (!registry) return null;
+  if (!registry) return pgListEntries(options);
 
   const ctx = getDb(registry);
-  if (!ctx) return null;
+  if (!ctx) return pgListEntries(options);
 
   try {
     const { namespace, limit = 20, offset = 0 } = options;
@@ -687,10 +1494,10 @@ export async function bridgeGetEntry(options: {
   error?: string;
 } | null> {
   const registry = await getRegistry(options.dbPath);
-  if (!registry) return null;
+  if (!registry) return pgGetEntry(options);
 
   const ctx = getDb(registry);
-  if (!ctx) return null;
+  if (!ctx) return pgGetEntry(options);
 
   try {
     const { key, namespace = 'default' } = options;
@@ -789,10 +1596,10 @@ export async function bridgeDeleteEntry(options: {
   error?: string;
 } | null> {
   const registry = await getRegistry(options.dbPath);
-  if (!registry) return null;
+  if (!registry) return pgDeleteEntry(options);
 
   const ctx = getDb(registry);
-  if (!ctx) return null;
+  if (!ctx) return pgDeleteEntry(options);
 
   try {
     const { key, namespace = 'default' } = options;
@@ -1152,6 +1959,7 @@ export async function shutdownBridge(): Promise<void> {
     registryPromise = null;
     bridgeAvailable = null;
   }
+  await shutdownPgPool();
 }
 
 // ===== Phase 3: ReasoningBank pattern operations =====
