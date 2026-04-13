@@ -3,6 +3,7 @@ import { printSuccess, printError, printWarning } from '../utils.js';
 import { createSparcPrompt } from './sparc-modes/index.js';
 import { Deno, cwd, exit, existsSync } from '../node-compat.js';
 import process from 'process';
+import { SPARC_ALLOWED_TOOLS } from '../utils/allowed-tools.js';
 
 export async function sparcCommand(subArgs, flags) {
   const sparcCmd = subArgs[0];
@@ -82,7 +83,7 @@ async function listSparcModes(subArgs) {
       console.log(`Please ensure .roomodes file exists in: ${workingDir}`);
       console.log();
       console.log('To enable SPARC development modes, run:');
-      console.log('  npx claude-flow@latest init --sparc');
+      console.log('  npx outlaw-flow@latest init --sparc');
       console.log();
       console.log('This will create:');
       console.log('  • .roomodes file with 17+ SPARC development modes');
@@ -134,7 +135,7 @@ async function showModeInfo(subArgs) {
       console.log(`Please ensure .roomodes file exists in: ${workingDir}`);
       console.log();
       console.log('To enable SPARC development modes, run:');
-      console.log('  npx claude-flow@latest init --sparc');
+      console.log('  npx outlaw-flow@latest init --sparc');
       return;
     }
     const config = JSON.parse(configContent);
@@ -189,7 +190,7 @@ async function runSparcMode(subArgs, flags) {
       console.log(`Please ensure .roomodes file exists in: ${workingDir}`);
       console.log();
       console.log('To enable SPARC development modes, run:');
-      console.log('  npx claude-flow@latest init --sparc');
+      console.log('  npx outlaw-flow@latest init --sparc');
       return;
     }
     const config = JSON.parse(configContent);
@@ -218,8 +219,8 @@ async function runSparcMode(subArgs, flags) {
       
       const enablePermissions = subArgs.includes('--enable-permissions');
       if (!enablePermissions) {
-        console.log(`Tools: ALL (via --dangerously-skip-permissions)`);
-        console.log(`Permissions: Will be auto-skipped`);
+        console.log(`Tools: Restricted via safe allowlist (--allowedTools)`);
+        console.log(`Permissions: Safe allowlist applied (--allowedTools)`);
       } else {
         console.log(`Tools: ${toolsList}`);
         console.log(`Permissions: Will prompt for actions`);
@@ -240,8 +241,8 @@ async function runSparcMode(subArgs, flags) {
     const enablePermissions = subArgs.includes('--enable-permissions');
     
     if (!enablePermissions) {
-      console.log(`🔧 Tools: ALL (including MCP and WebSearch via --dangerously-skip-permissions)`);
-      console.log(`⚡ Permissions: Auto-skipped (--dangerously-skip-permissions)`);
+      console.log(`🔧 Tools: Restricted via safe allowlist (--allowedTools)`);
+      console.log(`🔒 Permissions: Safe allowlist (no --dangerously-skip-permissions)`);
     } else {
       console.log(`🔧 Tools: ${toolsList}`);
       console.log(`✅ Permissions: Enabled (will prompt for actions)`);
@@ -337,12 +338,14 @@ async function executeClaude(enhancedTask, toolsList, instanceId, memoryNamespac
   // Build arguments array correctly
   const claudeArgs = [];
   claudeArgs.push(enhancedTask);
-  
-  // Add --dangerously-skip-permissions by default unless --enable-permissions is set
-  if (!enablePermissions) {
-    claudeArgs.push('--dangerously-skip-permissions');
+
+  // Use allowlist: SPARC tools by default, user-specified list when permissions enabled
+  if (enablePermissions) {
+    claudeArgs.push('--allowedTools', toolsList);
+  } else {
+    claudeArgs.push('--allowedTools', SPARC_ALLOWED_TOOLS);
   }
-  
+
   if (isNonInteractive) {
     // Non-interactive mode: add additional flags
     claudeArgs.push('-p'); // Use short form for print
@@ -355,13 +358,6 @@ async function executeClaude(enhancedTask, toolsList, instanceId, memoryNamespac
     }
   }
   
-  // When using --dangerously-skip-permissions, we don't need to specify individual tools
-  // as it enables ALL tools including mcp and websearch
-  // Only add --allowedTools if permissions are enabled
-  if (enablePermissions) {
-    claudeArgs.push('--allowedTools', toolsList);
-  }
-  
   if (subArgs.includes('--config')) {
     const configIndex = subArgs.indexOf('--config');
     claudeArgs.push('--mcp-config', subArgs[configIndex + 1]);
@@ -371,8 +367,8 @@ async function executeClaude(enhancedTask, toolsList, instanceId, memoryNamespac
   if (isNonInteractive || subArgs.includes('--verbose') || subArgs.includes('-v')) {
     console.log('\n🔍 Debug: Executing claude with:');
     console.log('Command: claude');
-    console.log('Permissions:', enablePermissions ? '✅ Enabled (will prompt)' : '⚡ Skipped (--dangerously-skip-permissions)');
-    console.log('Tools:', enablePermissions ? `Specified: ${toolsList}` : 'ALL tools enabled (MCP, WebSearch, etc.)');
+    console.log('Permissions:', enablePermissions ? '✅ Enabled (will prompt)' : '🔒 Safe allowlist (restricted tool set)');
+    console.log('Tools:', enablePermissions ? `Specified: ${toolsList}` : 'Allowed tools via --allowedTools');
     console.log('Mode:', isNonInteractive ? '🤖 Non-interactive' : '💬 Interactive');
     console.log('Args array length:', claudeArgs.length);
     console.log('First arg (prompt) length:', claudeArgs[0].length, 'characters');
@@ -426,8 +422,8 @@ async function executeClaude(enhancedTask, toolsList, instanceId, memoryNamespac
         ...Deno.env.toObject(),
         CLAUDE_INSTANCE_ID: instanceId,
         CLAUDE_SPARC_MODE: 'true',
-        CLAUDE_FLOW_MEMORY_ENABLED: 'true',
-        CLAUDE_FLOW_MEMORY_NAMESPACE: memoryNamespace,
+        OUTLAW_FLOW_MEMORY_ENABLED: 'true',
+        OUTLAW_FLOW_MEMORY_NAMESPACE: memoryNamespace,
         CLAUDE_WORKING_DIRECTORY: cwd(), // Also pass as env variable
       },
       stdin: 'inherit',
@@ -459,27 +455,27 @@ function showSparcHelp() {
   console.log('  tdd <task>               Run Test-Driven Development workflow');
   console.log();
   console.log('Examples:');
-  console.log('  claude-flow sparc "orchestrate app development"    # Uses sparc orchestrator');
-  console.log('  claude-flow sparc modes --verbose');
-  console.log('  claude-flow sparc info architect');
-  console.log('  claude-flow sparc run code "implement user authentication"');
-  console.log('  claude-flow sparc run code "add login feature" --non-interactive');
-  console.log('  claude-flow sparc run tdd "create test suite" --namespace tests');
-  console.log('  claude-flow sparc tdd "payment processing system" --interactive');
+  console.log('  outlaw-flow sparc "orchestrate app development"    # Uses sparc orchestrator');
+  console.log('  outlaw-flow sparc modes --verbose');
+  console.log('  outlaw-flow sparc info architect');
+  console.log('  outlaw-flow sparc run code "implement user authentication"');
+  console.log('  outlaw-flow sparc run code "add login feature" --non-interactive');
+  console.log('  outlaw-flow sparc run tdd "create test suite" --namespace tests');
+  console.log('  outlaw-flow sparc tdd "payment processing system" --interactive');
   console.log();
   console.log('Parallel Execution with BatchTool:');
   console.log('  # Run multiple SPARC modes concurrently');
   console.log('  batchtool run --parallel \\');
-  console.log('    "npx claude-flow sparc run code \'user service\' --non-interactive" \\');
-  console.log('    "npx claude-flow sparc run code \'auth service\' --non-interactive" \\');
-  console.log('    "npx claude-flow sparc run tdd \'test suite\' --non-interactive"');
+  console.log('    "npx outlaw-flow sparc run code \'user service\' --non-interactive" \\');
+  console.log('    "npx outlaw-flow sparc run code \'auth service\' --non-interactive" \\');
+  console.log('    "npx outlaw-flow sparc run tdd \'test suite\' --non-interactive"');
   console.log();
   console.log('  # Boomerang orchestration pattern');
   console.log('  batchtool orchestrate --boomerang \\');
-  console.log('    --research "npx claude-flow sparc run ask \'requirements\' --non-interactive" \\');
-  console.log('    --design "npx claude-flow sparc run architect \'system\' --non-interactive" \\');
-  console.log('    --implement "npx claude-flow sparc run code \'features\' --non-interactive" \\');
-  console.log('    --test "npx claude-flow sparc run tdd \'validation\' --non-interactive"');
+  console.log('    --research "npx outlaw-flow sparc run ask \'requirements\' --non-interactive" \\');
+  console.log('    --design "npx outlaw-flow sparc run architect \'system\' --non-interactive" \\');
+  console.log('    --implement "npx outlaw-flow sparc run code \'features\' --non-interactive" \\');
+  console.log('    --test "npx outlaw-flow sparc run tdd \'validation\' --non-interactive"');
   console.log();
   console.log('Flags:');
   console.log('  --dry-run, -d            Show configuration without executing');
@@ -491,12 +487,12 @@ function showSparcHelp() {
   console.log('  --config <path>          Use custom MCP configuration file');
   console.log();
   console.log('Permission Behavior:');
-  console.log('  By default, SPARC runs with --dangerously-skip-permissions for efficiency');
-  console.log('  Use --enable-permissions to restore permission prompts if needed');
+  console.log('  By default, SPARC uses a safe tool allowlist for autonomous execution');
+  console.log('  Use --enable-permissions to restore full permission prompts if needed');
   console.log();
   console.log('Non-Interactive Mode:');
   console.log('  When using --non-interactive, claude will be executed with:');
-  console.log('  - --dangerously-skip-permissions (unless --enable-permissions is set)');
+  console.log('  - --allowedTools with safe tool allowlist (unless --enable-permissions is set)');
   console.log('  - -p (print mode for streaming output)');
   console.log('  - --output-format stream-json (structured output format)');
   console.log('  - --verbose (detailed execution logs)');

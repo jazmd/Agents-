@@ -10,6 +10,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import { Logger } from '../core/logger.js';
 import { generateId } from '../utils/helpers.js';
+import { CORE_TOOLS } from '../cli/utils/allowed-tools.js';
 import {
   TaskDefinition, AgentState, TaskResult, SwarmEvent, EventType,
   SWARM_CONSTANTS
@@ -486,12 +487,17 @@ export class TaskExecutor extends EventEmitter {
       args.push('--temperature', options.temperature.toString());
     }
 
-    // Skip permissions check for swarm execution
-    args.push('--dangerously-skip-permissions');
+    // Use safe permissions allowlist instead of --dangerously-skip-permissions
+    args.push('--allowedTools', CORE_TOOLS);
 
     // Add output format
     if (options.outputFormat) {
       args.push('--output-format', options.outputFormat);
+    }
+
+    // Add sandbox metadata if configured
+    if (this.config.sandboxed) {
+      args.push('--metadata', JSON.stringify({ sandboxed: true }));
     }
 
     return {

@@ -1,4 +1,5 @@
 import { getErrorMessage } from '../../utils/error-handler.js';
+import { SWARM_ALLOWED_TOOLS } from '../utils/allowed-tools.js';
 /**
  * Claude instance management commands
  */
@@ -22,7 +23,7 @@ claudeCommand
   .description('Spawn a new Claude instance with specific configuration')
   .arguments('<task>')
   .option('-t, --tools <tools>', 'Allowed tools (comma-separated)', 'View,Edit,Replace,GlobTool,GrepTool,LS,Bash')
-  .option('--no-permissions', 'Use --dangerously-skip-permissions flag')
+  .option('--no-permissions', 'Use safe tool allowlist instead of interactive permission prompts')
   .option('-c, --config <config>', 'MCP config file path')
   .option('-m, --mode <mode>', 'Development mode (full, backend-only, frontend-only, api-only)', 'full')
   .option('--parallel', 'Enable parallel execution with BatchTool')
@@ -47,11 +48,7 @@ claudeCommand
         // Build Claude command
         const claudeArgs = [task];
         claudeArgs.push('--allowedTools', tools);
-        
-        if (options.noPermissions) {
-          claudeArgs.push('--dangerously-skip-permissions');
-        }
-        
+
         if (options.config) {
           claudeArgs.push('--mcp-config', options.config);
         }
@@ -83,9 +80,9 @@ claudeCommand
           env: {
             ...process.env,
             CLAUDE_INSTANCE_ID: instanceId,
-            CLAUDE_FLOW_MODE: options.mode,
-            CLAUDE_FLOW_COVERAGE: parseInt(options.coverage).toString(),
-            CLAUDE_FLOW_COMMIT: options.commit,
+            OUTLAW_FLOW_MODE: options.mode,
+            OUTLAW_FLOW_COVERAGE: parseInt(options.coverage).toString(),
+            OUTLAW_FLOW_COMMIT: options.commit,
           }
         });
         
@@ -134,8 +131,8 @@ claudeCommand
         }
         
         // Add flags
-        if (task.skipPermissions) {
-          claudeArgs.push('--dangerously-skip-permissions');
+        if (task.skipPermissions && !task.tools) {
+          claudeArgs.push('--allowedTools', SWARM_ALLOWED_TOOLS);
         }
         
         if (task.config) {

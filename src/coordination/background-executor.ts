@@ -3,6 +3,7 @@ import { spawn, ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { Logger } from '../core/logger.js';
 import { generateId } from '../utils/helpers.js';
+import { CORE_TOOLS } from '../cli/utils/allowed-tools.js';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 
@@ -180,7 +181,7 @@ export class BackgroundExecutor extends EventEmitter {
       args.push('--max-tokens', options.maxTokens.toString());
     }
 
-    args.push('--dangerously-skip-permissions');
+    args.push('--allowedTools', CORE_TOOLS);
 
     return this.submitTask('claude-spawn', 'claude', args, {
       ...options,

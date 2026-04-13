@@ -1,9 +1,16 @@
 /**
- * Environment Detection Utility for Claude-Flow v2.0
+ * Environment Detection Utility for Outlaw-Flow v2.0
  * Detects execution environment and recommends appropriate flags
  */
 
 import chalk from 'chalk';
+
+export interface SandboxCapabilities {
+  available: boolean;
+  type: 'bubblewrap' | 'sandbox-exec' | 'none';
+  bwrapPath: string | null;
+  sandboxExecPath: string | null;
+}
 
 export interface ExecutionEnvironment {
   isInteractive: boolean;
@@ -17,6 +24,7 @@ export interface ExecutionEnvironment {
   supportsRawMode: boolean;
   supportsColor: boolean;
   terminalType: string;
+  sandbox: SandboxCapabilities;
   recommendedFlags: string[];
   warnings: string[];
 }
@@ -43,6 +51,7 @@ export function detectExecutionEnvironment(options: EnvironmentOptions = {}): Ex
     supportsRawMode: false,
     supportsColor: true,
     terminalType: 'unknown',
+    sandbox: detectSandboxCapabilities(),
     recommendedFlags: [],
     warnings: []
   };
@@ -129,29 +138,26 @@ function checkRawModeSupport(): boolean {
 function generateRecommendations(env: ExecutionEnvironment): void {
   // VS Code specific recommendations
   if (env.isVSCode || env.isVSCodeInsiders) {
-    env.recommendedFlags.push('--dangerously-skip-permissions');
     env.recommendedFlags.push('--non-interactive');
     env.warnings.push('VS Code integrated terminal detected - interactive features may be limited');
   }
-  
+
   // CI environment recommendations
   if (env.isCI) {
-    env.recommendedFlags.push('--dangerously-skip-permissions');
     env.recommendedFlags.push('--non-interactive');
     env.recommendedFlags.push('--json');
     env.warnings.push('CI environment detected - running in non-interactive mode');
   }
-  
+
   // Docker recommendations
   if (env.isDocker && !env.isInteractive) {
-    env.recommendedFlags.push('--dangerously-skip-permissions');
     env.recommendedFlags.push('--non-interactive');
     env.warnings.push('Docker container without TTY - interactive features disabled');
   }
-  
+
   // SSH without TTY
   if (env.isSSH && !env.isInteractive) {
-    env.recommendedFlags.push('--dangerously-skip-permissions');
+    env.recommendedFlags.push('--non-interactive');
     env.warnings.push('SSH session without TTY - consider using ssh -t');
   }
   
@@ -164,6 +170,44 @@ function generateRecommendations(env: ExecutionEnvironment): void {
   if (!env.supportsRawMode && env.isInteractive) {
     env.recommendedFlags.push('--compatible-ui');
     env.warnings.push('Terminal does not support raw mode - using compatible UI');
+  }
+
+  // Sandbox not available
+  if (!env.sandbox.available) {
+    env.warnings.push('No OS sandbox detected - SafeBash will run without OS-level isolation');
+  }
+}
+
+/**
+ * Detects OS sandbox capabilities (bubblewrap on Linux, sandbox-exec on macOS)
+ */
+function detectSandboxCapabilities(): SandboxCapabilities {
+  const platform = process.platform;
+
+  if (platform === 'linux') {
+    const bwrapPath = findBinaryOnPath('bwrap');
+    if (bwrapPath) {
+      return { available: true, type: 'bubblewrap', bwrapPath, sandboxExecPath: null };
+    }
+  }
+
+  if (platform === 'darwin') {
+    const sandboxExecPath = findBinaryOnPath('sandbox-exec');
+    if (sandboxExecPath) {
+      return { available: true, type: 'sandbox-exec', bwrapPath: null, sandboxExecPath };
+    }
+  }
+
+  return { available: false, type: 'none', bwrapPath: null, sandboxExecPath: null };
+}
+
+function findBinaryOnPath(name: string): string | null {
+  try {
+    const { execFileSync } = require('child_process');
+    const result = execFileSync('which', [name], { encoding: 'utf8' }).trim();
+    return result || null;
+  } catch {
+    return null;
   }
 }
 
@@ -197,12 +241,10 @@ export function applySmartDefaults<T extends Record<string, any>>(
   const appliedDefaults: string[] = [];
   const enhanced = { ...options, appliedDefaults };
   
-  // Apply defaults based on environment
-  if ((environment.isVSCode || environment.isCI || !environment.supportsRawMode) && 
-      !options.hasOwnProperty('skipPermissions')) {
-    enhanced.skipPermissions = true;
-    enhanced.dangerouslySkipPermissions = true;
-    appliedDefaults.push('--dangerously-skip-permissions');
+  // Apply defaults based on environment - use --non-interactive for non-interactive contexts
+  if (environment.isVSCode || environment.isCI || !environment.supportsRawMode) {
+    enhanced.nonInteractive = true;
+    appliedDefaults.push('--non-interactive');
   }
   
   if ((environment.isCI || !environment.isInteractive) && 

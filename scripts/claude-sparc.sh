@@ -254,22 +254,14 @@ EOF
 
 # Build allowed tools based on configuration
 build_allowed_tools() {
-    local tools="View,Edit,Replace,GlobTool,GrepTool,LS,Bash"
-    
-    if [[ "$SKIP_RESEARCH" != true ]]; then
-        tools="$tools,WebFetchTool"
-    fi
-    
-    if [[ "$PARALLEL_EXECUTION" == true ]]; then
-        tools="$tools,BatchTool,dispatch_agent"
-    fi
-    
+    local tools="Read,Write,Edit,Glob,Grep,Bash,WebSearch,WebFetch,mcp__outlaw-flow__memory_store,mcp__outlaw-flow__memory_query,mcp__outlaw-flow__sparc_mode,mcp__outlaw-flow__workflow_create,mcp__outlaw-flow__health_check"
+
     echo "$tools"
 }
 
 # Build Claude command flags
 build_claude_flags() {
-    local flags="--mcp-config $MCP_CONFIG --dangerously-skip-permissions"
+    local flags="--mcp-config $MCP_CONFIG"
     
     if [[ "$VERBOSE" == true ]]; then
         flags="$flags --verbose"

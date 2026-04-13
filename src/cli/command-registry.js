@@ -19,6 +19,7 @@ import { automationAction } from './simple-commands/automation.js';
 import { coordinationAction } from './simple-commands/coordination.js';
 import { hooksAction } from './simple-commands/hooks.js';
 import { hiveMindCommand } from './simple-commands/hive-mind.js';
+import { safeBashCommand } from './simple-commands/safe-bash.js';
 import { showUnifiedMetrics, fixTaskAttribution } from './simple-commands/swarm-metrics-integration.js';
 // Note: TypeScript imports commented out for Node.js compatibility
 // import { ruvSwarmAction } from './commands/ruv-swarm.ts';
@@ -34,7 +35,7 @@ export function registerCoreCommands() {
     description: 'Initialize Claude Code integration files and SPARC development environment',
     usage: 'init [--force] [--minimal] [--sparc]',
     examples: [
-      'npx claude-flow@latest init --sparc  # Recommended: Full SPARC setup',
+      'npx outlaw-flow@latest init --sparc  # Recommended: Full SPARC setup',
       'init --sparc                         # Initialize with SPARC modes',
       'init --force --minimal               # Minimal setup, overwrite existing',
       'init --sparc --force                 # Force SPARC setup'
@@ -46,12 +47,12 @@ The --sparc flag creates a complete development environment:
   • Pre-configured modes: architect, code, tdd, debug, security, and more
   • Ready for TDD workflows and automated code generation
   
-First-time users should run: npx claude-flow@latest init --sparc`
+First-time users should run: npx outlaw-flow@latest init --sparc`
   });
 
   commandRegistry.set('start', {
     handler: startCommand,
-    description: 'Start the Claude-Flow orchestration system',
+    description: 'Start the Outlaw-Flow orchestration system',
     usage: 'start [--daemon] [--port <port>] [--verbose] [--ui] [--web]',
     examples: [
       'start                    # Start in interactive mode',
@@ -162,6 +163,17 @@ First-time users should run: npx claude-flow@latest init --sparc`
       'mcp start --port 8080',
       'mcp tools --verbose',
       'mcp auth setup'
+    ]
+  });
+
+  commandRegistry.set('safe-bash', {
+    handler: safeBashCommand,
+    description: 'SafeBash MCP server — semantic command analysis with OS sandbox',
+    usage: 'safe-bash <start|check> [options]',
+    examples: [
+      'safe-bash start',
+      'safe-bash check "npm install"',
+      'safe-bash check "node --require /tmp/x app.js"'
     ]
   });
 
@@ -276,8 +288,8 @@ Batch operations support:
   • Configuration validation and estimation tools
   
 Use with init command:
-  claude-flow init --batch-init project1,project2,project3
-  claude-flow init --config batch-config.json --parallel`
+  outlaw-flow init --batch-init project1,project2,project3
+  outlaw-flow init --config batch-config.json --parallel`
   });
 
   commandRegistry.set('github', {
@@ -550,7 +562,7 @@ Commands:
     ],
     details: `
 Advanced configuration management features:
-  • Unified configuration across Claude-Flow and ruv-swarm
+  • Unified configuration across Outlaw-Flow and ruv-swarm
   • Configuration presets for different environments
   • Automatic synchronization between config systems
   • Import/export capabilities with validation
@@ -636,7 +648,7 @@ export function showCommandHelp(name) {
   
   console.log(`Command: ${name}`);
   console.log(`Description: ${command.description}`);
-  console.log(`Usage: claude-flow ${command.usage}`);
+  console.log(`Usage: outlaw-flow ${command.usage}`);
   
   if (command.details) {
     console.log(command.details);
@@ -648,7 +660,7 @@ export function showCommandHelp(name) {
       if (example.startsWith('npx')) {
         console.log(`  ${example}`);
       } else {
-        console.log(`  claude-flow ${example}`);
+        console.log(`  outlaw-flow ${example}`);
       }
     }
   }
@@ -666,7 +678,7 @@ export function showAllCommands() {
   }
   
   console.log();
-  console.log('Use "claude-flow help <command>" for detailed usage information');
+  console.log('Use "outlaw-flow help <command>" for detailed usage information');
 }
 
 // Initialize the command registry

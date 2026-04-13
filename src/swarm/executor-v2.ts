@@ -11,6 +11,7 @@ import chalk from 'chalk';
 import { Logger } from '../core/logger.js';
 import { generateId } from '../utils/helpers.js';
 import { detectExecutionEnvironment, applySmartDefaults } from '../cli/utils/environment-detector.js';
+import { CORE_TOOLS } from '../cli/utils/allowed-tools.js';
 import {
   TaskDefinition, AgentState, TaskResult, SwarmEvent, EventType,
   SWARM_CONSTANTS
@@ -22,6 +23,7 @@ export interface ClaudeExecutionOptionsV2 extends ClaudeExecutionOptions {
   promptDefaults?: Record<string, any>;
   environmentOverride?: Record<string, string>;
   retryOnInteractiveError?: boolean;
+  useAllowedTools?: boolean;
 }
 
 export class TaskExecutorV2 extends TaskExecutor {
@@ -71,7 +73,7 @@ export class TaskExecutorV2 extends TaskExecutor {
         
         // Force non-interactive mode and retry
         enhancedOptions.nonInteractive = true;
-        enhancedOptions.dangerouslySkipPermissions = true;
+        enhancedOptions.useAllowedTools = true;
         
         return await this.executeClaudeWithTimeoutV2(
           generateId('claude-execution-retry'),
@@ -339,11 +341,8 @@ export class TaskExecutorV2 extends TaskExecutor {
       args.push('--temperature', options.temperature.toString());
     }
 
-    // Skip permissions check for non-interactive environments
-    if (options.nonInteractive || options.dangerouslySkipPermissions || 
-        this.environment.recommendedFlags.includes('--dangerously-skip-permissions')) {
-      args.push('--dangerously-skip-permissions');
-    }
+    // Use safe permissions allowlist instead of --dangerously-skip-permissions
+    args.push('--allowedTools', CORE_TOOLS);
 
     // Add non-interactive flag if needed
     if (options.nonInteractive) {
@@ -367,6 +366,7 @@ export class TaskExecutorV2 extends TaskExecutor {
     args.push('--metadata', JSON.stringify({
       environment: this.environment.terminalType,
       interactive: this.environment.isInteractive,
+      sandbox: this.environment.sandbox,
       executor: 'v2'
     }));
 
