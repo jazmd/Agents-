@@ -486,7 +486,7 @@ export class ControllerRegistry extends EventEmitter {
       this.agentdb = new AgentDBClass({
         dbPath,
         vectorBackend: config.vectorBackend ?? 'auto',
-        vectorDimension: config.dimension || 384,
+        vectorDimension: config.dimension ?? 384,
       });
 
       // Suppress agentdb's noisy info-level output during init
@@ -917,8 +917,12 @@ export class ControllerRegistry extends EventEmitter {
         // These are accessed via AgentDB internal state, not direct construction
         if (!this.agentdb) return null;
         try {
-          // vectorBackend is exposed as a direct property on AgentDB instance
-          // agentdb.getController() does not support 'vectorBackend' (only reflexion/skills/causalGraph)
+          // vectorBackend is exposed as a direct property on AgentDB instance.
+          // Note: agentdb.getController() does not support 'vectorBackend'
+          // (only reflexion/skills/causalGraph). Accessing via direct property
+          // is intentional — if AgentDB changes internals, this should be
+          // replaced by a proper getController('vectorBackend') upstream.
+          // TODO: request getController('vectorBackend') support in agentdb.
           if (name === 'vectorBackend' && this.agentdb.vectorBackend) {
             return this.agentdb.vectorBackend;
           }
