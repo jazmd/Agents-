@@ -22,11 +22,16 @@ export interface MCPToolResult {
 
 /**
  * Returns the effective project working directory.
- * Prefers CLAUDE_FLOW_CWD (set by the install script for global/MCP installs
- * where process.cwd() may resolve to '/') over the real process.cwd().
+ * Prefers project-scoped env vars exposed by the host runtime over the
+ * installer fallback `CLAUDE_FLOW_CWD`, so globally registered MCP servers can
+ * still isolate state per project when the host provides that context.
  */
 export function getProjectCwd(): string {
-  return process.env.CLAUDE_FLOW_CWD || process.cwd();
+  return process.env.CLAUDE_FLOW_PROJECT_DIR
+    || process.env.CLAUDE_PROJECT_DIR
+    || process.env.INIT_CWD
+    || process.env.CLAUDE_FLOW_CWD
+    || process.cwd();
 }
 
 export interface MCPTool {
