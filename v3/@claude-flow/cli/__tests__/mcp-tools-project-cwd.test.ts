@@ -39,10 +39,25 @@ afterEach(() => {
 });
 
 describe('getProjectCwd', () => {
+  it('prefers CLAUDE_FLOW_PROJECT_DIR over other env fallbacks', () => {
+    const explicitProjectDir = makeTempDir('flow-project-dir');
+    const claudeProjectDir = makeTempDir('claude-project-dir');
+    const initDir = makeTempDir('init-dir');
+    const fallbackDir = makeTempDir('fallback-dir');
+
+    process.env.CLAUDE_FLOW_PROJECT_DIR = explicitProjectDir;
+    process.env.CLAUDE_PROJECT_DIR = claudeProjectDir;
+    process.env.INIT_CWD = initDir;
+    process.env.CLAUDE_FLOW_CWD = fallbackDir;
+
+    expect(getProjectCwd()).toBe(explicitProjectDir);
+  });
+
   it('prefers CLAUDE_PROJECT_DIR over CLAUDE_FLOW_CWD fallback', () => {
     const projectDir = makeTempDir('project-dir');
     const fallbackDir = makeTempDir('fallback-dir');
 
+    delete process.env.CLAUDE_FLOW_PROJECT_DIR;
     process.env.CLAUDE_PROJECT_DIR = projectDir;
     process.env.CLAUDE_FLOW_CWD = fallbackDir;
 
@@ -53,6 +68,7 @@ describe('getProjectCwd', () => {
     const initDir = makeTempDir('init-dir');
     const fallbackDir = makeTempDir('fallback-dir');
 
+    delete process.env.CLAUDE_FLOW_PROJECT_DIR;
     delete process.env.CLAUDE_PROJECT_DIR;
     process.env.INIT_CWD = initDir;
     process.env.CLAUDE_FLOW_CWD = fallbackDir;
