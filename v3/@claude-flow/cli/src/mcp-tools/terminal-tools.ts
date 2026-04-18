@@ -4,8 +4,9 @@
  * Terminal session management with real command execution.
  */
 
-import type { MCPTool } from './types.js';
+import { type MCPTool, getProjectCwd } from './types.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { validateIdentifier, validatePath, validateText } from './validate-input.js';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
 
@@ -31,7 +32,7 @@ interface TerminalStore {
 }
 
 function getTerminalDir(): string {
-  return join(process.cwd(), STORAGE_DIR, TERMINAL_DIR);
+  return join(getProjectCwd(), STORAGE_DIR, TERMINAL_DIR);
 }
 
 function getTerminalPath(): string {
@@ -76,6 +77,16 @@ export const terminalTools: MCPTool[] = [
       },
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      if (input.name) {
+        const v = validateText(input.name, 'name', 256);
+        if (!v.valid) return { success: false, error: v.error };
+      }
+      if (input.workingDir) {
+        const v = validatePath(input.workingDir, 'workingDir');
+        if (!v.valid) return { success: false, error: v.error };
+      }
+
       const store = loadTerminalStore();
       const id = `term-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -85,7 +96,7 @@ export const terminalTools: MCPTool[] = [
         status: 'active',
         createdAt: new Date().toISOString(),
         lastActivity: new Date().toISOString(),
-        workingDir: (input.workingDir as string) || process.cwd(),
+        workingDir: (input.workingDir as string) || getProjectCwd(),
         history: [],
         env: (input.env as Record<string, string>) || {},
       };
@@ -118,6 +129,14 @@ export const terminalTools: MCPTool[] = [
       required: ['command'],
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      const vCmd = validateText(input.command, 'command', 10_000);
+      if (!vCmd.valid) return { success: false, error: vCmd.error };
+      if (input.sessionId) {
+        const v = validateIdentifier(input.sessionId, 'sessionId');
+        if (!v.valid) return { success: false, error: v.error };
+      }
+
       const store = loadTerminalStore();
       const sessionId = input.sessionId as string;
       const command = input.command as string;
@@ -134,7 +153,7 @@ export const terminalTools: MCPTool[] = [
           status: 'active',
           createdAt: new Date().toISOString(),
           lastActivity: new Date().toISOString(),
-          workingDir: process.cwd(),
+          workingDir: getProjectCwd(),
           history: [],
           env: {},
         };
@@ -142,7 +161,7 @@ export const terminalTools: MCPTool[] = [
       }
 
       const timeout = (input.timeout as number) || 30_000;
-      const cwd = session.workingDir || process.cwd();
+      const cwd = session.workingDir || getProjectCwd();
       const startTime = Date.now();
       let output: string;
       let exitCode: number;
@@ -236,6 +255,10 @@ export const terminalTools: MCPTool[] = [
       required: ['sessionId'],
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      const vId = validateIdentifier(input.sessionId, 'sessionId');
+      if (!vId.valid) return { success: false, error: vId.error };
+
       const store = loadTerminalStore();
       const sessionId = input.sessionId as string;
       const session = store.sessions[sessionId];
@@ -267,6 +290,12 @@ export const terminalTools: MCPTool[] = [
       },
     },
     handler: async (input) => {
+      // Validate user-provided input (#1425)
+      if (input.sessionId) {
+        const v = validateIdentifier(input.sessionId, 'sessionId');
+        if (!v.valid) return { success: false, error: v.error };
+      }
+
       const store = loadTerminalStore();
       const sessionId = input.sessionId as string;
       const limit = (input.limit as number) || 50;
