@@ -544,7 +544,7 @@ export const agentTools: MCPTool[] = [
 
       const store = loadAgentStore();
       const agents = Object.values(store.agents).filter(a => a.status !== 'terminated');
-      const threshold = (input.threshold as number) || 0.5;
+      const threshold = (input.threshold as number) ?? 0.5;
 
       if (input.agentId) {
         const agent = store.agents[input.agentId as string];

@@ -347,7 +347,7 @@ export const memoryTools: MCPTool[] = [
       const query = input.query as string;
       const namespace = (input.namespace as string) || 'default';
       const limit = (input.limit as number) || 10;
-      const threshold = (input.threshold as number) || 0.3;
+      const threshold = (input.threshold as number) ?? 0.3;
 
       validateMemoryInput(undefined, undefined, query);
 

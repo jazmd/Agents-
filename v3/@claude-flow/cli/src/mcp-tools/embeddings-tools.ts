@@ -453,7 +453,7 @@ export const embeddingsTools: MCPTool[] = [
 
       const query = input.query as string;
       const topK = (input.topK as number) || 5;
-      const threshold = (input.threshold as number) || 0.5;
+      const threshold = (input.threshold as number) ?? 0.5;
       const namespace = input.namespace as string;
 
       { const v = validateText(query, 'query'); if (!v.valid) return { success: false, error: v.error }; }
@@ -556,8 +556,8 @@ export const embeddingsTools: MCPTool[] = [
         case 'init':
           config.neural = {
             enabled: true,
-            driftThreshold: (input.driftThreshold as number) || 0.3,
-            decayRate: (input.decayRate as number) || 0.01,
+            driftThreshold: (input.driftThreshold as number) ?? 0.3,
+            decayRate: (input.decayRate as number) ?? 0.01,
             ruvector: {
               enabled: true,
               sona: true,

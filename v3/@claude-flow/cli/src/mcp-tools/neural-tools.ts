@@ -235,7 +235,7 @@ export const neuralTools: MCPTool[] = [
         accuracy: 0,
         epochs,
         config: {
-          learningRate: input.learningRate || 0.001,
+          learningRate: (input.learningRate as number) ?? 0.001,
           batchSize: 32,
         },
       };
@@ -505,7 +505,7 @@ export const neuralTools: MCPTool[] = [
 
       const store = loadNeuralStore();
       const method = (input.method as string) || 'quantize';
-      const targetReduction = (input.targetSize as number) || 0.5;
+      const targetReduction = (input.targetSize as number) ?? 0.5;
       const patterns = Object.values(store.patterns);
 
       if (patterns.length === 0) {
