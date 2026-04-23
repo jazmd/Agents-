@@ -4,6 +4,21 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { existsSync } from 'node:fs';
 
+// Mirror suppression from @claude-flow/cli/bin/cli.js — ruflo imports dist/src/index.js
+// directly so it bypasses the canonical entry's console.warn patch.
+const _origWarn = console.warn;
+console.warn = (...args) => {
+  const msg = String(args[0] ?? '');
+  if (msg.includes('[AgentDB Patch]')) return;
+  _origWarn.apply(console, args);
+};
+const _origLog = console.log;
+console.log = (...args) => {
+  const msg = String(args[0] ?? '');
+  if (msg.includes('[AgentDB Patch]')) return;
+  _origLog.apply(console, args);
+};
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Walk up from ruflo/bin/ to find @claude-flow/cli in node_modules
@@ -43,8 +58,14 @@ if (isMCPMode) {
     name: 'ruflo',
     description: 'Ruflo - AI Agent Orchestration Platform',
   });
-  cli.run().catch((error) => {
-    console.error('Fatal error:', error.message);
-    process.exit(1);
-  });
+  cli.run()
+    .then(() => {
+      // #1552: Exit cleanly after one-shot commands. Mirrors @claude-flow/cli/bin/cli.js.
+      // Long-running commands (daemon foreground, mcp, status --watch) never resolve.
+      process.exit(0);
+    })
+    .catch((error) => {
+      console.error('Fatal error:', error.message);
+      process.exit(1);
+    });
 }
