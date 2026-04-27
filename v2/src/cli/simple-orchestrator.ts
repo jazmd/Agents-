@@ -4,6 +4,7 @@
 
 import { EventEmitter } from 'events';
 import express from 'express';
+import helmet from 'helmet';
 import { WebSocketServer } from 'ws';
 import { createServer } from 'http';
 import { spawn } from 'child_process';
@@ -44,6 +45,7 @@ function startMCPServer(port: number) {
 // Enhanced web UI with console interface
 function startWebUI(host: string, port: number) {
   const app = express();
+  app.use(helmet());
   const server = createServer(app);
   const wss = new WebSocketServer({ server });
 

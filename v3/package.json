@@ -60,7 +60,47 @@
     ],
     "overrides": {
       "@ruvector/gnn": "0.1.25",
-      "@ruvector/gnn-linux-x64-gnu": "0.1.25"
+      "@ruvector/gnn-linux-x64-gnu": "0.1.25",
+      "axios@<=1.15.1": "1.15.1",
+      "protobufjs@<=7.5.5": "7.5.5",
+      "@anthropic-ai/claude-code@<=2.1.75": "2.1.75",
+      "react-router@<=7.12.0": "7.12.0",
+      "tar@<=7.5.11": "7.5.11",
+      "@hono/node-server@<=1.19.13": "1.19.13",
+      "hono@<=4.12.14": "4.12.14",
+      "path-to-regexp@<=8.4.0": "8.4.0",
+      "qs@<=6.14.2": "6.14.2",
+      "@modelcontextprotocol/sdk@<=1.26.0": "1.26.0",
+      "follow-redirects@<=1.16.0": "1.16.0",
+      "uuid@<=14.0.0": "14.0.0",
+      "cjs-module-lexer@<=2.2.0": "2.2.0",
+      "onnxruntime-node@<=1.24.2": "1.24.2",
+      "file-type@<=21.3.3": "21.3.3",
+      "brace-expansion@<=2.1.0": "2.1.0",
+      "undici@<=7.24.1": "7.24.1",
+      "ajv@<=8.18.0": "8.18.0",
+      "yaml@<=2.8.3": "2.8.3",
+      "minimatch@<=10.2.3": "10.2.3",
+      "@noble/ed25519@<=3.0.1": "3.0.1"
     }
+  },
+  "overrides": {
+    "axios@<=1.15.0": "1.15.0",
+    "hono@<=4.12.4": "4.12.4",
+    "@hono/node-server@<=1.19.13": "1.19.13",
+    "express-rate-limit@<=8.2.2": "8.2.2",
+    "path-to-regexp@<=8.4.0": "8.4.0",
+    "follow-redirects@<=1.16.0": "1.16.0",
+    "file-type@<=21.3.3": "21.3.3",
+    "yaml@<=2.8.3": "2.8.3",
+    "brace-expansion@<=2.1.0": "2.1.0",
+    "minimatch@<=9.0.7": "9.0.7",
+    "undici@<=7.24.1": "7.24.1",
+    "@noble/ed25519@<=3.0.1": "3.0.1",
+    "onnxruntime-node@<=1.24.2": "1.24.2",
+    "@isaacs/brace-expansion@<=5.0.1": "5.0.1",
+    "protobufjs@<=7.5.5": "7.5.5",
+    "uuid@<=14.0.0": "14.0.0",
+    "cjs-module-lexer@<=2.2.0": "2.2.0"
   }
 }
