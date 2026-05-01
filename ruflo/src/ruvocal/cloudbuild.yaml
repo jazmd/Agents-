@@ -1,8 +1,14 @@
 steps:
-  # Build the WASM-integrated ruvocal image with embedded MongoDB
-  # (INCLUDE_DB=true triggers the multi-stage Dockerfile path that
-  # copies mongod from mongo:7 and sets MONGODB_URL=mongodb://localhost:27017).
+  # Build the WASM-integrated ruvocal image with embedded MongoDB.
+  # INCLUDE_DB=true triggers the multi-stage Dockerfile path that copies
+  # mongod from mongo:7 and sets MONGODB_URL=mongodb://localhost:27017.
+  #
+  # The Dockerfile uses BuildKit syntax (COPY --link, --mount=type=cache),
+  # so DOCKER_BUILDKIT=1 must be set in the env. Without it, the parser
+  # rejects --link with "Unknown flag" before any build steps run.
   - name: 'gcr.io/cloud-builders/docker'
+    env:
+      - 'DOCKER_BUILDKIT=1'
     args: [
       'build',
       '--build-arg', 'INCLUDE_DB=true',
