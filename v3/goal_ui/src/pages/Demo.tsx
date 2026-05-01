@@ -10,12 +10,12 @@ const Demo = () => {
   const [copied, setCopied] = useState(false);
   const [widgetLoaded, setWidgetLoaded] = useState(false);
 
-  const embedCode = `<!-- GOAP Research Widget -->
-<div id="goap-widget-container"></div>
+  const embedCode = `<!-- RuFlo Research Widget -->
+<div id="ruflo-research-widget-container"></div>
 
 <!-- Optional: Configure widget appearance -->
 <script>
-  window.GOAPWidgetConfig = {
+  window.RufloResearchWidgetConfig = {
     primaryColor: "#8b5cf6",
     accentColor: "#22c55e",
     backgroundColor: "#1a1a1a",
@@ -34,7 +34,7 @@ const Demo = () => {
 
   useEffect(() => {
     // Configure widget before loading
-    (window as any).GOAPWidgetConfig = {
+    (window as any).RufloResearchWidgetConfig = {
       primaryColor: "#8b5cf6",
       accentColor: "#22c55e",
       backgroundColor: "#1a1a1a",
@@ -90,11 +90,11 @@ const Demo = () => {
           console.log("[Demo] Widget loaded successfully");
 
           // Check if widget initialized
-          if ((window as any).GOAPWidget) {
-            console.log("[Demo] Widget version:", (window as any).GOAPWidget.version);
+          if ((window as any).RufloResearchWidget) {
+            console.log("[Demo] Widget version:", (window as any).RufloResearchWidget.version);
             toast({
               title: "Widget Ready",
-              description: "GOAP Research Widget loaded successfully",
+              description: "RuFlo Research Widget loaded successfully",
             });
           }
         };
@@ -126,8 +126,8 @@ const Demo = () => {
           link.parentNode.removeChild(link);
         }
         // Clear widget config
-        delete (window as any).GOAPWidgetConfig;
-        delete (window as any).GOAPWidget;
+        delete (window as any).RufloResearchWidgetConfig;
+        delete (window as any).RufloResearchWidget;
       };
     };
 
@@ -253,7 +253,7 @@ const Demo = () => {
 
           {/* Widget Container */}
           <div
-            id="goap-widget-container"
+            id="ruflo-research-widget-container"
             className="min-h-[600px] rounded-lg border border-border overflow-hidden"
             style={{
               background: widgetLoaded ? 'transparent' : 'repeating-linear-gradient(45deg, rgba(255,255,255,.05), rgba(255,255,255,.05) 10px, transparent 10px, transparent 20px)'

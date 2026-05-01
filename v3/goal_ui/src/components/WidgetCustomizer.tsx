@@ -48,14 +48,14 @@ export const WidgetCustomizer = ({ config, onConfigChange, onGenerate }: WidgetC
   };
 
   const generateEmbedCode = () => {
-    const embedCode = `<!-- GOAP Research Widget -->
-<div id="goap-widget-container"></div>
+    const embedCode = `<!-- RuFlo Research Widget -->
+<div id="ruflo-research-widget-container"></div>
 <script>
-  window.GOAPWidgetConfig = ${JSON.stringify(config, null, 2)};
+  window.RufloResearchWidgetConfig = ${JSON.stringify(config, null, 2)};
 </script>
 <script src="${window.location.origin}/widget.js"></script>
 <style>
-  #goap-widget-container {
+  #ruflo-research-widget-container {
     max-width: 100%;
     margin: 2rem auto;
   }

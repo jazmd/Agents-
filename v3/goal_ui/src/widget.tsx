@@ -27,8 +27,8 @@ interface WidgetConfig {
 
 declare global {
   interface Window {
-    GOAPWidgetConfig?: WidgetConfig;
-    GOAPWidget?: {
+    RufloResearchWidgetConfig?: WidgetConfig;
+    RufloResearchWidget?: {
       init: (containerId?: string) => void;
       version: string;
     };
@@ -36,21 +36,21 @@ declare global {
 }
 
 // Widget initialization function
-function initGOAPWidget(containerId: string = "goap-widget-container"): void {
-  console.log("[GOAP Widget] Starting initialization...");
+function initRufloResearchWidget(containerId: string = "ruflo-research-widget-container"): void {
+  console.log("[RuFlo Research] Starting initialization...");
   
   const container = document.getElementById(containerId);
   if (!container) {
-    console.error(`[GOAP Widget] Container with id "${containerId}" not found`);
+    console.error(`[RuFlo Research] Container with id "${containerId}" not found`);
     return;
   }
 
-  console.log("[GOAP Widget] Container found:", containerId);
+  console.log("[RuFlo Research] Container found:", containerId);
 
   // Apply widget config if provided
-  const config = window.GOAPWidgetConfig;
+  const config = window.RufloResearchWidgetConfig;
   if (config) {
-    console.log("[GOAP Widget] Applying configuration:", config);
+    console.log("[RuFlo Research] Applying configuration:", config);
     if (config.primaryColor) container.style.setProperty("--primary", config.primaryColor);
     if (config.accentColor) container.style.setProperty("--accent", config.accentColor);
     if (config.backgroundColor) container.style.setProperty("--background", config.backgroundColor);
@@ -78,9 +78,9 @@ function initGOAPWidget(containerId: string = "goap-widget-container"): void {
       )
     );
 
-    console.log("[GOAP Widget] ✅ Successfully initialized and rendered");
+    console.log("[RuFlo Research] ✅ Successfully initialized and rendered");
   } catch (error) {
-    console.error("[GOAP Widget] ❌ Initialization error:", error);
+    console.error("[RuFlo Research] ❌ Initialization error:", error);
   }
 }
 
@@ -88,28 +88,28 @@ function initGOAPWidget(containerId: string = "goap-widget-container"): void {
 function autoInit(): void {
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => {
-      console.log("[GOAP Widget] DOM ready, auto-initializing...");
-      initGOAPWidget();
+      console.log("[RuFlo Research] DOM ready, auto-initializing...");
+      initRufloResearchWidget();
     });
   } else {
-    console.log("[GOAP Widget] DOM already loaded, initializing...");
+    console.log("[RuFlo Research] DOM already loaded, initializing...");
     // Use setTimeout to ensure script has fully loaded
-    setTimeout(() => initGOAPWidget(), 0);
+    setTimeout(() => initRufloResearchWidget(), 0);
   }
 }
 
 // Initialize only in browser environment
 if (typeof window !== "undefined") {
   // Expose global API
-  window.GOAPWidget = {
-    init: initGOAPWidget,
+  window.RufloResearchWidget = {
+    init: initRufloResearchWidget,
     version: "1.0.0",
   };
   
-  console.log("[GOAP Widget] API exposed on window.GOAPWidget");
+  console.log("[RuFlo Research] API exposed on window.RufloResearchWidget");
   
   // Auto-initialize
   autoInit();
 }
 
-export default initGOAPWidget;
+export default initRufloResearchWidget;
