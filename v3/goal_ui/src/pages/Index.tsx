@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { AgentStep, StepStatus } from "@/components/AgentStep";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GoalInput } from "@/components/GoalInput";
 import { WidgetCustomizer } from "@/components/WidgetCustomizer";
@@ -1057,6 +1057,9 @@ const Index = () => {
           <DialogContent className="max-w-[95vw] sm:max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
             <DialogHeader>
               <DialogTitle>Widget Customization</DialogTitle>
+              <DialogDescription>
+                Tune colors, branding, and behaviour for the embeddable RuFlo Research widget.
+              </DialogDescription>
             </DialogHeader>
             <WidgetCustomizer
               config={widgetConfig}
@@ -1653,6 +1656,9 @@ const Index = () => {
               <RotateCcw className="w-5 h-5" />
               Revise Research Configuration
             </DialogTitle>
+            <DialogDescription>
+              Adjust the goal, presets, and per-step parameters before re-running the research workflow.
+            </DialogDescription>
           </DialogHeader>
           <ReviseResearchForm
             currentGoal={userGoal}
@@ -1673,6 +1679,9 @@ const Index = () => {
               <Settings className="w-5 h-5" />
               Advanced Research Settings
             </DialogTitle>
+            <DialogDescription>
+              Fine-tune GOAP planner, model routing, and per-step prompts for this research run.
+            </DialogDescription>
           </DialogHeader>
           <ReviseResearchForm
             currentGoal={userGoal || researchConfig.goal}
