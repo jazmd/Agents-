@@ -31,26 +31,107 @@ Today none of these are wired into goal_ui. Some workflows that should be local 
 
 ## Decision
 
-Migrate `v3/goal_ui/` to a **hybrid** data plane: keep Supabase for auth + persistent state, add RuVector WASM for vector search, embedding, and semantic caching. Validate every UI element and every agent workflow via Playwright e2e tests. Brand and terminology cleanup across the app.
+**Replace Supabase entirely with RVF (Ruflo Vector Format)** as the data plane for `v3/goal_ui/`. Browser-side, RVF runs over IndexedDB with the same binary header as `v3/@claude-flow/memory/src/rvf-backend.ts` (Node) so the format is interoperable. RuVector WASM provides the embedding + HNSW layer over the RVF entries. Validate every UI element and every agent workflow via Playwright e2e tests. Brand and terminology cleanup across the app.
+
+This is a fuller pivot than the original "hybrid" framing — every `supabase.from()` callsite gets replaced; the `@supabase/supabase-js` client is removed entirely from the app by end-of-plan. Edge functions (which are LLM calls, not storage) are addressed separately per workflow.
 
 ### Migration matrix (preliminary — Step 04 finalizes)
 
-| Workflow | Classification | Rationale |
-|----------|---------------|-----------|
-| Auth / sessions | `KEEP_SUPABASE` | Persistence + RLS — not a Ruflo concern |
-| Plan persistence | `KEEP_SUPABASE` | Cross-device sync needed |
-| GOAP plan cache | `WASM_LOCAL` | Pure read; semantic dedup works offline |
-| `generate-research-goal` | `HYBRID` | Local goal-text embedding + Supabase write-through for analytics |
-| `research-step` | `HYBRID` | Cache prior steps locally; mutations still server-side |
-| Similar-goal suggestion | `WASM_LOCAL` | Read-only nearest-neighbor over IndexedDB-stored embeddings |
-| Widget embed | `WASM_LOCAL` (best-effort) | Cross-origin iframe may not load WASM — fallback to Supabase |
+| Workflow / surface | Classification | Rationale |
+|---|---|---|
+| Goals table CRUD | `RVF_BROWSER` | IndexedDB-backed, instant reads, persists across sessions |
+| Plans / action items | `RVF_BROWSER` | Same — read-heavy, write occasional, fits a key-value + vector store |
+| Sessions / agent state | `RVF_BROWSER` | Local-first; no cross-device sync requirement in v0.1 |
+| Similar-goal suggestion | `RVF_BROWSER` | Vector search over the goals collection — RVF native strength |
+| GOAP plan caching | `RVF_BROWSER` | Embed goal text, semantic-dedup against prior plans |
+| `generate-research-goal` | `LOCAL_FN` / `GCF` | Local Node function in dev (port `:8787`), Google Cloud Function in prod. API key stays server-side. |
+| `research-step` | `LOCAL_FN` / `GCF` | Same. Function uses Node RVF for any persistence it needs. |
+| `generate-action-items` | `LOCAL_FN` / `GCF` | Same |
+| `optimize-research-config` | `LOCAL_FN` / `GCF` | Same |
+| `research-api` | `LOCAL_FN` / `GCF` | Same |
+| Widget embed | `RVF_BROWSER` (best-effort) | Cross-origin IndexedDB works in iframes; widget gets its own bucket |
+| Auth / sessions | `OUT_OF_SCOPE` | No multi-device sync target in v0.1 — local-first is acceptable. Re-evaluated in a follow-up ADR if Ruflo adopts a federation backend. |
 
-### Out of scope
+### What "replace Supabase" means concretely
 
-- Replacing Supabase auth, billing, or RLS.
+1. **No `@supabase/supabase-js` in `package.json`** by end of plan (removed in Step 21).
+2. **No `import { supabase }` lines** in `src/`.
+3. **Zero `supabase.from()` calls.** Every CRUD goes through `src/integrations/rvf/<entity>Repo.ts` facades.
+4. **Zero `supabase.functions.invoke()` calls.** Edge functions become either browser→Anthropic direct calls (with the user's own key) or — in a follow-up — a small Node service backed by Node RVF.
+5. **`example.env` no longer mentions `VITE_SUPABASE_*`** — only `VITE_RVF_ENABLED` and `VITE_ANTHROPIC_API_KEY` (optional).
+
+### Out of scope (this ADR)
+
+- Building a Node-side RVF service to host edge functions (separate ADR; placeholder is `LLM_DIRECT` for now).
+- Multi-device sync / federation. Local-first is acceptable for v0.1.
 - Mobile / native packaging.
-- Modifying server-side edge function code (only swapping client callsites).
-- `v3/@claude-flow/*` packages.
+- `v3/@claude-flow/*` packages remain unchanged.
+
+### What changes structurally
+
+- `src/integrations/supabase/` — **deleted** (Step 21).
+- `src/integrations/rvf/` — **new**, mirrors the IMemoryBackend interface from `@claude-flow/memory` so server and browser stay format-compatible.
+- `src/integrations/functions/` — **new**, thin client that calls server functions via fetch. Uses `VITE_FUNCTIONS_BASE_URL` (defaults to `http://localhost:8787` in dev, the GCF URL in prod).
+- `functions/` (new dir at repo or `v3/goal_ui/functions/`) — **new**, contains the 5 server functions as plain Node handlers. Local dev: an Express/Hono server on `:8787`. Production: each handler exported as a GCF entrypoint.
+- `supabase/functions/` — **deleted** in Step 21 (after porting). Logic lives in `functions/`.
+
+### Server function topology
+
+```
+Browser (goal.ruv.io)                     Server (LOCAL_FN dev OR GCF prod)
+─────────────────────                     ──────────────────────────────────
+GoalInput.tsx                             functions/generate-research-goal/
+  └─ functions/client.ts ──HTTPS──→         ├─ index.ts        # GCF entrypoint
+                                             ├─ handler.ts      # shared logic
+ResearchReportModal.tsx                      └─ rvf-store.ts    # Node RVF persistence
+  └─ functions/client.ts ──HTTPS──→
+                                           Same shape for: research-step,
+src/integrations/rvf/                       generate-action-items,
+  └─ IndexedDB-backed RVF                   optimize-research-config,
+                                            research-api
+```
+
+Local dev runs both: Vite on `:8080`, function server on `:8787`. Production: Vite static deploy + GCF behind a domain or path-prefix. CORS allowlist locks browser origins.
+
+## Security
+
+This is a public-facing app (`goal.ruv.io`) with LLM-calling server functions. Hardening priorities, in order:
+
+### S1 — API keys never reach the browser
+- All LLM keys (`ANTHROPIC_API_KEY`, etc.) live in the function environment, NOT in any `VITE_*` var. Vite only exposes `VITE_*` to the bundle, so any key without that prefix is server-side by construction.
+- `example.env` documents which vars are server (function-side) vs client (Vite).
+- Pre-commit hook + CI grep: any string matching `sk-ant-`, `sk-`, `AIza`, etc. blocks the commit.
+
+### S2 — Function authn / abuse control
+- Each function validates a `VITE_FUNCTIONS_PUBLIC_TOKEN` header (rotating shared secret, embedded in the bundle — defends against random callers, not against motivated attackers; rate-limit is the real control).
+- Functions enforce per-IP + per-token rate limit (token bucket; 60 req/min default; denial returns 429).
+- CORS allowlist: only `https://goal.ruv.io` in prod, `http://localhost:8080` in dev. No `*`.
+
+### S3 — Prompt injection mitigation
+- User-supplied goal text is wrapped in clear delimiters in every LLM prompt (`<user_input>...</user_input>`).
+- Output schemas are constrained — generated content is JSON-parsed and validated against a Zod schema before reaching the UI. Failures fall back to a safe default + log.
+- LLM responses are NEVER eval'd, NEVER passed to `dangerouslySetInnerHTML`, NEVER concatenated into other prompts without the same delimiter wrapping.
+
+### S4 — Browser-side hardening
+- CSP header: `default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self' <FUNCTIONS_URL>; object-src 'none'`.
+- The widget build sets the same CSP so embedders inherit it.
+- IndexedDB keys are namespaced by app version + RVF schema version, so format upgrades can quarantine old data instead of crashing.
+- Optional: AES-GCM at-rest encryption for IndexedDB blobs, key stored in `crypto.subtle`-wrapped form. Phase 5 step.
+
+### S5 — Supply chain
+- All ruvector + ONNX-WASM packages pinned to exact versions in `package.json` (`"ruvector": "1.2.3"`, no `^`).
+- `npm audit --production --audit-level=high` blocks build on high/critical findings.
+- Lockfile committed; `npm ci` (not `npm install`) in CI.
+- ONNX model SHA-256 verified at load time (built-in to ruvector, just enable the flag).
+
+### S6 — RVF format safety
+- Browser RVF deserializer rejects entries with mismatched magic, version > supported, or sizes that overflow a quota check.
+- Per-entry size cap (e.g. 256 KB) prevents a malicious export from filling IndexedDB.
+- Vector dimensions validated against the embedder's known dim before HNSW insertion.
+
+### S7 — Secrets scanning + telemetry
+- `aidefence` MCP tool (already in Ruflo) runs over committed diffs for PII / secrets.
+- No raw goal text shipped to any third-party telemetry without explicit user consent.
 
 ### Success criteria
 
