@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Target, Sparkles, Settings, TrendingUp, Building2, Heart, GraduationCap, Code, Cpu, Brain, Megaphone } from "lucide-react";
+import { Target, Sparkles, Settings, TrendingUp, Building2, Heart, GraduationCap, Code, Cpu, Brain, Megaphone, History } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { invokeFunction } from "@/integrations/functions/client";
+import { searchPastGoals, type PastGoalHit } from "@/integrations/rvf/goalRepo";
+import { RVF_ENABLED } from "@/lib/featureFlags";
 import { useToast } from "@/hooks/use-toast";
 
 interface GoalInputProps {
@@ -33,6 +35,23 @@ export const GoalInput = ({ onSubmit, isPlanning, onAdvancedSettings, onConfigUp
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialValue]);
   const [isGenerating, setIsGenerating] = useState(false);
+  // R-2.4: HNSW recall of past goals for autocomplete chips. Only
+  // queries when RVF storage is enabled (otherwise nothing has been
+  // indexed). Debounced 300ms so we don't fire on every keystroke.
+  const [pastGoalSuggestions, setPastGoalSuggestions] = useState<PastGoalHit[]>([]);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!RVF_ENABLED) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      void searchPastGoals(goal, 3)
+        .then(setPastGoalSuggestions)
+        .catch(() => setPastGoalSuggestions([]));
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [goal]);
   const { toast } = useToast();
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -138,6 +157,23 @@ export const GoalInput = ({ onSubmit, isPlanning, onAdvancedSettings, onConfigUp
           <p className="text-[10px] sm:text-xs text-muted-foreground mt-1.5 sm:mt-2">
             The GOAP system will analyze your objective and plan the optimal research workflow
           </p>
+          {pastGoalSuggestions.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="past-goal-suggestions">
+              <History className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+              <span className="text-[10px] sm:text-xs text-muted-foreground mr-1">Similar past goals:</span>
+              {pastGoalSuggestions.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setGoal(s.text)}
+                  className="text-[10px] sm:text-xs px-2 py-0.5 rounded-full bg-muted hover:bg-accent transition-colors text-foreground/80 hover:text-foreground"
+                  title={`cosine ${s.score.toFixed(3)}`}
+                >
+                  {s.text.length > 60 ? s.text.slice(0, 57) + '…' : s.text}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="space-y-2">

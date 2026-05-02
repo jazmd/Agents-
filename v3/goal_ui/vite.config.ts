@@ -23,9 +23,24 @@ export default defineConfig(() => {
       // Treat .wasm files as static assets (copied through, not inlined)
       assetsInclude: ['**/*.wasm'],
       resolve: {
-        alias: {
-          "@": path.resolve(__dirname, "./src"),
-        },
+        // Array form so each alias gets exact-prefix matching with a
+        // regex — the object form doesn't always honour the more-
+        // specific alias when both are present, leading to the
+        // dynamic-import target resolving via the broad `@` alias.
+        alias: [
+          {
+            // Widget excludes the past-goals ONNX embedder. The Node-
+            // fallback path of ruvector-onnx-embeddings-wasm uses
+            // __dirname + readFileSync, both undefined in the IIFE
+            // browser context. See `embed.widget-stub.ts`.
+            find: /^@\/integrations\/rvf\/embed$/,
+            replacement: path.resolve(__dirname, "./src/integrations/rvf/embed.widget-stub.ts"),
+          },
+          {
+            find: "@",
+            replacement: path.resolve(__dirname, "./src"),
+          },
+        ],
       },
       optimizeDeps: {
         exclude: RUVECTOR_WASM_PKGS,
