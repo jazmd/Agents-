@@ -189,11 +189,112 @@ Honesty checkpoints at steps 5, 10, 15, 20: full build + Playwright smoke + scre
 - IndexedDB quota on long-lived users could fill; needs an LRU eviction story (planned for Step 22)
 - If Supabase auth tokens leak via `VITE_*` env exposure, the migration doesn't help — orthogonal concern
 
+## RuFlo Platform Integration (Next Phase)
+
+### Honesty: current scope ≠ RuFlo-powered
+
+The migration captured at Step 25 is **RuFlo-format-adjacent** rather than
+RuFlo-powered. goal_ui produces RVF-compatible blobs and uses the same
+ruvector ONNX-WASM packages, but it does **not** consume any of the
+platform's runtime capabilities. Concrete inventory of unused surface area:
+
+| RuFlo capability | Used today | Why it should be used |
+|---|---|---|
+| `@claude-flow/cli` swarm orchestration (26 cmds, 140+ subs) | ❌ | Per-step research could spawn a 4-agent swarm (researcher + analyst + critic + scribe) instead of a single LLM call — measurably better breadth at the same cost. |
+| `@claude-flow/cli` MCP server (314 tools) | ❌ | Exposing goal_ui as an MCP-callable surface lets external claude-flow agents drive research workflows programmatically. |
+| `@claude-flow/memory` (AgentDB + HNSW, 150x–12 500x) | ❌ | Replaces standalone IndexedDB. Brings vector recall across past research sessions, persistent across browsers/devices via the bridge. |
+| `@claude-flow/security` (`InputValidator`, `SafeExecutor`, `PathValidator`, `PasswordHasher`, `TokenGenerator`) | ❌ | goal_ui rolled its own ad-hoc Zod + `wrapUserInput`. Switching to the shared package gets CVE-tracked, audited primitives. |
+| `@claude-flow/hooks` (17 hooks, 12 background workers) | ❌ | `audit`, `testgaps`, `optimize`, `document` workers can run on PR / on schedule against goal_ui without any new infra. |
+| RuVector intelligence pipeline (RETRIEVE → JUDGE → DISTILL → CONSOLIDATE) | ❌ | Each completed research session becomes a trajectory the SONA layer can learn from — successful goal patterns get easier to retrieve. |
+| Hive-mind consensus (Byzantine / Raft / gossip / CRDT) | ❌ | Multi-agent disagreement on a finding gets resolved by quorum vote rather than "first model wins." |
+| RuFlo embeddings package (sql.js, hyperbolic, agentic-flow ONNX) | ❌ | 75× faster embedding via agentic-flow integration; hierarchical embeddings for goal trees. |
+| Cost tracker / Observability | ❌ | Per-research-run cost attribution + correlated traces with the rest of the swarm. |
+
+### Phased integration roadmap
+
+Each phase is self-contained and can ship independently after the
+current PR merges. None require breaking the current contract.
+
+**Phase R-1 — Shared security primitives (small, low risk).**
+Replace `functions/_lib/sanitize.ts` ad-hoc validators with
+`@claude-flow/security`'s `InputValidator` + `SafeExecutor`. Zero
+runtime change, but every CVE patched there now reaches goal_ui.
+DoD: `wrapUserInput` becomes a thin wrapper over `InputValidator.untrustedString()`; existing `check:handler-fallback` stays at 8/8.
+
+**Phase R-2 — AgentDB memory bridge (medium, real leverage).**
+Replace the standalone IndexedDB RVF store with the `@claude-flow/memory` package's browser adapter. Persisted slots (widgetConfig / userGoal / researchConfig) move from local-only to cross-device via the existing memory bridge. Adds HNSW recall: typing a new goal surfaces relevant past goals as suggestions. DoD: `getCurrentGoal()` continues to read/write the same shape; new `searchPastGoals(query)` returns top-K HNSW hits in <10 ms p95.
+
+**Phase R-3 — Swarm-driven research step (medium, big quality gain).**
+The 7-step `executeResearch()` loop in `Index.tsx` calls `_lib/llm.ts` once per step. Replace the per-step call with a 4-agent swarm via `@claude-flow/cli` (`hierarchical` topology, max-agents 4, strategy `specialized`):
+- `researcher` — gathers raw findings
+- `analyst` — extracts structured claims
+- `critic` — challenges claims, flags low-confidence
+- `scribe` — produces final structured output
+
+Each agent runs as a tool-call worker with its own system prompt; consensus is a simple Raft-leader-elected merge. Net cost: ~3.5× tokens per step but measurably broader + self-critiqued findings.
+DoD: an A/B run against the current single-call path shows ≥30% increase in unique citations + ≥20% reduction in hallucination rate (judged by Claude Opus as evaluator).
+
+**Phase R-4 — Intelligence trajectory recording.**
+Every completed research run is a trajectory: `(goal, configHash, perStepFindings, finalReport, userAcceptance)`. Pipe it through the RuVector pipeline:
+- `RETRIEVE` HNSW-fetches similar prior trajectories on goal-input change
+- `JUDGE` records user acceptance (kept / discarded / edited) as the verdict
+- `DISTILL` extracts which preset+prompt combos correlate with kept reports
+- `CONSOLIDATE` updates SONA without catastrophic forgetting
+
+DoD: after 50 trajectories, "next-best preset" suggestion has ≥60% top-1 acceptance.
+
+**Phase R-5 — Expose goal_ui as MCP server.**
+Wrap each of the 4 wired functions plus a new `run_full_research` aggregate as MCP tools so external claude-flow agents can drive end-to-end research from the CLI:
+
+```bash
+npx @claude-flow/cli mcp call ruflo-research run_full_research \
+  --goal "Best family electric car under 50k" \
+  --preset academic-deep
+```
+
+DoD: MCP tool list registered; round-trip test passes against `claude mcp call`.
+
+**Phase R-6 — Hive-mind consensus on contested findings.**
+When two agents in the Phase R-3 swarm disagree on a claim's confidence by >0.2, kick off a 5-node Byzantine quorum vote (faulty tolerance: f < n/3). The dissenting finding either survives with attribution or is dropped with a recorded rationale.
+DoD: `npm run check:consensus` exercises a 5-node swarm with 1 forced-faulty node and verifies the vote terminates correctly.
+
+**Phase R-7 — Hooks-driven CI.**
+Wire `@claude-flow/hooks` workers as part of the goal_ui CI:
+- `audit` runs on every PR (security)
+- `testgaps` runs nightly (coverage analysis)
+- `document` regenerates `docs/ui-inventory.md` on component-tree changes
+- `optimize` runs when build size grows >5%
+
+DoD: each worker is a GitHub Actions job that calls `npx @claude-flow/cli hooks worker dispatch --trigger <name>`.
+
+### Sequencing
+
+```
+Phase R-1 ────────────────┐  (shared security; can ship anytime)
+Phase R-2 ──→ Phase R-4   │  (memory + intelligence; R-2 unlocks R-4)
+Phase R-3 ──→ Phase R-6   │  (swarm + consensus; R-3 unlocks R-6)
+Phase R-5 (MCP)           │  (independent — depends on R-1)
+Phase R-7 (CI)            │  (independent)
+```
+
+R-1 and R-2 are the highest-leverage smallest steps. R-3 is the visible-quality win. R-5 turns goal_ui from a standalone surface into a platform tool.
+
+### Out of scope (intentional, for now)
+
+- Full claude-flow daemon embed inside goal_ui (browser sandbox limits)
+- Federation across multiple goal_ui installs (no current demand)
+- DAA / IoT / Cognitum integrations (orthogonal to research workflow)
+
 ## References
 - ADR-033 — RuVector WASM-MCP integration in ruvocal
 - ADR-076 — Memory Bridge (Claude Code → AgentDB ONNX)
 - ADR-077 — DiskANN persistent index
 - ADR-088 — LongMemEval benchmark for AgentDB
+- `@claude-flow/cli` — 26 commands, 140+ subcommands, 314 MCP tools
+- `@claude-flow/memory` — AgentDB + HNSW (150x–12 500x faster recall)
+- `@claude-flow/security` — InputValidator / SafeExecutor / PathValidator
+- `@claude-flow/hooks` — 17 hooks + 12 background workers
+- RuVector intelligence pipeline — RETRIEVE → JUDGE → DISTILL → CONSOLIDATE
 - Plan file: `v3/goal_ui/.optimization-plan.md`
 - App: `v3/goal_ui/`
 - Live: https://goal.ruv.io

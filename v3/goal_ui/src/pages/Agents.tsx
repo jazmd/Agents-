@@ -713,7 +713,7 @@ export default function Agents() {
                 )}
               </div>
               <div className="space-y-4 relative">
-                <div className="absolute left-2 top-6 bottom-6 w-0.5 bg-gradient-to-b from-purple-500/50 via-blue-500/50 to-green-500/50" 
+                <div className="absolute -left-px sm:-left-[3px] top-6 bottom-6 w-0.5 bg-gradient-to-b from-purple-500/50 via-blue-500/50 to-green-500/50" 
                      style={{ 
                        height: `${shouldShowPhase(researchPhases.length - 1) ? '100%' : `${(currentPhase / researchPhases.length) * 100}%`}`,
                        transition: 'height 0.5s ease-out'
@@ -797,7 +797,7 @@ export default function Agents() {
                   </div>
                   
                   <div className="space-y-4 relative">
-                    <div className="absolute left-2 top-6 bottom-6 w-0.5 bg-gradient-to-b from-purple-500/50 via-blue-500/50 to-green-500/50" />
+                    <div className="absolute -left-px sm:-left-[3px] top-6 bottom-6 w-0.5 bg-gradient-to-b from-purple-500/50 via-blue-500/50 to-green-500/50" />
                     
                     {researchPhases.map((phase, index) => (
                       <div key={index} className="animate-fade-in">
@@ -1068,7 +1068,7 @@ export default function Agents() {
                 )}
               </div>
               <div className="space-y-4 relative">
-                <div className="absolute left-2 top-6 bottom-6 w-0.5 bg-gradient-to-b from-blue-500/50 via-green-500/50 to-emerald-500/50" 
+                <div className="absolute -left-px sm:-left-[3px] top-6 bottom-6 w-0.5 bg-gradient-to-b from-blue-500/50 via-green-500/50 to-emerald-500/50" 
                      style={{ 
                        height: `${devPhase === developmentPhases.length ? '100%' : `${(devPhase / developmentPhases.length) * 100}%`}`,
                        transition: 'height 0.5s ease-out'
