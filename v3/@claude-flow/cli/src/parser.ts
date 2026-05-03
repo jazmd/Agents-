@@ -3,6 +3,7 @@
  * Advanced argument parsing with validation and type coercion
  */
 
+import { getCommandAsync } from './index.js';
 import type { Command, CommandOption, ParsedFlags, CommandContext, V3Config } from './types.js';
 
 export interface ParseResult {
@@ -137,7 +138,7 @@ export class CommandParser {
     });
   }
 
-  parse(args: string[]): ParseResult {
+  async parse(args: string[]): Promise<ParseResult> {
     const result: ParseResult = {
       command: [],
       flags: { _: [] },
@@ -165,7 +166,8 @@ export class CommandParser {
         // Lazy command: we know its name but not its subcommands. Stop the
         // walk here — we'll rely on Pass 2 to push it onto commandPath.
         if (this.lazyCommandNames.has(arg)) {
-          break;
+            resolvedCmd = await getCommandAsync(arg);
+            break;
         }
         // Unknown first positional — not a command. Stop walking.
         break;
