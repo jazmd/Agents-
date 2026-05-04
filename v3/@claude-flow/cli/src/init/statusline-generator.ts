@@ -554,8 +554,14 @@ function getTestStats() {
           countTestFiles(path.join(dir, entry.name), depth + 1);
         } else if (entry.isFile()) {
           const n = entry.name;
-          if (n.includes('.test.') || n.includes('.spec.') || n.includes('_test.') || n.includes('_spec.')) {
-            testFiles++;
+          if (
+            n.includes('.test.') ||
+            n.includes('.spec.') ||
+            n.includes('_test.') ||
+            n.includes('_spec.') ||
+            (n.startsWith('test_') && n.endsWith('.py'))
+          )
+  testFiles++;
           }
         }
       }
