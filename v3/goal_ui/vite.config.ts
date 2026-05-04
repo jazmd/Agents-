@@ -2,6 +2,16 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
 
+// RuVector + ONNX-WASM packages MUST NOT go through Vite's prebundler —
+// they ship .wasm assets that need to load at runtime, not get inlined into
+// JS during esbuild's deps optimization. Listed once and reused for both
+// the main app and the widget build.
+const RUVECTOR_WASM_PKGS = [
+  "ruvector",
+  "ruvector-onnx-embeddings-wasm",
+  "ruvector-attention-wasm",
+];
+
 // https://vitejs.dev/config/
 export default defineConfig(() => {
   const isWidgetBuild = process.env.BUILD_WIDGET === 'true';
@@ -10,10 +20,30 @@ export default defineConfig(() => {
     // Widget-specific build configuration
     return {
       plugins: [react()],
+      // Treat .wasm files as static assets (copied through, not inlined)
+      assetsInclude: ['**/*.wasm'],
       resolve: {
-        alias: {
-          "@": path.resolve(__dirname, "./src"),
-        },
+        // Array form so each alias gets exact-prefix matching with a
+        // regex — the object form doesn't always honour the more-
+        // specific alias when both are present, leading to the
+        // dynamic-import target resolving via the broad `@` alias.
+        alias: [
+          {
+            // Widget excludes the past-goals ONNX embedder. The Node-
+            // fallback path of ruvector-onnx-embeddings-wasm uses
+            // __dirname + readFileSync, both undefined in the IIFE
+            // browser context. See `embed.widget-stub.ts`.
+            find: /^@\/integrations\/rvf\/embed$/,
+            replacement: path.resolve(__dirname, "./src/integrations/rvf/embed.widget-stub.ts"),
+          },
+          {
+            find: "@",
+            replacement: path.resolve(__dirname, "./src"),
+          },
+        ],
+      },
+      optimizeDeps: {
+        exclude: RUVECTOR_WASM_PKGS,
       },
       define: {
         // Define browser-compatible globals
@@ -64,10 +94,14 @@ export default defineConfig(() => {
       port: 8080,
     },
     plugins: [react()],
+    assetsInclude: ['**/*.wasm'],
     resolve: {
       alias: {
         "@": path.resolve(__dirname, "./src"),
       },
+    },
+    optimizeDeps: {
+      exclude: RUVECTOR_WASM_PKGS,
     },
   };
 });

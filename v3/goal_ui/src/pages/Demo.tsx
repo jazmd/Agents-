@@ -125,9 +125,12 @@ const Demo = () => {
         if (link && link.parentNode) {
           link.parentNode.removeChild(link);
         }
-        // Clear widget config
-        delete (window as any).RufloResearchWidgetConfig;
-        delete (window as any).RufloResearchWidget;
+        // Clear widget globals. The widget bundle defines these as
+        // non-configurable on some bundler outputs, so `delete` throws
+        // in strict mode. Assigning undefined achieves the same effect
+        // (next mount overwrites) without the throw.
+        try { (window as { RufloResearchWidgetConfig?: unknown }).RufloResearchWidgetConfig = undefined; } catch { /* ignore */ }
+        try { (window as { RufloResearchWidget?: unknown }).RufloResearchWidget = undefined; } catch { /* ignore */ }
       };
     };
 

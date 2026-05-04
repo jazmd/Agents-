@@ -27,7 +27,8 @@ import {
 } from "lucide-react";
 import { AgentStep, StepStatus } from "@/components/AgentStep";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { GoalInput } from "@/components/GoalInput";
 import { WidgetCustomizer } from "@/components/WidgetCustomizer";
@@ -37,7 +38,18 @@ import { StateAssessmentCard } from "@/components/StateAssessmentCard";
 import { GOAPConfigDisplay } from "@/components/GOAPConfigDisplay";
 import { GOAPPlanner, parseGoal, type Step, type DataItem } from "@/lib/goapPlanner";
 import { useToast } from "@/hooks/use-toast";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeFunction } from "@/integrations/functions/client";
+import { RVF_ENABLED } from "@/lib/featureFlags";
+import { getWidgetConfig, saveWidgetConfig } from "@/integrations/rvf/widgetConfigRepo";
+import { getCurrentGoal, saveCurrentGoal } from "@/integrations/rvf/goalRepo";
+import { getResearchConfig, saveResearchConfig } from "@/integrations/rvf/researchConfigRepo";
+import {
+  addTrajectory,
+  setTrajectoryVerdict,
+  computeGoalHash,
+  computeConfigHash,
+  type Trajectory,
+} from "@/integrations/agentdb/trajectory";
 
 interface WidgetConfig {
   primaryColor: string;
@@ -149,6 +161,34 @@ const Index = () => {
     enableAI: true,
     aiModel: "google/gemini-2.5-flash",
   });
+  // RVF persistence for widgetConfig (Step 11 POC, ADR-093). Behind
+  // VITE_RVF_ENABLED — when off, widgetConfig is React-state-only
+  // (original behavior, resets on reload).
+  const [rvfHydrated, setRvfHydrated] = useState<boolean>(!RVF_ENABLED);
+  useEffect(() => {
+    if (!RVF_ENABLED) return;
+    let cancelled = false;
+    getWidgetConfig<WidgetConfig>()
+      .then((stored) => {
+        if (!cancelled && stored) setWidgetConfig(stored);
+      })
+      .catch((err) => {
+        // IndexedDB unavailable / quota / format mismatch — just fall
+        // back to in-code defaults. Log as warn so the gate's zero-error
+        // rule isn't tripped.
+        console.warn("RVF widgetConfig hydrate failed:", err);
+      })
+      .finally(() => {
+        if (!cancelled) setRvfHydrated(true);
+      });
+    return () => { cancelled = true; };
+  }, []);
+  useEffect(() => {
+    if (!RVF_ENABLED || !rvfHydrated) return;
+    saveWidgetConfig(widgetConfig).catch((err) => {
+      console.warn("RVF widgetConfig save failed:", err);
+    });
+  }, [widgetConfig, rvfHydrated]);
   const [showCustomizer, setShowCustomizer] = useState(false);
   const [userGoal, setUserGoal] = useState<string>("");
   const [isPlanning, setIsPlanning] = useState(false);
@@ -160,10 +200,50 @@ const Index = () => {
   const [showReportModal, setShowReportModal] = useState(false);
   const [showReviseForm, setShowReviseForm] = useState(false);
   const [finalRecommendations, setFinalRecommendations] = useState<any[]>([]);
+  // R-4.2: track the active research run's trajectory so verdict
+  // updates (kept / edited) at the modal level can find the row.
+  const activeTrajectoryRef = useRef<{ goalHash: string; startedAt: number } | null>(null);
   const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
   const [researchConfig, setResearchConfig] = useState<ResearchConfig>(defaultResearchConfig);
   const [currentGOAPState, setCurrentGOAPState] = useState<Record<string, boolean | string | number>>(defaultResearchConfig.stateDefinition.currentState);
   const [showGOAPCards, setShowGOAPCards] = useState(false);
+
+  // RVF persistence for userGoal + researchConfig (Step 18 — extends
+  // Step 11's widgetConfig pattern). Behind VITE_RVF_ENABLED.
+  // Each slot has its own hydrated-gate so a slow IndexedDB read on
+  // one doesn't block the others' persist effects.
+  const [goalHydrated, setGoalHydrated] = useState<boolean>(!RVF_ENABLED);
+  const [researchConfigHydrated, setResearchConfigHydrated] = useState<boolean>(!RVF_ENABLED);
+  useEffect(() => {
+    if (!RVF_ENABLED) return;
+    let cancelled = false;
+    getCurrentGoal()
+      .then((stored) => {
+        if (!cancelled && stored) setUserGoal(stored);
+      })
+      .catch((err) => console.warn("RVF goal hydrate failed:", err))
+      .finally(() => { if (!cancelled) setGoalHydrated(true); });
+    return () => { cancelled = true; };
+  }, []);
+  useEffect(() => {
+    if (!RVF_ENABLED || !goalHydrated) return;
+    saveCurrentGoal(userGoal).catch((err) => console.warn("RVF goal save failed:", err));
+  }, [userGoal, goalHydrated]);
+  useEffect(() => {
+    if (!RVF_ENABLED) return;
+    let cancelled = false;
+    getResearchConfig<ResearchConfig>()
+      .then((stored) => {
+        if (!cancelled && stored) setResearchConfig(stored);
+      })
+      .catch((err) => console.warn("RVF researchConfig hydrate failed:", err))
+      .finally(() => { if (!cancelled) setResearchConfigHydrated(true); });
+    return () => { cancelled = true; };
+  }, []);
+  useEffect(() => {
+    if (!RVF_ENABLED || !researchConfigHydrated) return;
+    saveResearchConfig(researchConfig).catch((err) => console.warn("RVF researchConfig save failed:", err));
+  }, [researchConfig, researchConfigHydrated]);
   const activeStepRef = useRef<HTMLDivElement>(null);
   const goapCardsRef = useRef<HTMLDivElement>(null);
   const objectiveRef = useRef<HTMLDivElement>(null);
@@ -610,7 +690,21 @@ const Index = () => {
     
     setIsRunning(true);
     setShowFinalAnalysis(false);
-    
+
+    // R-4.2: trajectory recording — capture identity at run start.
+    // Per-step accumulator is built into a local array as findings
+    // arrive; the full Trajectory is persisted at run end (single
+    // write, fire-and-forget).
+    const trajGoalHash = computeGoalHash(researchGoal || userGoal || '(unknown)');
+    const trajConfigHash = computeConfigHash({
+      goap: researchConfig.goapConfig,
+      research: researchConfig.researchGuidance,
+      params: researchConfig.parameters,
+    });
+    const trajStartedAt = Date.now();
+    const perStepFindings: Trajectory['perStepFindings'] = [];
+    activeTrajectoryRef.current = { goalHash: trajGoalHash, startedAt: trajStartedAt };
+
     // Animate GOAP cards in
     setTimeout(() => setShowGOAPCards(true), 300);
     
@@ -674,21 +768,19 @@ const Index = () => {
           console.log(`📤 Calling Gemini API for step ${i}`);
           console.log(`   Context: ${previousStepsData.length} previous steps with ${previousStepsData.reduce((sum, s) => sum + s.data.length, 0)} total data items`);
           
-          const { data, error } = await supabase.functions.invoke('research-step', {
-            body: {
-              goal: researchGoal || userGoal,
-              stepTitle: currentStep.title,
-              stepDescription: currentStep.description,
-              stepType: currentStep.id,
-              aiModel: widgetConfig.aiModel,
-              config: {
-                researchGuidance: researchConfig.researchGuidance,
-                prompts: researchConfig.prompts,
-                parameters: researchConfig.parameters,
-                filters: researchConfig.filters,
-              },
-              previousStepsData: previousStepsData,
+          const { data, error } = await invokeFunction<DataItem[]>('research-step', {
+            goal: researchGoal || userGoal,
+            stepTitle: currentStep.title,
+            stepDescription: currentStep.description,
+            stepType: currentStep.id,
+            aiModel: widgetConfig.aiModel,
+            config: {
+              researchGuidance: researchConfig.researchGuidance,
+              prompts: researchConfig.prompts,
+              parameters: researchConfig.parameters,
+              filters: researchConfig.filters,
             },
+            previousStepsData: previousStepsData,
           });
 
           if (error) {
@@ -763,6 +855,29 @@ const Index = () => {
         return newSteps;
       });
 
+      // R-4.2: trajectory per-step boundary — collect a summary of
+      // this step's findings (cap details to keep trajectory small).
+      const stepData = workingSteps[i].data ?? [];
+      const confidences = stepData
+        .map((d) => (d.details as { confidence?: number } | undefined)?.confidence)
+        .filter((c): c is number => typeof c === 'number');
+      perStepFindings.push({
+        stepTitle: workingSteps[i].title,
+        findingCount: stepData.length,
+        findings: stepData.slice(0, 10).map((d) => {
+          const det = d.details as { source?: string; confidence?: number; sources?: string[] } | undefined;
+          const src = det?.source ?? (Array.isArray(det?.sources) ? det.sources[0] : undefined);
+          return {
+            title: String(d.text ?? '').slice(0, 200) || '(untitled)',
+            source: src ? String(src).slice(0, 200) : undefined,
+            confidence: det?.confidence,
+          };
+        }),
+        avgConfidence: confidences.length
+          ? confidences.reduce((a, b) => a + b, 0) / confidences.length
+          : undefined,
+      });
+
       // Wait before moving to next step
       await new Promise(resolve => setTimeout(resolve, 500));
       
@@ -791,15 +906,13 @@ const Index = () => {
           })
         }));
 
-        const { data, error } = await supabase.functions.invoke('research-step', {
-          body: {
-            goal: researchGoal || userGoal,
-            stepTitle: "Final Recommendations",
-            stepDescription: `Based on all research findings, provide specific, actionable recommendations that directly answer: "${researchGoal || userGoal}". Include concrete suggestions with supporting data from the research.`,
-            stepType: "final-report",
-            aiModel: widgetConfig.aiModel,
-            previousStepsData: allResearchContext,
-          },
+        const { data, error } = await invokeFunction<unknown[]>('research-step', {
+          goal: researchGoal || userGoal,
+          stepTitle: "Final Recommendations",
+          stepDescription: `Based on all research findings, provide specific, actionable recommendations that directly answer: "${researchGoal || userGoal}". Include concrete suggestions with supporting data from the research.`,
+          stepType: "final-report",
+          aiModel: widgetConfig.aiModel,
+          previousStepsData: allResearchContext,
         });
 
         if (!error && data && Array.isArray(data)) {
@@ -810,7 +923,33 @@ const Index = () => {
         console.error('Error generating final report:', err);
       }
     }
-    
+
+    // R-4.2: trajectory end boundary — persist the full record.
+    // Fire-and-forget; failures are logged at warn level so a bad
+    // IDB write never blocks the user-facing flow.
+    try {
+      const trajectory: Trajectory = {
+        goalHash: trajGoalHash,
+        goalText: (researchGoal || userGoal || '').slice(0, 2_000),
+        configHash: trajConfigHash,
+        presetId: researchConfig.researchGuidance?.depth ?? 'default',
+        perStepFindings: perStepFindings.length ? perStepFindings : [{
+          stepTitle: 'no-steps-recorded',
+          findingCount: 0,
+          findings: [],
+        }],
+        finalReport: { recommendationsCount: finalRecommendations.length },
+        userVerdict: undefined,
+        startedAt: trajStartedAt,
+        completedAt: Date.now(),
+      };
+      void addTrajectory(trajectory).catch((err) => {
+        console.warn('[trajectory] addTrajectory failed (non-fatal):', err?.message ?? err);
+      });
+    } catch (err) {
+      console.warn('[trajectory] build failed (non-fatal):', (err as Error)?.message ?? err);
+    }
+
     setTimeout(() => {
       setShowFinalAnalysis(true);
     }, 1000);
@@ -908,20 +1047,17 @@ const Index = () => {
   }, [showFinalAnalysis]);
 
   return (
-    <div 
-      className="min-h-screen transition-colors duration-300"
-      style={{ 
-        backgroundColor: widgetConfig.backgroundColor,
-        fontFamily: widgetConfig.fontFamily,
-      }}
+    <div
+      className="min-h-screen bg-background text-foreground transition-colors duration-300"
+      style={{ fontFamily: widgetConfig.fontFamily }}
     >
       {/* Hero Section */}
       <div className="border-b" style={{ borderColor: `${widgetConfig.primaryColor}40` }}>
         <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
           <div className="text-center animate-fade-in">
-            <div 
+            <div
               className="inline-flex items-center gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded border text-xs sm:text-sm mb-3 sm:mb-4"
-              style={{ 
+              style={{
                 backgroundColor: `${widgetConfig.primaryColor}20`,
                 borderColor: `${widgetConfig.primaryColor}40`,
                 color: widgetConfig.primaryColor
@@ -930,10 +1066,10 @@ const Index = () => {
               <Network className="w-3 h-3 sm:w-4 sm:h-4" />
               <span className="text-xs sm:text-sm">{widgetConfig.brandName || "GOAP Multi-Agent System"}</span>
             </div>
-            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-semibold mb-2 sm:mb-3 px-2" style={{ color: "#f5f5f5" }}>
+            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-semibold mb-2 sm:mb-3 px-2 text-foreground">
               {widgetConfig.title}
             </h1>
-            <p className="text-xs sm:text-sm max-w-xl mx-auto px-4 mb-3" style={{ color: "#a3a3a3" }}>
+            <p className="text-xs sm:text-sm max-w-xl mx-auto px-4 mb-3 text-muted-foreground">
               {widgetConfig.description}
             </p>
             <div className="flex justify-center gap-2 flex-wrap">
@@ -980,6 +1116,7 @@ const Index = () => {
                 <span className="hidden sm:inline">{showCustomizer ? "Close" : "Create Widget"}</span>
                 <span className="sm:hidden">{showCustomizer ? "Close" : "Widget"}</span>
               </Button>
+              <ThemeToggle />
             </div>
           </div>
         </div>
@@ -992,6 +1129,9 @@ const Index = () => {
           <DialogContent className="max-w-[95vw] sm:max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
             <DialogHeader>
               <DialogTitle>Widget Customization</DialogTitle>
+              <DialogDescription>
+                Tune colors, branding, and behaviour for the embeddable RuFlo Research widget.
+              </DialogDescription>
             </DialogHeader>
             <WidgetCustomizer
               config={widgetConfig}
@@ -1012,6 +1152,7 @@ const Index = () => {
           <GoalInput
             onSubmit={handleGoalSubmit}
             isPlanning={isPlanning}
+            initialValue={userGoal}
             onAdvancedSettings={() => setShowAdvancedSettings(true)}
             onConfigUpdate={(optimizedConfig) => {
               setResearchConfig(prev => ({
@@ -1054,8 +1195,8 @@ const Index = () => {
             <div className="flex items-center gap-3">
               <Sparkles className="w-5 h-5 animate-spin" style={{ color: widgetConfig.primaryColor }} />
               <div>
-                <h3 className="font-medium" style={{ color: "#f5f5f5" }}>Planning Research Workflow</h3>
-                <p className="text-sm" style={{ color: "#a3a3a3" }}>
+                <h3 className="font-medium text-foreground">Planning Research Workflow</h3>
+                <p className="text-sm text-muted-foreground">
                   Analyzing objective, identifying preconditions, calculating optimal action sequence...
                 </p>
               </div>
@@ -1116,8 +1257,8 @@ const Index = () => {
                 <RotateCcw className="w-4 h-4" />
                 New Research
               </Button>
-              <div className="text-xs sm:text-sm flex-1 min-w-0 text-center px-4" style={{ color: "#a3a3a3" }}>
-                <span className="font-medium" style={{ color: "#f5f5f5" }}>Objective:</span> <span className="break-words">{userGoal}</span>
+              <div className="text-xs sm:text-sm flex-1 min-w-0 text-center px-4 text-muted-foreground">
+                <span className="font-medium text-foreground">Objective:</span> <span className="break-words">{userGoal}</span>
               </div>
               <div className="w-[120px]" />
             </div>
@@ -1182,7 +1323,7 @@ const Index = () => {
                   <div className="text-2xl font-semibold mb-1" style={{ color: widgetConfig.primaryColor }}>
                     {steps.filter((s) => s.status === "completed").length}
                   </div>
-                  <div className="text-xs" style={{ color: "#a3a3a3" }}>Completed</div>
+                  <div className="text-xs text-muted-foreground">Completed</div>
                 </div>
                 <div 
                   className="border p-4 text-center"
@@ -1195,7 +1336,7 @@ const Index = () => {
                   <div className="text-2xl font-semibold mb-1" style={{ color: widgetConfig.primaryColor }}>
                     {steps.filter((s) => s.status === "active").length}
                   </div>
-                  <div className="text-xs" style={{ color: "#a3a3a3" }}>Active</div>
+                  <div className="text-xs text-muted-foreground">Active</div>
                 </div>
                 <div 
                   className="border p-4 text-center"
@@ -1205,10 +1346,10 @@ const Index = () => {
                     borderRadius: widgetConfig.borderRadius,
                   }}
                 >
-                  <div className="text-2xl font-semibold mb-1" style={{ color: "#737373" }}>
+                  <div className="text-2xl font-semibold mb-1 text-muted-foreground">
                     {steps.filter((s) => s.status === "pending").length}
                   </div>
-                  <div className="text-xs" style={{ color: "#a3a3a3" }}>Pending</div>
+                  <div className="text-xs text-muted-foreground">Pending</div>
                 </div>
               </div>
             )}
@@ -1242,31 +1383,31 @@ const Index = () => {
                         Final Research Report
                         <CheckCircle2 className="w-5 h-5" />
                       </h3>
-                      <p className="text-sm mb-4" style={{ color: "#a3a3a3" }}>
+                      <p className="text-sm mb-4 text-muted-foreground">
                         Comprehensive analysis generated by multi-agent GOAP research system
                       </p>
-                      
+
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
-                        <div className="rounded p-3" style={{ backgroundColor: `${widgetConfig.backgroundColor}80` }}>
-                          <div className="text-xs mb-1" style={{ color: "#a3a3a3" }}>Total Steps</div>
-                          <div className="text-xl font-semibold" style={{ color: "#f5f5f5" }}>{steps.length}</div>
+                        <div className="rounded p-3 bg-card">
+                          <div className="text-xs mb-1 text-muted-foreground">Total Steps</div>
+                          <div className="text-xl font-semibold text-foreground">{steps.length}</div>
                         </div>
-                        <div className="rounded p-3" style={{ backgroundColor: `${widgetConfig.backgroundColor}80` }}>
-                          <div className="text-xs mb-1" style={{ color: "#a3a3a3" }}>Data Points</div>
-                          <div className="text-xl font-semibold" style={{ color: "#f5f5f5" }}>
+                        <div className="rounded p-3 bg-card">
+                          <div className="text-xs mb-1 text-muted-foreground">Data Points</div>
+                          <div className="text-xl font-semibold text-foreground">
                             {steps.reduce((acc, step) => acc + (step.data?.length || 0), 0)}
                           </div>
                         </div>
-                        <div className="rounded p-3" style={{ backgroundColor: `${widgetConfig.backgroundColor}80` }}>
-                          <div className="text-xs mb-1" style={{ color: "#a3a3a3" }}>Confidence</div>
+                        <div className="rounded p-3 bg-card">
+                          <div className="text-xs mb-1 text-muted-foreground">Confidence</div>
                           <div className="text-xl font-semibold" style={{ color: widgetConfig.accentColor }}>94%</div>
                         </div>
-                        <div className="rounded p-3" style={{ backgroundColor: `${widgetConfig.backgroundColor}80` }}>
-                          <div className="text-xs mb-1 flex items-center gap-1" style={{ color: "#a3a3a3" }}>
+                        <div className="rounded p-3 bg-card">
+                          <div className="text-xs mb-1 flex items-center gap-1 text-muted-foreground">
                             <Clock className="w-3 h-3" />
                             Duration
                           </div>
-                          <div className="text-xl font-semibold" style={{ color: "#f5f5f5" }}>
+                          <div className="text-xl font-semibold text-foreground">
                             {Math.round(steps.length * 3.5)}s
                           </div>
                         </div>
@@ -1546,10 +1687,20 @@ const Index = () => {
                     New Research
                   </Button>
                   <Button
-                    onClick={() => setShowReportModal(true)}
+                    onClick={() => {
+                      setShowReportModal(true);
+                      // R-4.2: viewing the full report counts as a 'kept'
+                      // signal — the user wanted to inspect the output.
+                      const t = activeTrajectoryRef.current;
+                      if (t) {
+                        void setTrajectoryVerdict(t.goalHash, t.startedAt, 'kept').catch((err) => {
+                          console.warn('[trajectory] verdict update failed:', err?.message ?? err);
+                        });
+                      }
+                    }}
                     size="sm"
                     className="gap-2"
-                    style={{ 
+                    style={{
                       backgroundColor: widgetConfig.accentColor,
                       color: '#fff'
                     }}
@@ -1573,6 +1724,14 @@ const Index = () => {
         onRevise={() => {
           setShowReportModal(false);
           setShowReviseForm(true);
+          // R-4.2: revising = the user found the report not-quite-right.
+          // Tag as 'edited' (overrides any earlier 'kept').
+          const t = activeTrajectoryRef.current;
+          if (t) {
+            void setTrajectoryVerdict(t.goalHash, t.startedAt, 'edited').catch((err) => {
+              console.warn('[trajectory] verdict update failed:', err?.message ?? err);
+            });
+          }
         }}
         primaryColor={widgetConfig.primaryColor}
         accentColor={widgetConfig.accentColor}
@@ -1587,6 +1746,9 @@ const Index = () => {
               <RotateCcw className="w-5 h-5" />
               Revise Research Configuration
             </DialogTitle>
+            <DialogDescription>
+              Adjust the goal, presets, and per-step parameters before re-running the research workflow.
+            </DialogDescription>
           </DialogHeader>
           <ReviseResearchForm
             currentGoal={userGoal}
@@ -1607,6 +1769,9 @@ const Index = () => {
               <Settings className="w-5 h-5" />
               Advanced Research Settings
             </DialogTitle>
+            <DialogDescription>
+              Fine-tune GOAP planner, model routing, and per-step prompts for this research run.
+            </DialogDescription>
           </DialogHeader>
           <ReviseResearchForm
             currentGoal={userGoal || researchConfig.goal}
@@ -1624,10 +1789,12 @@ const Index = () => {
       <footer className="border-t mt-16 py-6" style={{ borderColor: `${widgetConfig.primaryColor}20` }}>
         <div className="max-w-4xl mx-auto px-4 sm:px-6 text-center">
           <p className="text-sm" style={{ color: widgetConfig.secondaryTextColor }}>
+            <span className="font-medium" style={{ color: widgetConfig.primaryColor }}>RuFlo Research</span>
+            <span aria-hidden="true"> · </span>
             Created with <span style={{ color: widgetConfig.accentColor }}>❤️</span> by{" "}
-            <a 
-              href="https://ruv.io" 
-              target="_blank" 
+            <a
+              href="https://ruv.io"
+              target="_blank"
               rel="noopener noreferrer"
               className="font-medium hover:underline transition-colors"
               style={{ color: widgetConfig.primaryColor }}

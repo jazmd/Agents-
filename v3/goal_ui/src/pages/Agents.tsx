@@ -25,8 +25,11 @@ import {
   SkipForward,
   RotateCw,
   Network,
-  CheckCircle2
+  CheckCircle2,
+  ArrowLeft
 } from "lucide-react";
+import { Link as RouterLink } from "react-router-dom";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { AgentStatusCard } from "@/components/agents/AgentStatusCard";
 import { TaskBoard } from "@/components/agents/TaskBoard";
 import { DependencyGraph } from "@/components/agents/DependencyGraph";
@@ -638,16 +641,26 @@ export default function Agents() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
-      <div className="container mx-auto p-6 space-y-6">
+      <div className="container mx-auto p-4 sm:p-6 space-y-6">
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-primary via-purple-500 to-blue-500 bg-clip-text text-transparent">
+        <div className="flex items-start sm:items-center justify-between gap-3 flex-col sm:flex-row">
+          <div className="min-w-0">
+            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-bold bg-gradient-to-r from-primary via-purple-500 to-blue-500 bg-clip-text text-transparent leading-tight">
               Coding Agent Swarm
             </h1>
-            <p className="text-muted-foreground mt-2">
+            <p className="text-sm sm:text-base text-muted-foreground mt-1 sm:mt-2">
               Intelligent multi-agent system for collaborative software development
             </p>
+          </div>
+          <div className="flex items-center gap-2 self-end sm:self-center">
+            <RouterLink to="/">
+              <Button variant="outline" size="sm" className="gap-2 text-xs sm:text-sm">
+                <ArrowLeft className="w-3 h-3 sm:w-4 sm:h-4" />
+                <span className="hidden sm:inline">Back to Research</span>
+                <span className="sm:hidden">Back</span>
+              </Button>
+            </RouterLink>
+            <ThemeToggle />
           </div>
         </div>
 
@@ -713,7 +726,7 @@ export default function Agents() {
                 )}
               </div>
               <div className="space-y-4 relative">
-                <div className="absolute left-2 top-6 bottom-6 w-0.5 bg-gradient-to-b from-purple-500/50 via-blue-500/50 to-green-500/50" 
+                <div className="absolute -left-px sm:-left-[3px] top-6 bottom-6 w-0.5 bg-gradient-to-b from-purple-500/50 via-blue-500/50 to-green-500/50" 
                      style={{ 
                        height: `${shouldShowPhase(researchPhases.length - 1) ? '100%' : `${(currentPhase / researchPhases.length) * 100}%`}`,
                        transition: 'height 0.5s ease-out'
@@ -797,7 +810,7 @@ export default function Agents() {
                   </div>
                   
                   <div className="space-y-4 relative">
-                    <div className="absolute left-2 top-6 bottom-6 w-0.5 bg-gradient-to-b from-purple-500/50 via-blue-500/50 to-green-500/50" />
+                    <div className="absolute -left-px sm:-left-[3px] top-6 bottom-6 w-0.5 bg-gradient-to-b from-purple-500/50 via-blue-500/50 to-green-500/50" />
                     
                     {researchPhases.map((phase, index) => (
                       <div key={index} className="animate-fade-in">
@@ -1068,7 +1081,7 @@ export default function Agents() {
                 )}
               </div>
               <div className="space-y-4 relative">
-                <div className="absolute left-2 top-6 bottom-6 w-0.5 bg-gradient-to-b from-blue-500/50 via-green-500/50 to-emerald-500/50" 
+                <div className="absolute -left-px sm:-left-[3px] top-6 bottom-6 w-0.5 bg-gradient-to-b from-blue-500/50 via-green-500/50 to-emerald-500/50" 
                      style={{ 
                        height: `${devPhase === developmentPhases.length ? '100%' : `${(devPhase / developmentPhases.length) * 100}%`}`,
                        transition: 'height 0.5s ease-out'

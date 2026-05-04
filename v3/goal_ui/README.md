@@ -36,15 +36,30 @@ npm run widget:dev           # build widget + start dev server
 ```
 v3/goal_ui/
 ├── src/
-│   ├── components/          # React components (GoalInput, AgentStep, ResearchReportModal, …)
-│   ├── pages/               # Index, Agents, Demo, NotFound
-│   ├── lib/goapPlanner.ts   # GOAP A* implementation
-│   ├── integrations/supabase/  # Supabase client + types
-│   └── widget.tsx           # Embeddable widget entry
-├── supabase/functions/      # Edge functions (research-step, generate-research-goal, …)
-├── public/                  # Static assets, widget-embed.html demo
-├── docs/                    # DEPLOYMENT.md, WIDGET-INTEGRATION.md, WIDGET_SETUP.md
-└── netlify.toml             # Hosting config
+│   ├── components/             # React components (GoalInput, AgentStep, ResearchReportModal, …)
+│   ├── pages/                  # Index, Agents, Demo, NotFound
+│   ├── lib/goapPlanner.ts      # GOAP A* implementation
+│   ├── lib/featureFlags.ts     # VITE_* feature flag accessors (typed)
+│   ├── integrations/rvf/       # Browser RVF backend (IndexedDB + ruvector ONNX-WASM)
+│   ├── integrations/functions/ # Local/GCF function client (replaces Supabase fns)
+│   └── widget.tsx              # Embeddable widget entry
+├── functions/                  # Local Node + Google Cloud Functions handlers
+│   ├── _lib/sanitize.ts        # wrapUserInput() — prompt-injection defense
+│   ├── server.ts               # Hono dev server on :8787 (CORS + token + rate limit)
+│   └── <fn-name>/{handler,index}.ts  # 4 wired functions
+├── tests/e2e/                  # Playwright suite (22 tests, console-error guard)
+├── scripts/                    # check-secrets, check-rvf-format, check-fn-security, …
+├── docs/
+│   ├── checkpoints/            # Honesty-checkpoint screenshots (step-06/10/15/20/25)
+│   ├── ui-inventory.md         # 76 interactive elements catalogued
+│   ├── workflow-inventory.md   # 5 workflows × paths
+│   ├── migration-matrix.md     # RVF/LOCAL_FN/GCF/DEFER classification
+│   ├── audit-known-issues.md   # Accepted-vulnerability register
+│   ├── DEPLOYMENT.md, WIDGET-INTEGRATION.md, WIDGET_SETUP.md
+├── public/                     # Static assets, widget-embed.html, widget-test.html
+├── playwright.config.ts        # E2E config
+├── netlify.toml                # Hosting config
+└── .optimization-plan.md       # Step-by-step plan (ADR-093 execution log)
 ```
 
 ## Embedding the Widget
@@ -65,7 +80,73 @@ The widget exposes a global `window.RufloResearchWidget` with `init(containerId)
 
 ## Tech Stack
 
-React 18 · TypeScript 5 · Vite 5 · Tailwind 3 · shadcn/ui · Radix UI · React Query · React Router · Supabase Edge Functions · GOAP A* planner
+React 18 · TypeScript 5 · Vite 5 · Tailwind 3 · shadcn/ui · Radix UI · React Query · React Router · Hono (Node) + Google Cloud Functions · Anthropic Messages API · gcloud Secret Manager · RVF (IndexedDB) + ruvector ONNX-WASM (MiniLM-L6, 384d) · GOAP A* planner · Playwright e2e
+
+## Browser Persistence (RVF + ruvector ONNX-WASM)
+
+Per [ADR-093](../docs/adr/ADR-093-goal-ui-ruvector-wasm.md), persistent client state lives in the browser via the **RuFlo Vector Format (RVF)** — a binary file format compatible with the Node `RvfBackend`, stored in IndexedDB through the [`idb`](https://www.npmjs.com/package/idb) wrapper.
+
+| Feature | Detail |
+|---|---|
+| Format | RVF v1 (`magic = "RVF\0"`, header JSON + entries) — same byte layout as `@claude-flow/memory/src/rvf-backend.ts` |
+| Storage | IndexedDB (`ruflo-research-rvf` v1, `entries` ObjectStore + `key` / `namespace` indexes) |
+| Embedder | [`ruvector-onnx-embeddings-wasm`](https://www.npmjs.com/package/ruvector-onnx-embeddings-wasm) — MiniLM-L6, 384-dim, L2-normalized, lazy-loaded |
+| Search | Cosine similarity (linear scan, ~4 ms at 10K × 384 fp32) |
+| Hardening | 256 KB per-entry size cap · `MAX_DIMENSIONS=10000` · vector-dim ≠ header rejected · header-truncation check |
+| Performance | p95 write 0.3 ms · p95 read 0.2 ms (167× / 50× DoD headroom) |
+
+Persisted slots today: `widgetConfig` · `userGoal` · `researchConfig`. Toggle via `VITE_RVF_ENABLED=true`.
+
+> ⚠️ **WASM dependencies are pinned to exact versions.** Upgrades require a Step-22d-style audit of supply chain + browser CSP envelope. See [`docs/audit-known-issues.md`](docs/audit-known-issues.md).
+
+## Functions Backend (LOCAL_FN + GCF)
+
+The 4 wired AI workflows (research-goal generation, per-step research, action-item synthesis, config optimization) run as framework-agnostic Node handlers wrapped under either:
+
+- **Local dev** — Hono on `:8787` (`npm run functions:dev`), CORS allowlist, X-RuFlo-Token check, 60 req/min per-IP rate limit
+- **Production** — Google Cloud Functions (entrypoints in `functions/<name>/index.ts`)
+
+**LLM provider:** Anthropic Messages API directly (no Lovable AI Gateway, no third-party proxy). Default model: `claude-haiku-4-5-20251001` (override via `RUFLO_LLM_MODEL`).
+
+**Credential resolution** — `functions/_lib/secrets.ts` resolves on first call and caches:
+
+1. `ANTHROPIC_API_KEY` env var — fastest local-dev path
+2. **Google Cloud Secret Manager** — required for prod, supported in shared-dev:
+   - Project ID from `GCLOUD_PROJECT_ID` (or auto-detected `GOOGLE_CLOUD_PROJECT` set by GCF)
+   - Secret name from `RUFLO_ANTHROPIC_SECRET_NAME` (default `ruflo-anthropic-api-key`)
+   - Version `latest`
+3. Fall through → handlers serve mock responses (canned `[mock]` strings; the demo flow still renders end-to-end)
+
+Each handler validates LLM tool-call output via Zod and wraps user input in `<user_input>...</user_input>` delimiters (close-tag injection stripped). Malformed model output → 502 (no leakage of unsafe content).
+
+**Setup the production secret (one-time):**
+
+```bash
+# Create the secret
+gcloud secrets create ruflo-anthropic-api-key --replication-policy=automatic
+
+# Add a version
+echo -n "sk-ant-..." | gcloud secrets versions add ruflo-anthropic-api-key --data-file=-
+
+# Grant access to the GCF runtime service account
+gcloud secrets add-iam-policy-binding ruflo-anthropic-api-key \
+  --member="serviceAccount:<runtime-sa>@<project>.iam.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+```
+
+## Quality Gates
+
+```bash
+npm run check:secrets          # API-key shape scanner across src/, dist/, public/, …
+npm run check:audit            # npm audit --audit-level=critical (deploy block)
+npm run check:audit:high       # awareness gate — surfaces high vulns (non-blocking)
+npm run check:handler-fallback # 4 handlers × Zod schema neg tests + sanitizer test
+npm run check:rvf-format       # 5 negative + 5 happy-path RVF deserializer tests
+npm run check:fn-security      # 401/CORS-empty/429 enforcement (server must be running)
+npm run test:e2e               # Playwright suite (22 tests; smoke + ui + workflows + persistence + widget)
+```
+
+`postbuild` automatically runs `check:secrets` after every `npm run build`.
 
 ## Deployment
 
@@ -73,13 +154,25 @@ Hosted on Netlify (`netlify.toml`) at [goal.ruv.io](https://goal.ruv.io/). See [
 
 ## Environment
 
-Copy `example.env` → `.env` and set the Supabase publishable variables (all `VITE_*` prefixed and safe to ship to the browser):
+Copy `example.env` → `.env`. **Public** vars are `VITE_*` prefixed and ship in the browser bundle. **Server-only** vars MUST never be `VITE_*` prefixed.
 
+```bash
+# === Public (VITE_-prefixed; safe in browser bundle) ===
+VITE_RVF_ENABLED=false                      # toggle browser RVF persistence
+VITE_FUNCTIONS_BASE_URL=http://localhost:8787   # LOCAL_FN dev / GCF prod URL
+VITE_FUNCTIONS_PUBLIC_TOKEN=dev-token-change-me # weak abuse-control token
+
+# === Server-only (NEVER VITE_-prefixed) ===
+ANTHROPIC_API_KEY=sk-ant-...                # local-dev fallback (Secret Manager preferred for prod)
+GCLOUD_PROJECT_ID=my-gcp-project            # required for Secret Manager fallback
+RUFLO_ANTHROPIC_SECRET_NAME=ruflo-anthropic-api-key  # override default secret name
+RUFLO_LLM_MODEL=claude-haiku-4-5-20251001   # override default model
+RUFLO_FUNCTIONS_TOKEN=...                   # production override of public token (validated server-side)
+RUFLO_ALLOWED_ORIGINS=...                   # CSV CORS allowlist (defaults: localhost:8080,goal.ruv.io)
+RUFLO_RATE_LIMIT_PER_MIN=60                 # per-IP token bucket
 ```
-VITE_SUPABASE_URL=...
-VITE_SUPABASE_PROJECT_ID=...
-VITE_SUPABASE_PUBLISHABLE_KEY=...
-```
+
+Per [ADR-093 §S1](../docs/adr/ADR-093-goal-ui-ruvector-wasm.md), the `VITE_*` rule is enforced by `npm run check:secrets`: any `VITE_*=key-shape` assignment fails the build.
 
 ## License
 

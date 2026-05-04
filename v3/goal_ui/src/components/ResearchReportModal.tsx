@@ -38,7 +38,7 @@ import {
   CheckSquare,
 } from "lucide-react";
 import { Step } from "@/lib/goapPlanner";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeFunction } from "@/integrations/functions/client";
 
 interface ResearchReportModalProps {
   open: boolean;
@@ -116,20 +116,43 @@ export const ResearchReportModal = ({
       }));
 
       // Call AI to generate contextual action items
-      const { data, error } = await supabase.functions.invoke('generate-action-items', {
-        body: {
-          goal: userGoal,
-          researchContext: researchContext,
-          totalSteps: steps.length,
-          totalDataPoints: steps.reduce((sum, step) => sum + step.data.length, 0)
-        }
+      const { data, error } = await invokeFunction<{ actionItems?: unknown[]; summary?: string }>('generate-action-items', {
+        goal: userGoal,
+        researchContext: researchContext,
+        totalSteps: steps.length,
+        totalDataPoints: steps.reduce((sum, step) => sum + step.data.length, 0),
       });
 
       if (!error && data) {
-        if (data.actionItems) {
-          setAiActionItems(data.actionItems);
+        if (Array.isArray(data.actionItems)) {
+          // Normalize: ensure every item has the fields the renderer needs.
+          // Real upstream + mock both return the rich shape; this is the
+          // last-line guard against thinned/malformed responses.
+          const normalized: ActionItem[] = data.actionItems
+            .filter((item): item is Record<string, unknown> => typeof item === 'object' && item !== null)
+            .map((item, idx) => {
+              const priorityRaw = String((item as { priority?: unknown }).priority ?? 'Medium');
+              const priorityCap = priorityRaw.charAt(0).toUpperCase() + priorityRaw.slice(1).toLowerCase();
+              const priority = (['High', 'Medium', 'Low'] as const).includes(priorityCap as 'High' | 'Medium' | 'Low')
+                ? (priorityCap as 'High' | 'Medium' | 'Low')
+                : 'Medium';
+              return {
+                id: String((item as { id?: unknown }).id ?? `ai-${idx + 1}`),
+                title: String((item as { title?: unknown }).title ?? 'Untitled action'),
+                description: String((item as { description?: unknown }).description ?? ''),
+                timeline: String((item as { timeline?: unknown }).timeline ?? ''),
+                timelineDetails: String((item as { timelineDetails?: unknown }).timelineDetails ?? ''),
+                priority,
+                resources: ((item as { resources?: ActionItem['resources'] }).resources) ?? {},
+                metrics: Array.isArray((item as { metrics?: unknown }).metrics) ? ((item as { metrics: string[] }).metrics) : [],
+                risks: Array.isArray((item as { risks?: unknown }).risks) ? ((item as { risks: ActionItem['risks'] }).risks) : [],
+                references: Array.isArray((item as { references?: unknown }).references) ? ((item as { references: ActionItem['references'] }).references) : [],
+                researchContext: String((item as { researchContext?: unknown }).researchContext ?? ''),
+              };
+            });
+          setAiActionItems(normalized);
         }
-        if (data.summary) {
+        if (typeof data.summary === 'string') {
           setAiSummary(data.summary);
         }
       }
@@ -802,7 +825,7 @@ export const ResearchReportModal = ({
                                   <Clock className="w-3 h-3" />
                                   <span>{action.timeline}</span>
                                 </div>
-                                {action.resources.budget && (
+                                {action.resources?.budget && (
                                   <div className="flex items-center gap-1">
                                     <DollarSign className="w-3 h-3" />
                                     <span className="hidden sm:inline">{action.resources.budget}</span>
@@ -825,7 +848,7 @@ export const ResearchReportModal = ({
                               <Brain className="w-3 h-3" style={{ color: primaryColor }} />
                               <span className="font-medium">Research Context</span>
                             </div>
-                            <p className="text-muted-foreground">{action.researchContext}</p>
+                            <p className="text-muted-foreground">{action.researchContext ?? '—'}</p>
                           </div>
 
                           {/* Timeline Details */}
@@ -834,14 +857,14 @@ export const ResearchReportModal = ({
                               <Clock className="w-3 h-3" style={{ color: accentColor }} />
                               <h6 className="text-xs font-semibold">Timeline Breakdown</h6>
                             </div>
-                            <p className="text-xs text-muted-foreground">{action.timelineDetails}</p>
+                            <p className="text-xs text-muted-foreground">{action.timelineDetails ?? action.timeline}</p>
                           </div>
 
                           {/* Resources */}
                           <div>
                             <h6 className="text-xs font-semibold mb-2">Resource Requirements</h6>
                             <div className="space-y-2">
-                              {action.resources.budget && (
+                              {action.resources?.budget && (
                                 <div className="flex items-start gap-2 text-xs">
                                   <DollarSign className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: accentColor }} />
                                   <div>
@@ -850,7 +873,7 @@ export const ResearchReportModal = ({
                                   </div>
                                 </div>
                               )}
-                              {action.resources.team && (
+                              {action.resources?.team && (
                                 <div className="flex items-start gap-2 text-xs">
                                   <Users className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: accentColor }} />
                                   <div>
@@ -859,7 +882,7 @@ export const ResearchReportModal = ({
                                   </div>
                                 </div>
                               )}
-                              {action.resources.tools && action.resources.tools.length > 0 && (
+                              {action.resources?.tools && action.resources.tools.length > 0 && (
                                 <div className="flex items-start gap-2 text-xs">
                                   <Target className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: accentColor }} />
                                   <div className="flex-1">
@@ -884,7 +907,7 @@ export const ResearchReportModal = ({
                               <h6 className="text-xs font-semibold">Success Metrics & KPIs</h6>
                             </div>
                             <ul className="space-y-1">
-                              {action.metrics.map((metric, idx) => (
+                              {(action.metrics ?? []).map((metric, idx) => (
                                 <li key={idx} className="flex items-start gap-2 text-xs">
                                   <CheckSquare className="w-3 h-3 mt-0.5 flex-shrink-0 text-muted-foreground" />
                                   <span className="text-muted-foreground">{metric}</span>
@@ -900,7 +923,7 @@ export const ResearchReportModal = ({
                               <h6 className="text-xs font-semibold">Risks & Mitigation Strategies</h6>
                             </div>
                             <div className="space-y-2">
-                              {action.risks.map((risk, idx) => (
+                              {(action.risks ?? []).map((risk, idx) => (
                                 <div key={idx} className="rounded-lg bg-muted/50 p-2 text-xs">
                                   <div className="flex items-start gap-1.5 mb-1">
                                     <span className="font-medium text-orange-600">⚠</span>
@@ -916,14 +939,14 @@ export const ResearchReportModal = ({
                           </div>
 
                           {/* References */}
-                          {action.references.length > 0 && (
+                          {(action.references?.length ?? 0) > 0 && (
                             <div>
                               <div className="flex items-center gap-1.5 mb-2">
                                 <ExternalLink className="w-3 h-3" style={{ color: accentColor }} />
                                 <h6 className="text-xs font-semibold">Implementation Resources</h6>
                               </div>
                               <div className="space-y-1">
-                                {action.references.map((ref, idx) => (
+                                {(action.references ?? []).map((ref, idx) => (
                                   <a
                                     key={idx}
                                     href={ref.url}

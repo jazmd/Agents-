@@ -1,9 +1,12 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { Target, Sparkles, Settings, TrendingUp, Building2, Heart, GraduationCap, Code, Cpu, Brain, Megaphone } from "lucide-react";
+import { Target, Sparkles, Settings, TrendingUp, Building2, Heart, GraduationCap, Code, Cpu, Brain, Megaphone, History } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { supabase } from "@/integrations/supabase/client";
+import { invokeFunction } from "@/integrations/functions/client";
+import { searchPastGoals, type PastGoalHit } from "@/integrations/rvf/goalRepo";
+import { searchKeptTrajectoryGoals, type KeptGoalHit } from "@/integrations/agentdb/trajectory";
+import { RVF_ENABLED } from "@/lib/featureFlags";
 import { useToast } from "@/hooks/use-toast";
 
 interface GoalInputProps {
@@ -11,11 +14,58 @@ interface GoalInputProps {
   isPlanning: boolean;
   onAdvancedSettings?: () => void;
   onConfigUpdate?: (config: any) => void;
+  /**
+   * One-shot hydration source for the goal textarea (e.g. from
+   * RVF persistence in Index.tsx). Only adopted when the textarea
+   * is empty — typing into the field "owns" it from then on so an
+   * upstream prop change doesn't clobber in-progress edits.
+   */
+  initialValue?: string;
 }
 
-export const GoalInput = ({ onSubmit, isPlanning, onAdvancedSettings, onConfigUpdate }: GoalInputProps) => {
-  const [goal, setGoal] = useState("");
+export const GoalInput = ({ onSubmit, isPlanning, onAdvancedSettings, onConfigUpdate, initialValue }: GoalInputProps) => {
+  const [goal, setGoal] = useState(initialValue ?? "");
+  // Adopt initialValue when it arrives (e.g. RVF hydrate-on-mount
+  // resolves after the component mounted with empty defaults).
+  // Only hydrate while the textarea is still empty so user typing
+  // wins.
+  useEffect(() => {
+    if (initialValue && !goal) setGoal(initialValue);
+    // Intentionally ignore `goal` in deps — we only want to react
+    // to upstream initialValue changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialValue]);
   const [isGenerating, setIsGenerating] = useState(false);
+  // R-2.4 + R-4.3: HNSW recall for autocomplete chips. Two tiers:
+  //   1. KEPT trajectory goals (R-4.3) — high signal: goals from
+  //      research runs the user marked as 'kept'. Surfaced first.
+  //   2. Past goals (R-2.4) — broader: every saved goal ≥10 chars.
+  //      Used as fallback when there are no kept-trajectory hits.
+  // Debounced 300ms; only queries when RVF storage is enabled.
+  type Suggestion = { id: string; text: string; score: number; kind: 'kept' | 'past' };
+  const [goalSuggestions, setGoalSuggestions] = useState<Suggestion[]>([]);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!RVF_ENABLED) return;
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const keptHits: KeptGoalHit[] = await searchKeptTrajectoryGoals(goal, 3);
+        if (keptHits.length > 0) {
+          setGoalSuggestions(keptHits.map((h) => ({ id: h.id, text: h.text, score: h.score, kind: 'kept' as const })));
+          return;
+        }
+        // Fallback to broader past-goals recall.
+        const pastHits: PastGoalHit[] = await searchPastGoals(goal, 3);
+        setGoalSuggestions(pastHits.map((h) => ({ id: h.id, text: h.text, score: h.score, kind: 'past' as const })));
+      } catch {
+        setGoalSuggestions([]);
+      }
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [goal]);
   const { toast } = useToast();
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -52,18 +102,14 @@ export const GoalInput = ({ onSubmit, isPlanning, onAdvancedSettings, onConfigUp
     try {
       // Generate goal and optimize config in parallel
       const [goalResult, configResult] = await Promise.all([
-        supabase.functions.invoke('generate-research-goal', {
-          body: { category }
+        invokeFunction<{ goals?: string[] }>('generate-research-goal', { category }),
+        invokeFunction<{ config?: unknown }>('optimize-research-config', {
+          preset: categoryToPresetMap[category] || 'academic-deep',
+          currentGoal: '',
         }),
-        supabase.functions.invoke('optimize-research-config', {
-          body: { 
-            preset: categoryToPresetMap[category] || 'academic-deep',
-            currentGoal: '' 
-          }
-        })
       ]);
 
-      if (goalResult.error) throw goalResult.error;
+      if (goalResult.error) throw new Error(goalResult.error.message);
 
       if (goalResult.data?.goals && goalResult.data.goals.length > 0) {
         // Set the first generated goal
@@ -125,6 +171,31 @@ export const GoalInput = ({ onSubmit, isPlanning, onAdvancedSettings, onConfigUp
           <p className="text-[10px] sm:text-xs text-muted-foreground mt-1.5 sm:mt-2">
             The GOAP system will analyze your objective and plan the optimal research workflow
           </p>
+          {goalSuggestions.length > 0 && (
+            <div className="mt-2 flex flex-wrap items-center gap-1.5" data-testid="past-goal-suggestions">
+              <History className="w-3 h-3 text-muted-foreground flex-shrink-0" />
+              <span className="text-[10px] sm:text-xs text-muted-foreground mr-1">
+                {goalSuggestions[0].kind === 'kept' ? 'Kept past goals:' : 'Similar past goals:'}
+              </span>
+              {goalSuggestions.map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setGoal(s.text)}
+                  className={cn(
+                    'text-[10px] sm:text-xs px-2 py-0.5 rounded-full transition-colors',
+                    s.kind === 'kept'
+                      ? 'bg-primary/10 hover:bg-primary/20 text-primary'
+                      : 'bg-muted hover:bg-accent text-foreground/80 hover:text-foreground',
+                  )}
+                  title={`cosine ${s.score.toFixed(3)} · ${s.kind === 'kept' ? 'kept trajectory' : 'past goal'}`}
+                  data-suggestion-kind={s.kind}
+                >
+                  {s.text.length > 60 ? s.text.slice(0, 57) + '…' : s.text}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="space-y-2">
@@ -179,6 +250,11 @@ export const GoalInput = ({ onSubmit, isPlanning, onAdvancedSettings, onConfigUp
             </>
           )}
         </Button>
+        {!goal.trim() && !isPlanning && (
+          <p className="text-[10px] sm:text-xs text-muted-foreground text-center -mt-2">
+            Type a goal above or pick a category to begin
+          </p>
+        )}
       </form>
     </div>
   );
