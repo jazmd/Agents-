@@ -1446,10 +1446,8 @@ async function modifyGitCommitCommand(subArgs, flags) {
     ? `[${type}] ${commitMsg} (${ticket})`
     : `[${type}] ${commitMsg}`;
 
-  // Add co-author
-  if (!/Co-Authored-By/.test(command)) {
-    formattedMsg += `\n\n🤖 Generated with Claude Flow\nCo-Authored-By: claude-flow <noreply@ruv.io>`;
-  }
+  // Do not add Co-Authored-By by default
+ // Preserve user-authored commit message exactly unless explicitly provided
 
   // Replace message in command
   const modifiedCommand = command.replace(
