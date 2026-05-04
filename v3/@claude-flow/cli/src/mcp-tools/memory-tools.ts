@@ -30,9 +30,10 @@ interface LegacyMemoryStore {
   version: string;
 }
 
-// Paths
-const MEMORY_DIR = '.claude-flow/memory';
+// #1604: Align with memory-initializer.ts — single source of truth is .swarm/memory.db
+const MEMORY_DIR = '.swarm';
 const LEGACY_MEMORY_FILE = 'store.json';
+const LEGACY_MEMORY_DIR = '.claude-flow/memory';
 const MIGRATION_MARKER = '.migrated-to-sqlite';
 
 function getMemoryDir(): string {
@@ -80,11 +81,11 @@ function validateMemoryInput(key?: string, value?: string, query?: string, names
 }
 
 /**
- * Check if legacy JSON store exists and needs migration
+ * Check if legacy JSON store exists in old .claude-flow/memory/ location
  */
 function hasLegacyStore(): boolean {
-  const legacyPath = getLegacyPath();
-  const migrationMarker = getMigrationMarkerPath();
+  const legacyPath = resolve(join(LEGACY_MEMORY_DIR, LEGACY_MEMORY_FILE));
+  const migrationMarker = resolve(join(LEGACY_MEMORY_DIR, MIGRATION_MARKER));
   return existsSync(legacyPath) && !existsSync(migrationMarker);
 }
 
@@ -93,9 +94,9 @@ function hasLegacyStore(): boolean {
  */
 function loadLegacyStore(): LegacyMemoryStore | null {
   try {
-    const path = getLegacyPath();
-    if (existsSync(path)) {
-      const data = readFileSync(path, 'utf-8');
+    const legacyPath = resolve(join(LEGACY_MEMORY_DIR, LEGACY_MEMORY_FILE));
+    if (existsSync(legacyPath)) {
+      const data = readFileSync(legacyPath, 'utf-8');
       return JSON.parse(data);
     }
   } catch {
@@ -108,8 +109,9 @@ function loadLegacyStore(): LegacyMemoryStore | null {
  * Mark migration as complete
  */
 function markMigrationComplete(): void {
-  ensureMemoryDir();
-  writeFileSync(getMigrationMarkerPath(), JSON.stringify({
+  const legacyDir = resolve(LEGACY_MEMORY_DIR);
+  if (!existsSync(legacyDir)) mkdirSync(legacyDir, { recursive: true });
+  writeFileSync(resolve(join(LEGACY_MEMORY_DIR, MIGRATION_MARKER)), JSON.stringify({
     migratedAt: new Date().toISOString(),
     version: '3.0.0',
   }), 'utf-8');
@@ -141,43 +143,48 @@ async function getMemoryFunctions() {
 }
 
 /**
- * Ensure memory database is initialized and migrate legacy data if needed
+ * Ensure memory database is initialized and migrate legacy data if needed.
+ * #1606: Wrapped in try/catch to prevent process-level crashes that kill
+ * the stdio MCP transport on Windows/Codex.
  */
 async function ensureInitialized(): Promise<void> {
-  const { initializeMemoryDatabase, checkMemoryInitialization, storeEntry } = await getMemoryFunctions();
+  try {
+    const { initializeMemoryDatabase, checkMemoryInitialization, storeEntry } = await getMemoryFunctions();
 
-  // Check if already initialized
-  const status = await checkMemoryInitialization();
-  if (!status.initialized) {
-    await initializeMemoryDatabase({ force: false, verbose: false });
-  }
-
-  // Migrate legacy JSON data if exists
-  if (hasLegacyStore()) {
-    const legacyStore = loadLegacyStore();
-    if (legacyStore && Object.keys(legacyStore.entries).length > 0) {
-      console.error('[MCP Memory] Migrating legacy JSON store to sql.js...');
-      let migrated = 0;
-
-      for (const [key, entry] of Object.entries(legacyStore.entries)) {
-        try {
-          // Convert value to string for storage
-          const value = typeof entry.value === 'string' ? entry.value : JSON.stringify(entry.value);
-          await storeEntry({
-            key,
-            value,
-            namespace: 'default',
-            generateEmbeddingFlag: true,
-          });
-          migrated++;
-        } catch (e) {
-          console.error(`[MCP Memory] Failed to migrate key "${key}":`, e);
-        }
-      }
-
-      console.error(`[MCP Memory] Migrated ${migrated}/${Object.keys(legacyStore.entries).length} entries`);
-      markMigrationComplete();
+    // Check if already initialized
+    const status = await checkMemoryInitialization();
+    if (!status.initialized) {
+      await initializeMemoryDatabase({ force: false, verbose: false });
     }
+
+    // Migrate legacy JSON data if exists (from old .claude-flow/memory/ location)
+    if (hasLegacyStore()) {
+      const legacyStore = loadLegacyStore();
+      if (legacyStore && Object.keys(legacyStore.entries).length > 0) {
+        console.error('[MCP Memory] Migrating legacy JSON store to sql.js...');
+        let migrated = 0;
+
+        for (const [key, entry] of Object.entries(legacyStore.entries)) {
+          try {
+            const value = typeof entry.value === 'string' ? entry.value : JSON.stringify(entry.value);
+            await storeEntry({
+              key,
+              value,
+              namespace: 'default',
+              generateEmbeddingFlag: true,
+            });
+            migrated++;
+          } catch (e) {
+            console.error(`[MCP Memory] Failed to migrate key "${key}":`, e);
+          }
+        }
+
+        console.error(`[MCP Memory] Migrated ${migrated}/${Object.keys(legacyStore.entries).length} entries`);
+        markMigrationComplete();
+      }
+    }
+  } catch (error) {
+    console.error('[MCP Memory] Initialization failed:', error instanceof Error ? error.message : error);
   }
 }
 
@@ -337,6 +344,7 @@ export const memoryTools: MCPTool[] = [
         namespace: { type: 'string', description: 'Namespace to search (default: "default")' },
         limit: { type: 'number', description: 'Maximum results (default: 10)' },
         threshold: { type: 'number', description: 'Minimum similarity threshold 0-1 (default: 0.3)' },
+        smart: { type: 'boolean', description: 'Enable SmartRetrieval pipeline — query expansion, RRF fusion, recency boost, MMR diversity (default: false)' },
       },
       required: ['query'],
     },
@@ -346,14 +354,68 @@ export const memoryTools: MCPTool[] = [
 
       const query = input.query as string;
       const namespace = (input.namespace as string) || 'default';
-      const limit = (input.limit as number) || 10;
-      const threshold = (input.threshold as number) || 0.3;
+      const limit = (input.limit as number) ?? 10;
+      const threshold = (input.threshold as number) ?? 0.3;
 
       validateMemoryInput(undefined, undefined, query);
 
       const startTime = performance.now();
 
       try {
+        if (input.smart) {
+          // SmartRetrieval pipeline (ADR-090)
+          const { smartSearch } = await import('@claude-flow/memory');
+
+          // Adapt searchEntries to the SearchFn interface
+          const rawSearch = async (req: { query: string; namespace?: string; limit?: number; threshold?: number }) => {
+            const r = await searchEntries({
+              query: req.query,
+              namespace: req.namespace || namespace,
+              limit: req.limit || limit * 3,
+              threshold: req.threshold ?? threshold,
+            });
+            return {
+              results: r.results.map(e => ({
+                id: e.id,
+                key: e.key,
+                content: e.content,
+                score: e.score,
+                namespace: e.namespace,
+              })),
+            };
+          };
+
+          const smartResult = await smartSearch(rawSearch, {
+            query,
+            namespace,
+            limit,
+            threshold,
+          });
+
+          const duration = performance.now() - startTime;
+
+          const results = smartResult.results.map(r => {
+            let value: unknown = r.content;
+            try { value = JSON.parse(r.content); } catch { /* keep as string */ }
+            return {
+              key: r.key,
+              namespace: r.namespace,
+              value,
+              similarity: r.score,
+            };
+          });
+
+          return {
+            query,
+            results,
+            total: results.length,
+            searchTime: `${duration.toFixed(2)}ms`,
+            backend: 'SmartRetrieval (RRF + MMR + Recency)',
+            stats: smartResult.stats,
+          };
+        }
+
+        // Original non-smart path (unchanged)
         const result = await searchEntries({
           query,
           namespace,
@@ -775,7 +837,7 @@ export const memoryTools: MCPTool[] = [
       validateMemoryInput(undefined, undefined, input.query as string);
 
       const query = input.query as string;
-      const limit = (input.limit as number) || 10;
+      const limit = (input.limit as number) ?? 10;
       const ns = input.namespace as string | undefined;
 
       if (ns) { const vNs = validateIdentifier(ns, 'namespace'); if (!vNs.valid) return { success: false, query, results: [], total: 0, error: vNs.error }; }
