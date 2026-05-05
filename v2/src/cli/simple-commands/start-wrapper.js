@@ -3,13 +3,18 @@ import { printSuccess, printError, printWarning, printInfo } from '../utils.js';
 import { promises as fs } from 'fs';
 import { cwd, exit, existsSync } from '../node-compat.js';
 import { compat } from '../runtime-detector.js';
+import { memoryInitCommand } from './memory.js';
+import { daemonStartCommand } from './daemon.js';
 
 export async function startCommand(subArgs, flags) {
+  if (subArgs[0] === 'all') {
+    await memoryInitCommand([]);
+    await daemonStartCommand([]);
+    return startCommand([], flags);
+  }
+
   // Show help if requested
   if (flags.help || flags.h || subArgs.includes('--help') || subArgs.includes('-h')) {
-    showStartHelp();
-    return;
-  }
 
   // Parse start options
   const daemon = subArgs.includes('--daemon') || subArgs.includes('-d') || flags.daemon;
@@ -245,6 +250,7 @@ function showStartHelp() {
   console.log();
   console.log('Examples:');
   console.log('  claude-flow start                    # Start in interactive mode');
+  console.log('  claude-flow start all           # Start full local stack');
   console.log('  claude-flow start --daemon           # Start as background daemon');
   console.log('  claude-flow start --port 8080        # Use custom server port');
   console.log('  claude-flow start --ui               # Launch terminal-based UI');
