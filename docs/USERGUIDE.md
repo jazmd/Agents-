@@ -7410,7 +7410,7 @@ npx ruflo@latest doctor --fix
 | V2 Command | V3 Command | Notes |
 |------------|------------|-------|
 | `ruflo start` | `ruflo mcp start` | MCP is explicit |
-| `ruflo init` | `ruflo init --wizard` | Interactive mode |
+| `ruflo init` | `ruflo init wizard` | Interactive setup (subcommand, not a flag) |
 | `ruflo spawn <type>` | `ruflo agent spawn -t <type>` | Nested under `agent` |
 | `ruflo swarm create` | `ruflo swarm init --topology mesh` | Explicit topology |
 | `--pattern-store path` | `--memory-backend agentdb` | Backend selection |
