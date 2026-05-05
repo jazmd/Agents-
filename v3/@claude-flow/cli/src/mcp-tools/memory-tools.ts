@@ -10,7 +10,8 @@
  * @module v3/cli/mcp-tools/memory-tools
  */
 
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
+import { homedir } from 'os';
 import { join, resolve } from 'path';
 import type { MCPTool } from './types.js';
 import { validateIdentifier } from './validate-input.js';
@@ -191,7 +192,7 @@ async function ensureInitialized(): Promise<void> {
 export const memoryTools: MCPTool[] = [
   {
     name: 'memory_store',
-    description: 'Store a value in memory with vector embedding for semantic search (sql.js + HNSW backend). Use upsert=true to update existing keys.',
+    description: 'Persistent key-value store with vector embedding — survives across sessions and is searchable by meaning, not just by file path. Use when native Write is wrong because the data is not a file (e.g. a learned pattern, a decision, a budget config) AND you need to recall it later by semantic query, not by path. Defaults to namespace="default"; pass --upsert=true to update an existing key.',
     category: 'memory',
     inputSchema: {
       type: 'object',
@@ -271,7 +272,7 @@ export const memoryTools: MCPTool[] = [
   },
   {
     name: 'memory_retrieve',
-    description: 'Retrieve a value from memory by key',
+    description: 'Read back a value previously stored via memory_store, by exact (namespace, key) — lossless, includes metadata. Use when native Read is wrong because the value is not a file (it lives in the .swarm/memory.db SQLite store) AND you know the exact key. For semantic lookup by meaning, use memory_search.',
     category: 'memory',
     inputSchema: {
       type: 'object',
@@ -335,7 +336,7 @@ export const memoryTools: MCPTool[] = [
   },
   {
     name: 'memory_search',
-    description: 'Semantic vector search using HNSW index (150x-12,500x faster than keyword search)',
+    description: 'Find stored memories by meaning (vector similarity), not by literal text — finds "JWT auth pattern" when you query "token-based login flow". Use when native Grep is wrong because Grep matches characters and you need to find conceptually-related entries across past sessions. Backed by HNSW index over ONNX embeddings; returns top-k with similarity scores. Pair with smart=true for query expansion + MMR diversity.',
     category: 'memory',
     inputSchema: {
       type: 'object',
@@ -461,7 +462,7 @@ export const memoryTools: MCPTool[] = [
   },
   {
     name: 'memory_delete',
-    description: 'Delete a memory entry by key',
+    description: 'Remove a stored memory entry by exact (namespace, key). Use when a previously stored decision is invalidated or contains stale data. No native equivalent — Write to a file does not affect the .swarm/memory.db SQLite store.',
     category: 'memory',
     inputSchema: {
       type: 'object',
@@ -504,7 +505,7 @@ export const memoryTools: MCPTool[] = [
   },
   {
     name: 'memory_list',
-    description: 'List memory entries with optional filtering',
+    description: 'Enumerate stored memory entries (optionally filtered by namespace/tags) without semantic search. Use when native Glob is wrong because the entries are not files (they live in .swarm/memory.db). For inspection / audit / "what is in my memory" — pair with memory_search for retrieval-by-meaning.',
     category: 'memory',
     inputSchema: {
       type: 'object',
@@ -667,7 +668,6 @@ export const memoryTools: MCPTool[] = [
     handler: async (input) => {
       await ensureInitialized();
       const { storeEntry } = await getMemoryFunctions();
-      const { homedir } = await import('os');
 
       const ns = (input.namespace as string) || 'claude-memories';
       if (input.namespace) { const vNs = validateIdentifier(ns, 'namespace'); if (!vNs.valid) return { success: false, imported: 0, error: vNs.error }; }
@@ -681,13 +681,11 @@ export const memoryTools: MCPTool[] = [
         // Scan all projects
         if (existsSync(claudeProjectsDir)) {
           try {
-            const projects = readFileSync; // just need fs methods already imported
-            const { readdirSync: readDir } = await import('fs');
-            for (const project of readDir(claudeProjectsDir, { withFileTypes: true })) {
+            for (const project of readdirSync(claudeProjectsDir, { withFileTypes: true })) {
               if (!project.isDirectory()) continue;
               const memDir = join(claudeProjectsDir, project.name, 'memory');
               if (!existsSync(memDir)) continue;
-              for (const file of readDir(memDir).filter((f: string) => f.endsWith('.md'))) {
+              for (const file of readdirSync(memDir).filter((f: string) => f.endsWith('.md'))) {
                 memoryFiles.push({ path: join(memDir, file), project: project.name, file });
               }
             }
@@ -700,8 +698,7 @@ export const memoryTools: MCPTool[] = [
         const memDir = join(claudeProjectsDir, projectHash, 'memory');
         if (existsSync(memDir)) {
           try {
-            const { readdirSync: readDir } = await import('fs');
-            for (const file of readDir(memDir).filter((f: string) => f.endsWith('.md'))) {
+            for (const file of readdirSync(memDir).filter((f: string) => f.endsWith('.md'))) {
               memoryFiles.push({ path: join(memDir, file), project: projectHash, file });
             }
           } catch { /* scan error */ }
@@ -771,7 +768,6 @@ export const memoryTools: MCPTool[] = [
     inputSchema: { type: 'object', properties: {} },
     handler: async () => {
       await ensureInitialized();
-      const { homedir } = await import('os');
 
       // Count Claude memory files
       const claudeProjectsDir = join(homedir(), '.claude', 'projects');
@@ -779,12 +775,11 @@ export const memoryTools: MCPTool[] = [
       let claudeProjects = 0;
       if (existsSync(claudeProjectsDir)) {
         try {
-          const { readdirSync: readDir } = await import('fs');
-          for (const project of readDir(claudeProjectsDir, { withFileTypes: true })) {
+          for (const project of readdirSync(claudeProjectsDir, { withFileTypes: true })) {
             if (!project.isDirectory()) continue;
             const memDir = join(claudeProjectsDir, project.name, 'memory');
             if (!existsSync(memDir)) continue;
-            const files = readDir(memDir).filter((f: string) => f.endsWith('.md'));
+            const files = readdirSync(memDir).filter((f: string) => f.endsWith('.md'));
             if (files.length > 0) { claudeProjects++; claudeFiles += files.length; }
           }
         } catch { /* ignore */ }
