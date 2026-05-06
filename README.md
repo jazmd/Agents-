@@ -175,6 +175,13 @@ Statusline density is more noticeable in narrow terminal layouts and split-pane 
 
 ### CLI Install
 
+## Windows Installation
+
+Use Git Bash or WSL for best compatibility.
+
+```bash
+curl -fsSL <install-url> | bash
+
 ```bash
 # One-line install
 curl -fsSL https://cdn.jsdelivr.net/gh/ruvnet/ruflo@main/scripts/install.sh | bash
