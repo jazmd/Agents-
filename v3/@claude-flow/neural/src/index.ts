@@ -101,6 +101,35 @@ export type {
 } from './sona-integration.js';
 
 // =============================================================================
+// Reproducibility (#1773 Phase 1.3)
+// =============================================================================
+
+export type { RNG } from './utils/rng.js';
+export {
+  Mulberry32,
+  MathRandomRng,
+  setGlobalRng,
+  getGlobalRng,
+  resetGlobalRng,
+  random,
+  randomInt,
+  randomNormal,
+} from './utils/rng.js';
+
+// =============================================================================
+// Persistence helpers (#1773 Phase 1.1)
+// =============================================================================
+
+export {
+  encodeFloat32Array,
+  decodeFloat32Array,
+  encodeMap,
+  decodeMap,
+  deepEncode,
+  deepDecode,
+} from './utils/serialize.js';
+
+// =============================================================================
 // ReasoningBank
 // =============================================================================
 

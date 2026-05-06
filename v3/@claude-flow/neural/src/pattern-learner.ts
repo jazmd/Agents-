@@ -19,6 +19,7 @@ import type {
   NeuralEvent,
   NeuralEventListener,
 } from './types.js';
+import { deepEncode, deepDecode } from './utils/serialize.js';
 
 /**
  * Configuration for Pattern Learner
@@ -445,6 +446,75 @@ export class PatternLearner {
       avgExtractionTimeMs: this.extractionCount > 0 ? this.totalExtractionTime / this.extractionCount : 0,
       avgEvolutionTimeMs: this.evolutionCount > 0 ? this.totalEvolutionTime / this.evolutionCount : 0,
     };
+  }
+
+  // ==========================================================================
+  // Persistence (#1773 Phase 1.6)
+  // ==========================================================================
+
+  /**
+   * Serialize learner state to a JSON-safe object. Round-trips losslessly
+   * through `JSON.stringify` → file → `JSON.parse` → `deserialize()`.
+   * Float32Array embeddings encode as `{__f32: number[]}`, Maps as
+   * `{__map: [[k,v], …]}`. Sets become arrays. Excludes event listeners
+   * (callers re-register on restore).
+   */
+  serialize(): unknown {
+    return deepEncode({
+      schemaVersion: 1,
+      config: this.config,
+      patterns: this.patterns,
+      clusters: this.clusters.map((c) => ({
+        clusterId: c.clusterId,
+        centroid: c.centroid,
+        patternIds: Array.from(c.patternIds),
+      })),
+      patternToCluster: this.patternToCluster,
+      counters: {
+        matchCount: this.matchCount,
+        totalMatchTime: this.totalMatchTime,
+        extractionCount: this.extractionCount,
+        totalExtractionTime: this.totalExtractionTime,
+        evolutionCount: this.evolutionCount,
+        totalEvolutionTime: this.totalEvolutionTime,
+      },
+    });
+  }
+
+  /**
+   * Restore from a previously-serialized state. Replaces all current state.
+   * Event listeners NOT restored — re-register after deserialize() returns.
+   */
+  deserialize(state: unknown): void {
+    const decoded = deepDecode(state) as {
+      schemaVersion: number;
+      config: PatternLearnerConfig;
+      patterns: Map<string, Pattern>;
+      clusters: Array<{ clusterId: number; centroid: Float32Array; patternIds: string[] }>;
+      patternToCluster: Map<string, number>;
+      counters: {
+        matchCount: number; totalMatchTime: number;
+        extractionCount: number; totalExtractionTime: number;
+        evolutionCount: number; totalEvolutionTime: number;
+      };
+    };
+    if (decoded.schemaVersion !== 1) {
+      throw new Error(`PatternLearner: unsupported schemaVersion ${decoded.schemaVersion} (expected 1)`);
+    }
+    this.config = { ...this.config, ...decoded.config };
+    this.patterns = decoded.patterns;
+    this.clusters = decoded.clusters.map((c) => ({
+      clusterId: c.clusterId,
+      centroid: c.centroid,
+      patternIds: new Set(c.patternIds),
+    }));
+    this.patternToCluster = decoded.patternToCluster;
+    this.matchCount = decoded.counters.matchCount;
+    this.totalMatchTime = decoded.counters.totalMatchTime;
+    this.extractionCount = decoded.counters.extractionCount;
+    this.totalExtractionTime = decoded.counters.totalExtractionTime;
+    this.evolutionCount = decoded.counters.evolutionCount;
+    this.totalEvolutionTime = decoded.counters.totalEvolutionTime;
   }
 
   // ==========================================================================

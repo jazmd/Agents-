@@ -25,6 +25,7 @@ import type {
   NeuralEvent,
   NeuralEventListener,
 } from './types.js';
+import { deepEncode, deepDecode } from './utils/serialize.js';
 
 // ============================================================================
 // AgentDB Integration
@@ -798,6 +799,72 @@ export class ReasoningBank {
         commonCommands: patternStrategies.slice(0, 4),
       },
     };
+  }
+
+  // ==========================================================================
+  // Persistence (#1773 Phase 1.6)
+  // ==========================================================================
+
+  /**
+   * Serialize bank state to a JSON-safe object. Float32Array embeddings,
+   * Maps, and nested structures encode losslessly. Excludes the AgentDB
+   * connection (it's a runtime resource that must be re-acquired) and the
+   * event listener Set (callers re-register on restore).
+   */
+  serialize(): unknown {
+    return deepEncode({
+      schemaVersion: 1,
+      config: this.config,
+      trajectories: this.trajectories,
+      memories: this.memories,
+      patterns: this.patterns,
+      counters: {
+        retrievalCount: this.retrievalCount,
+        totalRetrievalTime: this.totalRetrievalTime,
+        distillationCount: this.distillationCount,
+        totalDistillationTime: this.totalDistillationTime,
+        judgeCount: this.judgeCount,
+        totalJudgeTime: this.totalJudgeTime,
+        consolidationCount: this.consolidationCount,
+        totalConsolidationTime: this.totalConsolidationTime,
+      },
+    });
+  }
+
+  /**
+   * Restore bank state from a previously-serialized snapshot. AgentDB
+   * connection is NOT restored — call initialize() again afterward to
+   * re-acquire it. Event listeners are NOT restored — re-register manually.
+   */
+  deserialize(state: unknown): void {
+    const decoded = deepDecode(state) as {
+      schemaVersion: number;
+      config: ReasoningBankConfig;
+      trajectories: Map<string, Trajectory>;
+      memories: Map<string, MemoryEntry>;
+      patterns: Map<string, Pattern>;
+      counters: {
+        retrievalCount: number; totalRetrievalTime: number;
+        distillationCount: number; totalDistillationTime: number;
+        judgeCount: number; totalJudgeTime: number;
+        consolidationCount: number; totalConsolidationTime: number;
+      };
+    };
+    if (decoded.schemaVersion !== 1) {
+      throw new Error(`ReasoningBank: unsupported schemaVersion ${decoded.schemaVersion} (expected 1)`);
+    }
+    this.config = { ...this.config, ...decoded.config };
+    this.trajectories = decoded.trajectories;
+    this.memories = decoded.memories;
+    this.patterns = decoded.patterns;
+    this.retrievalCount = decoded.counters.retrievalCount;
+    this.totalRetrievalTime = decoded.counters.totalRetrievalTime;
+    this.distillationCount = decoded.counters.distillationCount;
+    this.totalDistillationTime = decoded.counters.totalDistillationTime;
+    this.judgeCount = decoded.counters.judgeCount;
+    this.totalJudgeTime = decoded.counters.totalJudgeTime;
+    this.consolidationCount = decoded.counters.consolidationCount;
+    this.totalConsolidationTime = decoded.counters.totalConsolidationTime;
   }
 
   // ==========================================================================
