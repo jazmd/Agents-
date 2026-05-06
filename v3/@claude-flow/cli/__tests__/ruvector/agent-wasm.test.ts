@@ -154,7 +154,7 @@ describe('agent-wasm integration', () => {
       agentId = info.id;
       expect(info.id).toMatch(/^wasm-agent-/);
       expect(info.state).toBe('idle');
-      expect(info.model).toBe('anthropic:claude-sonnet-4-20250514');
+      expect(info.model).toBe('anthropic:claude-sonnet-4-6');
       expect(info.fileCount).toBe(0);
       expect(info.isStopped).toBe(false);
     });
