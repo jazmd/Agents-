@@ -1617,7 +1617,23 @@ export async function bridgeDeleteHierarchical(options: {
     }
 
     const hm = registry.get('hierarchicalMemory');
-    // 1. Try HierarchicalMemory's own delete API if it ever ships one.
+
+    // 1. agentdb@3.0.0-alpha.13+: ReflexionMemory.deleteEpisode propagates through
+    //    graph adapter / generic graph backend / vector backend AND purges SQL
+    //    episodes + episode_embeddings rows. Single call, durably consistent.
+    //    See agentic-flow#150/#151 (closes ruvnet/RuVector#427 the cli-visible way).
+    const reflexion = registry.get('reflexionMemory');
+    if (reflexion && typeof reflexion.deleteEpisode === 'function') {
+      try {
+        const removed = await reflexion.deleteEpisode(key);
+        if (removed) {
+          await logAttestation(registry, 'delete', key, { namespace: 'hierarchical', tier });
+          return { success: true, deleted: true, key, tier, controller: 'reflexionMemory', guarded: true };
+        }
+      } catch { /* fall through */ }
+    }
+
+    // 2. Try HierarchicalMemory's own delete API if it ever ships one.
     if (hm && typeof hm.delete === 'function') {
       try {
         await hm.delete(key);
@@ -1628,7 +1644,7 @@ export async function bridgeDeleteHierarchical(options: {
       }
     }
 
-    // 2. Stub HierarchicalMemory may expose `remove` or `forget`
+    // 3. Stub HierarchicalMemory may expose `remove` or `forget`
     if (hm && typeof hm.remove === 'function') {
       try {
         await hm.remove(key);
@@ -1705,8 +1721,24 @@ export async function bridgeDeleteCausalEdge(options: {
       return { success: false, deleted: false, sourceId, targetId, controller: 'guard', error: `MutationGuard rejected: ${guardResult.reason}` };
     }
 
-    // 1. Try CausalMemoryGraph's own delete API if it appears in a future agentdb version.
     const causalGraph = registry.get('causalGraph');
+
+    // 1. agentdb@3.0.0-alpha.13+: GraphDatabaseAdapter.deleteEdgesByEndpoints
+    //    handles the (sourceId, targetId, relation?) tuple case directly via
+    //    Cypher MATCH … DETACH DELETE. Cypher-injection-safe (label validated
+    //    against /^[A-Za-z_][A-Za-z0-9_]*$/ upstream).
+    if (causalGraph && typeof causalGraph.deleteEdgesByEndpoints === 'function') {
+      try {
+        const r = await causalGraph.deleteEdgesByEndpoints(sourceId, targetId, relation);
+        const deletedCount = typeof r === 'object' && r ? (r.deleted ?? 0) : (r ? 1 : 0);
+        if (deletedCount > 0) {
+          await logAttestation(registry, 'delete', edgeKey, { namespace: 'causal-edges', relation, count: deletedCount });
+          return { success: true, deleted: true, sourceId, targetId, controller: 'causalGraph-cypher', guarded: true };
+        }
+      } catch { /* fall through */ }
+    }
+
+    // 2. Pre-alpha.13 / different controller: try removeEdge() if exposed.
     if (causalGraph && typeof causalGraph.removeEdge === 'function') {
       try {
         await causalGraph.removeEdge(sourceId, targetId, relation);
@@ -1773,13 +1805,38 @@ export async function bridgeDeleteCausalNode(options: {
       return { success: false, deletedNode: false, deletedEdges: 0, nodeId, controller: 'guard', error: `MutationGuard rejected: ${guardResult.reason}` };
     }
 
+    // 1. agentdb@3.0.0-alpha.13+: GraphDatabaseAdapter.deleteNode(id, {cascade})
+    //    counts incident edges before delete so we get accurate audit numbers
+    //    regardless of binding stats. Cypher MATCH (n {id}) DETACH DELETE n.
+    const causalGraph = registry.get('causalGraph');
+    if (causalGraph && typeof causalGraph.deleteNode === 'function') {
+      try {
+        const r = await causalGraph.deleteNode(nodeId, { cascade: true });
+        if (r && typeof r === 'object') {
+          const deletedNodeNative = !!r.deletedNode;
+          const deletedEdgesNative = typeof r.deletedEdges === 'number' ? r.deletedEdges : 0;
+          await logAttestation(registry, 'delete', nodeId, { namespace: 'causal-nodes', deletedEdges: deletedEdgesNative });
+          return {
+            success: true,
+            deletedNode: deletedNodeNative,
+            deletedEdges: deletedEdgesNative,
+            nodeId,
+            controller: 'causalGraph-cypher',
+            guarded: true,
+          };
+        }
+      } catch { /* fall through to SQL */ }
+    }
+
+    // 2. SQL fallback: soft-delete the node row + every causal-edges row whose
+    //    key contains nodeId on either side. Used when agentdb pre-alpha.13 OR
+    //    when the entry was stored via the bridge's SQL fallback path.
     const ctx = getDb(registry);
     if (!ctx) return null;
 
     let deletedEdges = 0;
     let deletedNode = false;
     try {
-      // Soft-delete every edge whose key contains nodeId on either side.
       const edgeResult = ctx.db.prepare(`
         UPDATE memory_entries
         SET status = 'deleted', updated_at = ?
@@ -1789,7 +1846,6 @@ export async function bridgeDeleteCausalNode(options: {
       `).run(Date.now(), `${nodeId}→%`, `%→${nodeId}`);
       deletedEdges = edgeResult?.changes ?? 0;
 
-      // Soft-delete the node row if it exists in memory_entries.
       const nodeResult = ctx.db.prepare(`
         UPDATE memory_entries
         SET status = 'deleted', updated_at = ?
