@@ -130,6 +130,17 @@ export {
 } from './utils/serialize.js';
 
 // =============================================================================
+// Self-consistency orchestrator (#1773 Phase 1.5)
+// =============================================================================
+
+export type {
+  SelfConsistencyConfig,
+  SelfConsistencyResult,
+  SelfConsistencyAggregator,
+} from './utils/self-consistency.js';
+export { selfConsistency } from './utils/self-consistency.js';
+
+// =============================================================================
 // ReasoningBank
 // =============================================================================
 
