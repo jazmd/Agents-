@@ -212,6 +212,26 @@ describe('ReasoningBank.serialize/deserialize round-trip (#1773 Phase 1.1, 1.6)'
   });
 });
 
+describe('Retrieval-path observability (#1773 item 2)', () => {
+  it('ReasoningBank.getStats exposes hnsw vs brute-force retrieval counts', () => {
+    const bank = createReasoningBank();
+    const stats = bank.getStats();
+    // Both counters present; both zero on a fresh bank.
+    expect(stats).toHaveProperty('hnswRetrievalCount', 0);
+    expect(stats).toHaveProperty('bruteForceRetrievalCount', 0);
+    expect(stats).toHaveProperty('agentdbEnabled');
+  });
+
+  it('PatternLearner.getStats reports honest hnswEnabled=0 (no HNSW yet)', () => {
+    const learner = createPatternLearner();
+    const stats = learner.getStats();
+    expect(stats).toHaveProperty('hnswEnabled', 0);
+    expect(stats).toHaveProperty('bruteForceMatches');
+    // bruteForceMatches starts at 0 since findMatches hasn't been called
+    expect(stats.bruteForceMatches).toBe(0);
+  });
+});
+
 // SONAManager.serialize/deserialize round-trip — deferred until the
 // modes/balanced.ts load-order issue is resolved. The serialize() and
 // deserialize() methods compile and behave correctly per the build, but

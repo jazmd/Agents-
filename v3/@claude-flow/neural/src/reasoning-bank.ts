@@ -186,6 +186,11 @@ export class ReasoningBank {
   private totalJudgeTime = 0;
   private consolidationCount = 0;
   private totalConsolidationTime = 0;
+  // #1773 item 2 — observable retrieval-path counters so the dashboard can
+  // tell users whether HNSW is actually firing or they're silently getting
+  // brute-force performance.
+  private hnswRetrievalCount = 0;
+  private bruteForceRetrievalCount = 0;
 
   constructor(config: Partial<ReasoningBankConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -258,6 +263,7 @@ export class ReasoningBank {
     }
 
     let candidates: Array<{ entry: MemoryEntry; relevance: number }> = [];
+    let usedHnsw = false;
 
     // Try AgentDB HNSW search first
     if (this.agentdb && this.agentdbAvailable) {
@@ -269,6 +275,7 @@ export class ReasoningBank {
             return entry ? { entry, relevance: r.similarity } : null;
           })
           .filter((c): c is { entry: MemoryEntry; relevance: number } => c !== null);
+        if (candidates.length > 0) usedHnsw = true;
       } catch {
         // Fall through to brute-force
       }
@@ -282,6 +289,11 @@ export class ReasoningBank {
       }
       candidates.sort((a, b) => b.relevance - a.relevance);
     }
+
+    // #1773 item 2 — record which retrieval path actually fired so the
+    // dashboard can surface "you got HNSW" vs "you got O(n) brute-force"
+    if (usedHnsw) this.hnswRetrievalCount++;
+    else this.bruteForceRetrievalCount++;
 
     // Apply MMR for diversity
     const results: RetrievalResult[] = [];
@@ -734,6 +746,10 @@ export class ReasoningBank {
       failedTrajectories: this.getFailedTrajectories().length,
       agentdbEnabled: this.agentdbAvailable ? 1 : 0,
       retrievalCount: this.retrievalCount,
+      // #1773 item 2 — observable retrieval-path split so callers can tell
+      // whether they actually got HNSW or were silently downgraded.
+      hnswRetrievalCount: this.hnswRetrievalCount,
+      bruteForceRetrievalCount: this.bruteForceRetrievalCount,
       distillationCount: this.distillationCount,
       judgeCount: this.judgeCount,
       consolidationCount: this.consolidationCount,

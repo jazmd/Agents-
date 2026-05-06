@@ -445,6 +445,14 @@ export class PatternLearner {
       avgMatchTimeMs: this.matchCount > 0 ? this.totalMatchTime / this.matchCount : 0,
       avgExtractionTimeMs: this.extractionCount > 0 ? this.totalExtractionTime / this.extractionCount : 0,
       avgEvolutionTimeMs: this.evolutionCount > 0 ? this.totalEvolutionTime / this.evolutionCount : 0,
+      // #1773 item 2 — search-path observability. PatternLearner currently
+      // uses cluster-aware brute-force exclusively (no HNSW yet); this flag
+      // is exposed so the dashboard can report which retrieval substrate
+      // was actually used. Unlike ReasoningBank which CAN dispatch to HNSW,
+      // PatternLearner.findMatches always takes the brute-force path until
+      // a follow-up wires AgentDB into pattern matching too.
+      hnswEnabled: 0,
+      bruteForceMatches: this.matchCount,
     };
   }
 
