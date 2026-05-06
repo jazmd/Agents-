@@ -141,6 +141,45 @@ export type {
 export { selfConsistency } from './utils/self-consistency.js';
 
 // =============================================================================
+// Flash Attention (#1773 item 4 — migrated from @claude-flow/cli)
+// =============================================================================
+
+export type {
+  FlashAttentionConfig,
+  AttentionResult,
+  BenchmarkResult,
+} from './flash-attention.js';
+export {
+  FlashAttention,
+  getFlashAttention,
+  resetFlashAttention,
+  computeAttention,
+  benchmarkFlashAttention,
+  getFlashAttentionSpeedup,
+} from './flash-attention.js';
+
+// =============================================================================
+// MoE Router (#1773 item 4 — migrated from @claude-flow/cli)
+// =============================================================================
+
+export type {
+  ExpertType,
+  MoERouterConfig,
+  RoutingResult,
+  LoadBalanceStats,
+} from './moe-router.js';
+export {
+  EXPERT_NAMES,
+  NUM_EXPERTS,
+  INPUT_DIM,
+  HIDDEN_DIM,
+  MoERouter,
+  getMoERouter,
+  resetMoERouter,
+  createMoERouter,
+} from './moe-router.js';
+
+// =============================================================================
 // ReasoningBank
 // =============================================================================
 
