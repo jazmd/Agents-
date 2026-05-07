@@ -1400,26 +1400,40 @@ export async function bridgeSearchPatterns(options: {
 
   try {
     const reasoningBank = registry.get('reasoningBank');
+    const merged = new Map<string, { id: string; content: string; score: number }>();
+    const sources: string[] = [];
 
     // ReasoningBank may expose .searchPatterns() (agentdb) or .search() (legacy) (#1492 Bug 2)
+    // #bug2: this branch is now ADDITIVE — results from reasoningBank are merged
+    // with the SQL fallback so patterns written via either path are findable
+    // via either path. Previously this branch returned early with [] if the
+    // controller was registered but had no data, masking SQL-stored patterns.
     if (reasoningBank && typeof (reasoningBank.searchPatterns ?? reasoningBank.search) === 'function') {
-      let results: any;
-      if (typeof reasoningBank.searchPatterns === 'function') {
-        results = await reasoningBank.searchPatterns({ task: options.query, k: options.topK || 5, threshold: options.minConfidence || 0.3 });
-      } else {
-        results = await reasoningBank.search(options.query, { topK: options.topK || 5, minScore: options.minConfidence || 0.3 });
-      }
-      return {
-        results: Array.isArray(results) ? results.map((r: any) => ({
-          id: r.id || r.patternId || '',
-          content: r.content || r.pattern || '',
-          score: r.score ?? r.confidence ?? 0,
-        })) : [],
-        controller: 'reasoningBank',
-      };
+      try {
+        let results: any;
+        if (typeof reasoningBank.searchPatterns === 'function') {
+          results = await reasoningBank.searchPatterns({ task: options.query, k: options.topK || 5, threshold: options.minConfidence || 0.3 });
+        } else {
+          results = await reasoningBank.search(options.query, { topK: options.topK || 5, minScore: options.minConfidence || 0.3 });
+        }
+        if (Array.isArray(results)) {
+          for (const r of results) {
+            const id = r.id || r.patternId || '';
+            if (!id) continue;
+            const entry = {
+              id,
+              content: r.content || r.pattern || '',
+              score: r.score ?? r.confidence ?? 0,
+            };
+            const existing = merged.get(id);
+            if (!existing || entry.score > existing.score) merged.set(id, entry);
+          }
+          sources.push('reasoningBank');
+        }
+      } catch { /* fall through to SQL */ }
     }
 
-    // Fallback: search via bridge
+    // Always run the SQL fallback as well, then merge by id.
     const result = await bridgeSearchEntries({
       query: options.query,
       namespace: 'pattern',
@@ -1427,11 +1441,28 @@ export async function bridgeSearchPatterns(options: {
       threshold: options.minConfidence || 0.3,
       dbPath: options.dbPath,
     });
+    if (result) {
+      for (const r of result.results) {
+        const entry = { id: r.id, content: r.content, score: r.score };
+        const existing = merged.get(r.id);
+        if (!existing || entry.score > existing.score) merged.set(r.id, entry);
+      }
+      sources.push('bridge-fallback');
+    }
 
-    return result ? {
-      results: result.results.map(r => ({ id: r.id, content: r.content, score: r.score })),
-      controller: 'bridge-fallback',
-    } : null;
+    if (sources.length === 0) return null;
+
+    // Sort by score descending and apply topK cap.
+    const limit = options.topK || 5;
+    const ordered = Array.from(merged.values())
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+
+    // Preserve back-compat for single-source callers: if only one source ran
+    // emit its name; otherwise emit the union sentinel 'merged'.
+    const controller = sources.length === 1 ? sources[0] : 'merged';
+
+    return { results: ordered, controller };
   } catch {
     return null;
   }
