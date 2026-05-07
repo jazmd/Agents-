@@ -64,16 +64,21 @@ export function generateSettings(options: InitOptions): object {
   }
 
   // Add permissions
+  // #bug10.1 — MCP permission glob is `mcp__<server>__<tool>` (no colon). The
+  // historical literal `mcp__claude-flow__:*` matched zero tools and was dead.
+  // #bug10.2 — `.env` deny rules must be repo-wide globs, not project-relative.
+  // `Read(./.env)` only blocks when cwd is the same dir as the file; switching
+  // to `Read(**/.env*)` catches `.env`, `.env.local`, `.env.production`, … in
+  // any subdirectory.
   settings.permissions = {
     allow: [
       'Bash(npx @claude-flow*)',
       'Bash(npx claude-flow*)',
       'Bash(node .claude/*)',
-      'mcp__claude-flow__:*',
+      'mcp__claude-flow__*',
     ],
     deny: [
-      'Read(./.env)',
-      'Read(./.env.*)',
+      'Read(**/.env*)',
     ],
   };
 
@@ -179,13 +184,16 @@ export function generateSettings(options: InitOptions): object {
     },
     adr: {
       autoGenerate: true,
-      directory: '/docs/adr',
+      // #bug10.3 — must be repo-relative. `/docs/adr` resolves to filesystem
+      // root and ADR auto-generation fails with EACCES.
+      directory: 'docs/adr',
       template: 'madr',
     },
     ddd: {
       trackDomains: true,
       validateBoundedContexts: true,
-      directory: '/docs/ddd',
+      // #bug10.4 — same root-path bug as #bug10.3.
+      directory: 'docs/ddd',
     },
     security: {
       autoScan: true,
