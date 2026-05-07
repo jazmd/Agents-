@@ -7,6 +7,57 @@ import type { InitOptions } from './types.js';
 import { generateStatuslineScript, generateStatuslineHook } from './statusline-generator.js';
 
 /**
+ * Template-side helper string injected into every generated runtime helper
+ * (memory.js, session.js, intelligence.cjs, …). It exposes a single function
+ *
+ *   resolveFlowPath(...segs)
+ *
+ * that resolves a path under the *running* user's data directory:
+ *
+ *   1. Try `path.join(process.cwd(), ...segs)`. If the parent directory exists
+ *      OR the cwd is writable, prefer it (per-project install — current
+ *      behavior).
+ *   2. Otherwise fall back to `path.join(os.homedir(), '.claude', ...segs)`
+ *      (global install — `~/.claude/`). When `segs[0] === '.claude'` the
+ *      redundant prefix is dropped to avoid `~/.claude/.claude/...` (#bug1,
+ *      same root cause as #bug8).
+ *
+ * This converges writes from CWD-relative `.claude-flow/` literals into the
+ * single `~/.claude/.claude-flow/` data directory under a globally-installed
+ * Ruflo, while staying backward-compatible with the per-project install case.
+ *
+ * Emit this *string* at the top of every helper template (after the
+ * `require('fs/path/os')` lines) before declaring any path constants that
+ * previously used `path.join(process.cwd(), '.claude-flow', ...)`.
+ */
+export const RESOLVE_FLOW_PATH_HELPER = `
+function resolveFlowPath(...segs) {
+  // Drop redundant leading '.claude' segment for global-install case so we
+  // never produce ~/.claude/.claude/... (mirrors settings-generator #bug8).
+  function stripRedundant(home, parts) {
+    if (parts.length > 0 && parts[0] === '.claude') return parts.slice(1);
+    return parts;
+  }
+
+  const cwdPath = path.join(process.cwd(), ...segs);
+  try {
+    // Prefer cwd if its parent already exists (per-project install) or if
+    // we can create it (writable cwd, no global override needed).
+    const parent = path.dirname(cwdPath);
+    if (fs.existsSync(parent)) return cwdPath;
+    fs.mkdirSync(parent, { recursive: true });
+    // Probe writability — a successful mkdir is enough on POSIX/Windows.
+    return cwdPath;
+  } catch {
+    // Fall through to global fallback
+  }
+
+  const homeBase = path.join(os.homedir(), '.claude');
+  return path.join(homeBase, ...stripRedundant(homeBase, segs));
+}
+`;
+
+/**
  * Generate pre-commit hook script
  */
 export function generatePreCommitHook(): string {
@@ -74,8 +125,9 @@ export function generateSessionManager(): string {
 
 const fs = require('fs');
 const path = require('path');
-
-const SESSION_DIR = path.join(process.cwd(), '.claude-flow', 'sessions');
+const os = require('os');
+${RESOLVE_FLOW_PATH_HELPER}
+const SESSION_DIR = resolveFlowPath('.claude-flow', 'sessions');
 const SESSION_FILE = path.join(SESSION_DIR, 'current.json');
 
 const commands = {
@@ -281,8 +333,9 @@ export function generateMemoryHelper(): string {
 
 const fs = require('fs');
 const path = require('path');
-
-const MEMORY_DIR = path.join(process.cwd(), '.claude-flow', 'data');
+const os = require('os');
+${RESOLVE_FLOW_PATH_HELPER}
+const MEMORY_DIR = resolveFlowPath('.claude-flow', 'data');
 const MEMORY_FILE = path.join(MEMORY_DIR, 'memory.json');
 
 function loadMemory() {
@@ -613,11 +666,14 @@ export function generateIntelligenceStub(): string {
     "const path = require('path');",
     "const os = require('os');",
     '',
-    "const DATA_DIR = path.join(process.cwd(), '.claude-flow', 'data');",
+    // resolveFlowPath helper — converges runtime writes to ~/.claude under
+    // global install while keeping per-project install behavior (#bug1).
+    RESOLVE_FLOW_PATH_HELPER,
+    "const DATA_DIR = resolveFlowPath('.claude-flow', 'data');",
     "const STORE_PATH = path.join(DATA_DIR, 'auto-memory-store.json');",
     "const RANKED_PATH = path.join(DATA_DIR, 'ranked-context.json');",
     "const PENDING_PATH = path.join(DATA_DIR, 'pending-insights.jsonl');",
-    "const SESSION_DIR = path.join(process.cwd(), '.claude-flow', 'sessions');",
+    "const SESSION_DIR = resolveFlowPath('.claude-flow', 'sessions');",
     "const SESSION_FILE = path.join(SESSION_DIR, 'current.json');",
     '',
     'function ensureDir(dir) {',
@@ -661,8 +717,8 @@ export function generateIntelligenceStub(): string {
     '  var entries = [];',
     '  var candidates = [',
     '    path.join(os.homedir(), ".claude", "projects"),',
-    '    path.join(process.cwd(), ".claude-flow", "memory"),',
-    '    path.join(process.cwd(), ".claude", "memory"),',
+    '    resolveFlowPath(".claude-flow", "memory"),',
+    '    resolveFlowPath(".claude", "memory"),',
     '  ];',
     '  for (var i = 0; i < candidates.length; i++) {',
     '    try {',
@@ -1061,14 +1117,17 @@ export function generateCrossPlatformSessionManager(): string {
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-
+${RESOLVE_FLOW_PATH_HELPER}
 // Platform-specific paths
 const platform = os.platform();
 const homeDir = os.homedir();
 
-// Get data directory based on platform
+// Get data directory based on platform — resolveFlowPath converges runtime
+// writes under ~/.claude on global install (#bug1) while preserving the
+// per-project install case. Platform-specific OS-config fallbacks remain as
+// a last resort if even ~/.claude isn't writable.
 function getDataDir() {
-  const localDir = path.join(process.cwd(), '.claude-flow', 'sessions');
+  const localDir = resolveFlowPath('.claude-flow', 'sessions');
   if (fs.existsSync(path.dirname(localDir))) {
     return localDir;
   }
