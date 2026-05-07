@@ -2907,6 +2907,43 @@ export const hooksIntelligenceStats: MCPTool = {
       ruvllmStats.graphDatabase = { backend: gs.backend, totalNodes: gs.totalNodes, totalEdges: gs.totalEdges, avgDegree: gs.avgDegree };
     } catch { /* not available */ }
 
+    // ADR-094 / #bug3 — HNSW index size used to reflect the JSON memory store
+    // (loadMemoryStore) which the SQL+HNSW bridge never updates. As a result
+    // the counter was stuck at 0 even after pattern-store via
+    // bridgeStorePattern(). Resolve the real backend count by asking the
+    // singleton (memory-initializer.getHNSWStatus → hnswIndex.entries.size)
+    // *and* the bridge (memory-bridge.bridgeGetHNSWStatus → SELECT COUNT(*)
+    // FROM memory_entries WHERE embedding IS NOT NULL), and take the max.
+    // Fall back to the legacy memory-store count if neither backend is
+    // initialized (preserves prior behaviour for legacy data).
+    let hnswIndexSize = memoryStats.memory.indexSize;
+    let hnswSource: 'singleton' | 'bridge' | 'memory-store' = 'memory-store';
+    try {
+      const { getHNSWStatus } = await import('../memory/memory-initializer.js');
+      const singleton = getHNSWStatus();
+      if (singleton && typeof singleton.entryCount === 'number' && singleton.entryCount > hnswIndexSize) {
+        hnswIndexSize = singleton.entryCount;
+        hnswSource = 'singleton';
+      } else if (singleton && typeof singleton.entryCount === 'number' && singleton.entryCount > 0 && hnswSource === 'memory-store') {
+        // singleton has data but doesn't exceed memory-store count; still prefer it
+        // because it's authoritative for the in-memory HNSW index.
+        hnswIndexSize = Math.max(hnswIndexSize, singleton.entryCount);
+        hnswSource = 'singleton';
+      }
+    } catch {
+      // singleton not available
+    }
+    try {
+      const { bridgeGetHNSWStatus } = await import('../memory/memory-bridge.js');
+      const bridgeStatus = await bridgeGetHNSWStatus();
+      if (bridgeStatus && typeof bridgeStatus.entryCount === 'number' && bridgeStatus.entryCount > hnswIndexSize) {
+        hnswIndexSize = bridgeStatus.entryCount;
+        hnswSource = 'bridge';
+      }
+    } catch {
+      // bridge not available
+    }
+
     const stats = {
       sona: sonaStats,
       moe: moeStats,
@@ -2915,7 +2952,8 @@ export const hooksIntelligenceStats: MCPTool = {
       lora: loraStats,
       ruvllm: ruvllmStats,
       hnsw: {
-        indexSize: memoryStats.memory.indexSize,
+        indexSize: hnswIndexSize,
+        hnswSource,
         avgSearchTimeMs: 0.12,
         cacheHitRate: memoryStats.memory.totalAccessCount > 0
           ? Math.min(0.95, 0.5 + (memoryStats.memory.totalAccessCount / 1000))
