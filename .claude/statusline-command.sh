@@ -102,7 +102,7 @@ if [[ -d "$ruflo_state_dir" ]]; then
     # Active tasks (only show when non-zero)
     [[ "$task_total" -gt 0 ]] 2>/dev/null && ruflo_segment+=$(printf " \033[1;33m %s\033[0m" "$task_total")
     # Worker activity badge (cumulative runs)
-    [[ "$worker_runs" -gt 0 ]] 2>/dev/null && ruflo_segment+=$(printf "  \033[1;36m⟳ %s\033[0m" "$worker_runs")
+    [[ "$worker_runs" -gt 0 ]] 2>/dev/null && ruflo_segment+=$(printf " \033[1;36m⟳ %s\033[0m" "$worker_runs")
 
     output+=$(printf "| %s " "$ruflo_segment")
 fi
