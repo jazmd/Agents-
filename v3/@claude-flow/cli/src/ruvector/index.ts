@@ -203,11 +203,14 @@ export async function isRuvectorAvailable(): Promise<boolean> {
 }
 
 /**
- * Check if @ruvector/learning-wasm is available and loadable
+ * Check if @ruvector/learning-wasm is available and loadable.
+ * The package is an optionalDependency, so we use an indirect module name
+ * to bypass TypeScript's module resolution at compile time.
  */
 export async function isWasmBackendAvailable(): Promise<boolean> {
   try {
-    const wasm = await import('@ruvector/learning-wasm');
+    const learningWasmModule = '@ruvector/learning-wasm';
+    const wasm: any = await import(/* @vite-ignore */ learningWasmModule);
     return typeof wasm.WasmMicroLoRA === 'function' && typeof wasm.initSync === 'function';
   } catch {
     return false;
