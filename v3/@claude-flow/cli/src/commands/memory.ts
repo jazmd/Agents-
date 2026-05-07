@@ -347,7 +347,9 @@ const searchCommand: Command = {
       let backendLabel = 'HNSW + sql.js';
 
       if (useSmart) {
-        const { smartSearch } = await import('@claude-flow/memory');
+        // #bug16a: @claude-flow/memory@3.0.0-alpha.14 dropped the smartSearch export.
+        // Use local shim until upstream re-exports the function.
+        const { smartSearch } = await import('../memory/smart-search-shim.js');
 
         // Adapt searchEntries to the SearchFn interface
         const rawSearch = async (req: { query: string; namespace?: string; limit?: number; threshold?: number }) => {
