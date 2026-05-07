@@ -23,6 +23,11 @@ import { validateIdentifier, validateText } from './validate-input.js';
 
 const RUVECTOR_PIN = 'ruvector@0.2.25';
 const RVF_DIR_DEFAULT = '.ruflo/browser-sessions';
+// rvf create requires -d/--dimension <n>. 384 matches the embedding dimension
+// used elsewhere in the codebase (ONNX all-MiniLM-L6-v2,
+// neural_status.totalEmbeddingDims). Without this, the rvf create call errors
+// out immediately and browser_session_record is unusable (Bug 19).
+const RVF_DIMENSION = '384';
 
 interface ShellResult {
   success: boolean;
@@ -112,8 +117,9 @@ export const browserSessionTools: MCPTool[] = [
       const dir = (input.rvf_dir as string | undefined) ?? (await ensureSessionsDir());
       const rvfPath = path.join(dir, `${sessionId}.rvf`);
 
-      // 1. RVF allocate
-      const rvf = await shell('npx', ['-y', RUVECTOR_PIN, 'rvf', 'create', rvfPath, '--kind', 'browser-session'], { timeout: 60000 });
+      // 1. RVF allocate. rvf create requires -d/--dimension <n>; pass 384 to
+      //    match the codebase-wide embedding dimension (Bug 19).
+      const rvf = await shell('npx', ['-y', RUVECTOR_PIN, 'rvf', 'create', rvfPath, '--kind', 'browser-session', '--dimension', RVF_DIMENSION], { timeout: 60000 });
       if (!rvf.success) return fail('rvf create failed', { detail: rvf.error, stderr: rvf.stderr, sessionId, rvfPath });
 
       // 2. trajectory-begin
