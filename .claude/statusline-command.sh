@@ -52,11 +52,14 @@ output+=$(printf "\033[1;34m%s\033[0m " "$display_dir")
 if [[ -n "$branch" ]]; then
     output+=$(printf "on \033[1;32m %s\033[0m " "$branch")
 
+    # Bash-native pattern matching — replaces 4 echo|grep forks (~10-20ms saved).
+    # `_NL_$git_status` ensures we can match leading-line patterns with `*$'\n'X*`.
     status_icons=""
-    echo "$git_status" | grep -q "^??" && status_icons+=""
-    echo "$git_status" | grep -q "^ M" && status_icons+=""
-    echo "$git_status" | grep -q "^M " && status_icons+="++"
-    echo "$git_status" | grep -q "^D " && status_icons+=""
+    nl_status=$'\n'"$git_status"
+    [[ "$nl_status" == *$'\n'\?\?* ]] && status_icons+=""
+    [[ "$nl_status" == *$'\n'\ M* ]] && status_icons+=""
+    [[ "$nl_status" == *$'\n'M\ * ]] && status_icons+="++"
+    [[ "$nl_status" == *$'\n'D\ * ]] && status_icons+=""
 
     if [[ -n "$status_icons" ]]; then
         output+=$(printf "\033[1;32m(%s)\033[0m " "$status_icons")
