@@ -94,6 +94,15 @@ function safeStat(filePath) {
   return null;
 }
 
+// Memoized JSON file reader — same path is parsed at most once per render.
+// Statusline functions call readJSON for auto-memory-store, hooks store, etc.
+// from multiple call sites; parsing each ~200KB-2MB file repeatedly is wasteful.
+const _jsonCache = Object.create(null);
+function readJSONCached(filePath) {
+  if (filePath in _jsonCache) return _jsonCache[filePath];
+  return (_jsonCache[filePath] = readJSON(filePath));
+}
+
 // Shared settings cache — read once, used by multiple functions
 let _settingsCache = undefined;
 function getSettings() {
@@ -209,16 +218,15 @@ function getLearningStats() {
     }
   } catch { /* ignore */ }
 
-  // 2. Count patterns from auto-memory-store (real entries, not file size)
+  // 2. Count patterns from auto-memory-store (real entries, not file size).
+  // Uses cached parse — getAgentDBStats() also reads this file.
   if (patterns === 0) {
     const autoStorePath = resolveFlowPath('.claude-flow', 'data', 'auto-memory-store.json');
-    try {
-      if (fs.existsSync(autoStorePath)) {
-        const data = JSON.parse(fs.readFileSync(autoStorePath, 'utf-8'));
-        if (Array.isArray(data)) patterns = data.length;
-        else if (data && data.entries) patterns = data.entries.length;
-      }
-    } catch { /* ignore */ }
+    const data = readJSONCached(autoStorePath);
+    if (data) {
+      if (Array.isArray(data)) patterns = data.length;
+      else if (data.entries) patterns = data.entries.length;
+    }
   }
 
   // 3. Count patterns from memory.db using row count (sqlite header bytes 28-31)
@@ -468,31 +476,29 @@ function getAgentDBStats() {
   let namespaces = 0;
   let hasHnsw = false;
 
-  // 1. Count real entries from auto-memory-store.json
+  // 1. Count real entries from auto-memory-store.json (cached — getLearningStats() reads same file)
   const storePath = resolveFlowPath('.claude-flow', 'data', 'auto-memory-store.json');
   const storeStat = safeStat(storePath);
   if (storeStat) {
     dbSizeKB += storeStat.size / 1024;
-    try {
-      const store = JSON.parse(fs.readFileSync(storePath, 'utf-8'));
+    const store = readJSONCached(storePath);
+    if (store) {
       if (Array.isArray(store)) vectorCount += store.length;
-      else if (store && store.entries) vectorCount += store.entries.length;
-    } catch { /* fall back */ }
+      else if (store.entries) vectorCount += store.entries.length;
+    }
   }
 
-  // 2. Count entries from hooks memory store (.claude-flow/memory/store.json)
+  // 2. Count entries from hooks memory store (.claude-flow/memory/store.json) — cached
   const hooksStorePath = resolveFlowPath('.claude-flow', 'memory', 'store.json');
   const hooksStoreStat = safeStat(hooksStorePath);
   if (hooksStoreStat) {
     dbSizeKB += hooksStoreStat.size / 1024;
-    try {
-      const store = JSON.parse(fs.readFileSync(hooksStorePath, 'utf-8'));
-      if (store && store.entries) {
-        const entryCount = Object.keys(store.entries).length;
-        vectorCount = Math.max(vectorCount, entryCount);
-        if (entryCount > 0) namespaces++;
-      }
-    } catch { /* fall back */ }
+    const store = readJSONCached(hooksStorePath);
+    if (store && store.entries) {
+      const entryCount = Object.keys(store.entries).length;
+      vectorCount = Math.max(vectorCount, entryCount);
+      if (entryCount > 0) namespaces++;
+    }
   }
 
   // 3. Count entries from ranked-context.json

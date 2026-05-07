@@ -89,18 +89,30 @@ if [[ -d "$ruflo_state_dir" ]]; then
     worker_count=0
     worker_runs=0
     if [[ -f "$daemon_state" ]]; then
-        daemon_running=$(jq -r '.running // false' "$daemon_state" 2>/dev/null)
-        worker_count=$(jq -r '.workers | length' "$daemon_state" 2>/dev/null || echo 0)
-        worker_runs=$(jq -r '[.workers[].runCount] | add // 0' "$daemon_state" 2>/dev/null || echo 0)
+        # ONE jq call extracts running/worker_count/worker_runs (was 3 separate forks).
+        daemon_summary=$(jq -r '"\(.running // false)|\(.workers | length)|\([.workers[].runCount] | add // 0)"' "$daemon_state" 2>/dev/null)
+        daemon_running="${daemon_summary%%|*}"
+        rest_d="${daemon_summary#*|}"
+        worker_count="${rest_d%%|*}"
+        worker_runs="${rest_d##*|}"
+        [[ -z "$daemon_running" ]] && daemon_running="false"
+        [[ -z "$worker_count" ]] && worker_count=0
+        [[ -z "$worker_runs" ]] && worker_runs=0
     fi
 
     swarm_count=0
     agent_total=0
     task_total=0
     if [[ -f "$swarm_state" ]]; then
-        swarm_count=$(jq -r '.swarms | length' "$swarm_state" 2>/dev/null || echo 0)
-        agent_total=$(jq -r '[.swarms[].agents | length] | add // 0' "$swarm_state" 2>/dev/null || echo 0)
-        task_total=$(jq -r '[.swarms[].tasks | length] | add // 0' "$swarm_state" 2>/dev/null || echo 0)
+        # ONE jq call extracts swarm_count/agent_total/task_total (was 3 separate forks).
+        swarm_summary_top=$(jq -r '"\(.swarms | length)|\([.swarms[].agents | length] | add // 0)|\([.swarms[].tasks | length] | add // 0)"' "$swarm_state" 2>/dev/null)
+        swarm_count="${swarm_summary_top%%|*}"
+        rest_s="${swarm_summary_top#*|}"
+        agent_total="${rest_s%%|*}"
+        task_total="${rest_s##*|}"
+        [[ -z "$swarm_count" ]] && swarm_count=0
+        [[ -z "$agent_total" ]] && agent_total=0
+        [[ -z "$task_total" ]] && task_total=0
     fi
 
     # Daemon dot — green ● if running, dim ○ if stopped
@@ -188,17 +200,27 @@ if [[ -d "$ruflo_state_dir" ]]; then
     rufloA_count=0
     rufloA_tasks=0
     if [[ -f "$swarm_state" ]]; then
-        rufloA_count=$(jq -r '[.swarms[].agents | length] | add // 0' "$swarm_state" 2>/dev/null || echo 0)
-        rufloA_tasks=$(jq -r '[.swarms[].tasks[] | select(.status != "completed" and .status != "failed")] | length' "$swarm_state" 2>/dev/null || echo 0)
-        # First 3 agent names (if present) — use type or role field from agent record.
-        rufloA_names=$(jq -r '[.swarms[].agents[] | (.role // .type // .name // "agent")] | .[0:3] | join(",")' "$swarm_state" 2>/dev/null)
+        # ONE jq call extracts count/tasks/names (was 3 separate forks against same file).
+        rufloA_summary=$(jq -r '
+            "\([.swarms[].agents | length] | add // 0)|\([.swarms[].tasks[] | select(.status != "completed" and .status != "failed")] | length)|\([.swarms[].agents[] | (.role // .type // .name // "agent")] | .[0:3] | join(","))"
+        ' "$swarm_state" 2>/dev/null)
+        rufloA_count="${rufloA_summary%%|*}"
+        rest_a="${rufloA_summary#*|}"
+        rufloA_tasks="${rest_a%%|*}"
+        rufloA_names="${rest_a##*|}"
+        [[ -z "$rufloA_count" ]] && rufloA_count=0
+        [[ -z "$rufloA_tasks" ]] && rufloA_tasks=0
     fi
 
     sess_edits=0
     sess_cmds=0
     if [[ -f "$session_state" ]]; then
-        sess_edits=$(jq -r '.metrics.edits // 0' "$session_state" 2>/dev/null || echo 0)
-        sess_cmds=$(jq -r '.metrics.commands // 0' "$session_state" 2>/dev/null || echo 0)
+        # ONE jq call for both metrics (was 2 forks).
+        sess_summary=$(jq -r '"\(.metrics.edits // 0)|\(.metrics.commands // 0)"' "$session_state" 2>/dev/null)
+        sess_edits="${sess_summary%%|*}"
+        sess_cmds="${sess_summary##*|}"
+        [[ -z "$sess_edits" ]] && sess_edits=0
+        [[ -z "$sess_cmds" ]] && sess_cmds=0
     fi
 
     # Build the segment only if there's something worth showing.
