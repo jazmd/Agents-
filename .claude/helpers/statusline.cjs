@@ -103,15 +103,26 @@ function readJSONCached(filePath) {
   return (_jsonCache[filePath] = readJSON(filePath));
 }
 
-// Shared settings cache — read once, used by multiple functions
+// Shared settings cache — read once, used by multiple functions.
+// Stores ALL 4 sources (project + global × settings + settings.local) so
+// callers can pick the one matching their need (e.g. getHooksStatus needs
+// the source with `.hooks` defined, getSettings just needs any non-null).
+let _settingsSourcesCache = undefined;
+function getSettingsSources() {
+  if (_settingsSourcesCache !== undefined) return _settingsSourcesCache;
+  _settingsSourcesCache = [
+    readJSONCached(resolveFlowPath('.claude', 'settings.json')),
+    readJSONCached(resolveFlowPath('.claude', 'settings.local.json')),
+    readJSONCached(path.join(os.homedir(), '.claude', 'settings.json')),
+    readJSONCached(path.join(os.homedir(), '.claude', 'settings.local.json')),
+  ];
+  return _settingsSourcesCache;
+}
+
 let _settingsCache = undefined;
 function getSettings() {
   if (_settingsCache !== undefined) return _settingsCache;
-  _settingsCache = readJSON(resolveFlowPath('.claude', 'settings.json'))
-                || readJSON(resolveFlowPath('.claude', 'settings.local.json'))
-                || readJSON(path.join(os.homedir(), '.claude', 'settings.json'))
-                || readJSON(path.join(os.homedir(), '.claude', 'settings.local.json'))
-                || null;
+  _settingsCache = getSettingsSources().find(s => s) || null;
   return _settingsCache;
 }
 
@@ -435,13 +446,8 @@ function getHooksStatus() {
   let enabled = 0;
   let total = 0;
 
-  const sources = [
-    readJSON(resolveFlowPath('.claude', 'settings.json')),
-    readJSON(resolveFlowPath('.claude', 'settings.local.json')),
-    readJSON(path.join(os.homedir(), '.claude', 'settings.json')),
-    readJSON(path.join(os.homedir(), '.claude', 'settings.local.json')),
-  ];
-  const settings = sources.find(s => s && s.hooks) || null;
+  // Reuse the shared settings sources cache (was 4 separate readJSON calls per render).
+  const settings = getSettingsSources().find(s => s && s.hooks) || null;
 
   if (settings && settings.hooks) {
     for (const category of Object.keys(settings.hooks)) {
