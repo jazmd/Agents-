@@ -190,6 +190,110 @@ async function ensureInitialized(): Promise<void> {
   }
 }
 
+/**
+ * #bug7: Shared enumerator for Claude Code project memory files under
+ * `~/.claude/projects/<project_id>/memory/*.md`.
+ *
+ * The previous `memory_import_claude` single-project branch hashed
+ * `process.cwd()` with `cwd.replace(/\//g, '-')`, but Claude Code's
+ * actual encoding uses BOTH `/` -> `-` and `.` -> `-` and emits a
+ * leading dash (e.g. `/Users/h4ckm1n/.claude` becomes
+ * `-Users-h4ckm1n--claude`). The result was zero matches against the
+ * real on-disk directory while `memory_bridge_status` enumerated all
+ * project dirs and reported the correct count.
+ *
+ * Both tools now route through this helper so the importer count is
+ * guaranteed to match the status count.
+ *
+ * Encoding note: we cannot decode an arbitrary project_id back to its
+ * original cwd losslessly (the encoding is lossy — `/` and `.` collide
+ * onto `-`), so the single-project branch resolves cwd by computing
+ * the encoded form with both substitutions and falling back to a
+ * lookup over all available project dirs whose encoded name matches.
+ */
+export interface ClaudeProjectMemoryFile {
+  path: string;
+  project: string;
+  file: string;
+}
+
+export interface ClaudeProjectMemorySummary {
+  files: ClaudeProjectMemoryFile[];
+  projectsWithMemory: number;
+  projectsScanned: number;
+}
+
+/**
+ * Encode a working-directory path the way Claude Code names project dirs.
+ * Replaces both `/` and `.` with `-`; the leading slash becomes a leading
+ * dash via the `/` substitution, matching Claude Code's on-disk format.
+ */
+export function encodeClaudeProjectId(cwd: string): string {
+  return cwd.replace(/[/.]/g, '-');
+}
+
+/**
+ * Enumerate Claude Code memory files. Used by both `memory_import_claude`
+ * and `memory_bridge_status` so they always agree on what's importable.
+ *
+ * - `allProjects: true`  -> all `~/.claude/projects/*\/memory/*.md`.
+ * - `allProjects: false` (default) -> only the project that matches `cwd`
+ *   under the documented Claude Code encoding.
+ */
+export function getClaudeProjectMemoryFiles(opts: {
+  allProjects?: boolean;
+  cwd?: string;
+} = {}): ClaudeProjectMemorySummary {
+  const claudeProjectsDir = join(homedir(), '.claude', 'projects');
+  const summary: ClaudeProjectMemorySummary = {
+    files: [],
+    projectsWithMemory: 0,
+    projectsScanned: 0,
+  };
+
+  if (!existsSync(claudeProjectsDir)) return summary;
+
+  let projectDirs: string[] = [];
+  try {
+    projectDirs = readdirSync(claudeProjectsDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+  } catch {
+    return summary;
+  }
+  summary.projectsScanned = projectDirs.length;
+
+  let targetSet: Set<string> | null = null;
+  if (!opts.allProjects) {
+    const cwd = opts.cwd ?? process.cwd();
+    const expected = encodeClaudeProjectId(cwd);
+    targetSet = new Set<string>([expected]);
+    // Tolerate older/legacy encodings that did NOT replace dots — older
+    // ruflo builds wrote dirs like `-Users-h4ckm1n-.claude` instead of
+    // `-Users-h4ckm1n--claude`. If such a dir exists, accept it too.
+    targetSet.add(cwd.replace(/\//g, '-'));
+  }
+
+  for (const project of projectDirs) {
+    if (targetSet && !targetSet.has(project)) continue;
+    const memDir = join(claudeProjectsDir, project, 'memory');
+    if (!existsSync(memDir)) continue;
+    let mdFiles: string[] = [];
+    try {
+      mdFiles = readdirSync(memDir).filter((f: string) => f.endsWith('.md'));
+    } catch {
+      continue;
+    }
+    if (mdFiles.length === 0) continue;
+    summary.projectsWithMemory++;
+    for (const file of mdFiles) {
+      summary.files.push({ path: join(memDir, file), project, file });
+    }
+  }
+
+  return summary;
+}
+
 export const memoryTools: MCPTool[] = [
   {
     name: 'memory_store',
@@ -673,38 +777,10 @@ export const memoryTools: MCPTool[] = [
       const ns = (input.namespace as string) || 'claude-memories';
       if (input.namespace) { const vNs = validateIdentifier(ns, 'namespace'); if (!vNs.valid) return { success: false, imported: 0, error: vNs.error }; }
       const allProjects = input.allProjects as boolean;
-      const claudeProjectsDir = join(homedir(), '.claude', 'projects');
 
-      // Find memory files
-      const memoryFiles: Array<{ path: string; project: string; file: string }> = [];
-
-      if (allProjects) {
-        // Scan all projects
-        if (existsSync(claudeProjectsDir)) {
-          try {
-            for (const project of readdirSync(claudeProjectsDir, { withFileTypes: true })) {
-              if (!project.isDirectory()) continue;
-              const memDir = join(claudeProjectsDir, project.name, 'memory');
-              if (!existsSync(memDir)) continue;
-              for (const file of readdirSync(memDir).filter((f: string) => f.endsWith('.md'))) {
-                memoryFiles.push({ path: join(memDir, file), project: project.name, file });
-              }
-            }
-          } catch { /* scan error */ }
-        }
-      } else {
-        // Current project only — find by CWD hash
-        const cwd = process.cwd();
-        const projectHash = cwd.replace(/\//g, '-');
-        const memDir = join(claudeProjectsDir, projectHash, 'memory');
-        if (existsSync(memDir)) {
-          try {
-            for (const file of readdirSync(memDir).filter((f: string) => f.endsWith('.md'))) {
-              memoryFiles.push({ path: join(memDir, file), project: projectHash, file });
-            }
-          } catch { /* scan error */ }
-        }
-      }
+      // #bug7: route through the shared enumerator so importer count
+      // matches `memory_bridge_status.claudeCode.memoryFiles`.
+      const memoryFiles = getClaudeProjectMemoryFiles({ allProjects }).files;
 
       if (memoryFiles.length === 0) {
         return { success: true, imported: 0, message: 'No Claude memory files found' };
@@ -790,21 +866,11 @@ export const memoryTools: MCPTool[] = [
     handler: async () => {
       await ensureInitialized();
 
-      // Count Claude memory files
-      const claudeProjectsDir = join(homedir(), '.claude', 'projects');
-      let claudeFiles = 0;
-      let claudeProjects = 0;
-      if (existsSync(claudeProjectsDir)) {
-        try {
-          for (const project of readdirSync(claudeProjectsDir, { withFileTypes: true })) {
-            if (!project.isDirectory()) continue;
-            const memDir = join(claudeProjectsDir, project.name, 'memory');
-            if (!existsSync(memDir)) continue;
-            const files = readdirSync(memDir).filter((f: string) => f.endsWith('.md'));
-            if (files.length > 0) { claudeProjects++; claudeFiles += files.length; }
-          }
-        } catch { /* ignore */ }
-      }
+      // #bug7: route through the shared enumerator so this count matches
+      // what `memory_import_claude` (allProjects=true) would actually find.
+      const claudeSummary = getClaudeProjectMemoryFiles({ allProjects: true });
+      const claudeFiles = claudeSummary.files.length;
+      const claudeProjects = claudeSummary.projectsWithMemory;
 
       // AgentDB status
       let agentdbEntries = 0;
