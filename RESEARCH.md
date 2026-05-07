@@ -1,294 +1,112 @@
-# RESEARCH — `fix/global-install-and-learning-loop`
+# Research — fix/global-install-and-learning-loop
 
-All paths relative to the repo root `/Users/h4ckm1n/dev/ruflo/` unless absolute.
-Line numbers verified with `grep -n` against the source files at the time of
-investigation. Each bug section ends with a recommended fix shape sized for
-the upstream PR.
+Author: `researcher` agent. Methodology: grep + glob + targeted reads in
+`v3/@claude-flow/cli/src/`, `v3/@claude-flow/neural/src/` and
+`.claude/helpers/`. Line numbers are from the working tree on
+`fix/global-install-and-learning-loop` (branched from `main`).
 
----
-
-## Bug 1 — CWD-relative paths in helpers (memory.js, session.js)
-
-- **Source (template that emits `.claude/helpers/memory.js`)**:
-  `v3/@claude-flow/cli/src/init/helpers-generator.ts:285` — inside
-  `generateMemoryHelper()` (function declared at line 275).
-  ```ts
-  const MEMORY_DIR = path.join(process.cwd(), '.claude-flow', 'data');
-  ```
-- **Source (template that emits `.claude/helpers/session.js`)**:
-  `v3/@claude-flow/cli/src/init/helpers-generator.ts:78` — inside
-  `generateSessionManager()` (function declared at line 68).
-  ```ts
-  const SESSION_DIR = path.join(process.cwd(), '.claude-flow', 'sessions');
-  ```
-- **Other CWD-relative emitters in the same template file** (must all be
-  fixed together to actually converge writes under `~/.claude/`):
-  - line 285 — memory data dir (memory.js)
-  - line 616 — `DATA_DIR` injected into intelligence helper string
-  - line 619 — `PENDING_PATH` injected into intelligence helper string
-  - line 620 — `SESSION_DIR` injected into intelligence helper string
-  - line 664/665 — additional memory search roots
-  - line 1071 — `localDir` for sessions in another helper
-- **Confirmation**: `grep -n "process.cwd()" v3/@claude-flow/cli/src/init/helpers-generator.ts`
-  returned 9 matches, including the two referenced in the brief.
-- **Difficulty**: small (mechanical, but spread across one file).
-- **Approach**: introduce a single template-side helper string
-  `resolveFlowPath(...segs)` that is emitted into every generated helper
-  (memory.js, session.js, intelligence.cjs, hook-handler.cjs). The helper:
-  1. Detects whether `process.cwd()` is inside the install root
-     (`os.homedir() + '/.claude'` or contains `.claude-flow/data` writeable).
-  2. Otherwise, falls back to `path.join(os.homedir(), '.claude', ...segs)`.
-  Replace each `path.join(process.cwd(), '.claude-flow', ...)` literal in
-  helpers-generator with `resolveFlowPath('.claude-flow', ...)`. Add a
-  vitest that runs the generator with `cwd` set to a temp dir and asserts
-  the rendered helpers prefer the global path.
+Note: the SWARM_BRIEF.md mentions `helpers/memory.js` and
+`helpers/session.js` (`.js`). The actual on-disk filenames are
+`memory.cjs` and `session.cjs` — same code, just `.cjs` extension. Not a
+separate bug, just keep this in mind for the coder.
 
 ---
 
-## Bug 2 — `bridge-fallback` vs `reasoningBank` controller fragmentation
+## Bug 1 — CWD-relative paths in helpers/memory.cjs and helpers/session.cjs
+- Source files:
+  - `/Users/h4ckm1n/dev/ruflo/.claude/helpers/memory.cjs:10` — `MEMORY_DIR = path.join(process.cwd(), '.claude-flow', 'data')`. Pure CWD; no fallback to `~/.claude/.claude-flow/data`.
+  - `/Users/h4ckm1n/dev/ruflo/.claude/helpers/session.cjs:14-30` — `getDataDir()` checks `process.cwd()/.claude-flow/sessions`, then platform-default (`~/Library/Application Support/claude-flow` on macOS); never tries `~/.claude/.claude-flow/sessions`. So a globally-installed user gets sessions written to the macOS app-support dir while memory writes scatter into per-CWD `.claude-flow/data/`.
+  - `/Users/h4ckm1n/dev/ruflo/.claude/helpers/intelligence.cjs:13,17,80,81` — same pattern: `DATA_DIR`, `SESSION_DIR`, `bootstrapFromMemoryFiles()` candidate paths all rooted at `process.cwd()`. Must be fixed in lockstep or memory and intelligence stay split between two dirs.
+- Related code: the larger ESM helpers under `.claude/helpers/*.mjs` (e.g. `metrics-db.mjs:15`, `auto-memory-hook.mjs:20`, `learning-service.mjs:29`, `context-persistence-hook.mjs`) compute `PROJECT_ROOT = join(__dirname, '../..')`. For a global install where `__dirname == ~/.claude/helpers`, that resolves to `~/` — wrong but at least stable. Bug is specifically the CWD-rooted helpers. The init-time generators that ship those stubs are at `v3/@claude-flow/cli/src/init/helpers-generator.ts:619` (`PENDING_PATH`) and `v3/@claude-flow/cli/src/init/executor.ts:441,1129` (writes the `intelligence.cjs` stub).
+- Confirmation: `grep -n "process.cwd().*\.claude-flow" .claude/helpers/*.cjs` returns the three files above and only those (the `.mjs` cousins use `__dirname`).
+- Fix-difficulty estimate: small.
+- Suggested approach: add a tiny `resolveFlowPath(...segs)` helper at the top of each `.cjs` file (or a new shared `paths.cjs` required by all three). Logic: prefer `process.env.CLAUDE_FLOW_DATA_DIR` if set; otherwise prefer `process.cwd()/.claude-flow` if a marker (`.claude-flow/.local`) exists; otherwise fall back to `path.join(os.homedir(), '.claude', '.claude-flow', ...segs)`. Update the three files plus the corresponding generators in `helpers-generator.ts`/`executor.ts` so freshly-init'd installs get the same behaviour. Add a regression test that sets `CLAUDE_FLOW_DATA_DIR` to a tempdir and asserts memory.cjs/session.cjs/intelligence.cjs all converge.
 
-- **Source (store)**:
-  `v3/@claude-flow/cli/src/memory/memory-bridge.ts:1331` —
-  `bridgeStorePattern()` returns `controller: 'reasoningBank'` at line 1354
-  if `reasoningBank.store` exists, otherwise falls through to
-  `bridgeStoreEntry({ namespace: 'pattern' })` at line 1359 and returns
-  `controller: 'bridge-fallback'` at **line 1383**.
-- **Source (search)**:
-  `v3/@claude-flow/cli/src/memory/memory-bridge.ts:1392` —
-  `bridgeSearchPatterns()`. Line 1402 fetches `reasoningBank` from the
-  registry; line 1405 only proceeds if `reasoningBank.searchPatterns` *or*
-  `reasoningBank.search` is callable. If the registry has reasoningBank but
-  it lacks both methods (or returns no results because the data was written
-  by `bridge-fallback` into namespace `pattern` via SQL+HNSW, not into the
-  reasoningBank instance), search returns `controller: 'reasoningBank'`
-  with `[]` at lines 1412–1419 — never falling through to the SQL
-  `bridgeSearchEntries({ namespace: 'pattern' })` fallback at line 1422.
-- **Caller sites** (MCP tool handlers):
-  - `v3/@claude-flow/cli/src/mcp-tools/agentdb-tools.ts:128` —
-    `agentdb_pattern-store` calls `bridge.bridgeStorePattern`.
-  - `v3/@claude-flow/cli/src/mcp-tools/agentdb-tools.ts:189` —
-    `agentdb_pattern-search` calls `bridge.bridgeSearchPatterns`.
-- **Hooks-tools mirror**:
-  `v3/@claude-flow/cli/src/mcp-tools/hooks-tools.ts:2611` — same
-  controller-name check (`controller === 'reasoningBank' || controller === 'bridge-fallback'`).
-- **Confirmation**:
-  - `grep -rn "bridge-fallback" v3/@claude-flow/` → 9 hits (`memory-bridge.ts`
-    1383, 1433, 1569, 1669, 1762, 1866 + 3 hooks/test).
-  - `grep -n "reasoningBank" v3/@claude-flow/cli/src/memory/memory-bridge.ts` →
-    18+ hits anchored on lines 1342, 1402, 1482.
-- **Difficulty**: medium (controller registry semantics).
-- **Approach**: in `bridgeSearchPatterns` (line 1392) make the
-  `reasoningBank`-method branch *additive* rather than terminal: always
-  attempt the SQL fallback after, then merge by id and return the union.
-  Symmetrically, when `bridgeStorePattern` lands in the
-  `bridge-fallback` branch, also dual-write into the `reasoningBank`
-  controller if `reasoningBank.store` is added later. Simpler alternative:
-  invert the priority — write everything through `bridgeStoreEntry` (which
-  already HNSW-indexes), and have `reasoningBank.store` adapt to call it,
-  so both store and search hit the same SQL-backed `pattern` namespace.
-  Add a regression test in `v3/@claude-flow/cli/__tests__/agentdb-pattern-roundtrip.test.ts`
-  that store-then-search returns the just-written pattern.
-
----
+## Bug 2 — Multi-controller fragmentation (bridge-fallback vs reasoningBank)
+- Source files:
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/memory/memory-bridge.ts:1338-1387` — `bridgeStorePattern`. Tries `registry.get('reasoningBank').store({...})` and returns `controller: 'reasoningBank'`. If the registry has no `reasoningBank` controller wired, falls through to `bridgeStoreEntry` (SQL `pattern` namespace) → returns `controller: 'bridge-fallback'`.
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/memory/memory-bridge.ts:1392-1438` — `bridgeSearchPatterns`. Mirror logic, but the duck-type guard checks `(reasoningBank.searchPatterns ?? reasoningBank.search) === 'function'`. The local `LocalReasoningBank` defined in `intelligence.ts:436` only exposes `.store()` and `.findSimilar()`, NOT `.searchPatterns()` or `.search()`. So even when the registry HAS a `reasoningBank`, the search path skips it and falls through to `bridgeSearchEntries` — which in turn relies on the SQL `pattern` namespace having data. Net effect: store can land in EITHER reasoningBank in-memory OR SQL, search ALWAYS goes to SQL.
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/memory/memory-bridge.ts:111-135` — wiring of `LocalReasoningBank` into the registry (`reg.set('reasoningBank', rb)`). Done lazily AFTER `registry.initialize()`. First few calls into `getRegistry()` race with this and see `reasoningBank === undefined`.
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/memory/intelligence.ts:436-606` — `LocalReasoningBank`: only `store()` and `findSimilar(queryEmbedding, opts)`. No keyword `search()` overload, no `searchPatterns()`.
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/memory/memory-bridge.ts:2100-2160` — `bridgeHierarchicalStore` / `bridgeHierarchicalRecall` have an analogous duck-type drift: store probes `getStats && promote` to detect "real agentdb HierarchicalMemory", recall does the same. If the wired controller is the stub, stub-store puts data into one shape and stub-recall reads from the same shape — that path is internally consistent. The real-vs-stub asymmetry only bites when one half upgrades and the other doesn't.
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/mcp-tools/agentdb-tools.ts:104-199` — `agentdb_pattern-store` and `agentdb_pattern-search` MCP entry points; they just delegate to the bridge functions above.
+- Related code: `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/mcp-tools/hooks-tools.ts:2580-2670` — `hooks_intelligence_pattern-store` and `hooks_intelligence_pattern-search` go through the same bridge functions, so the same split applies.
+- Confirmation: `grep -rn 'controller: ' v3/@claude-flow/cli/src/memory/memory-bridge.ts` shows the four constant strings (`'reasoningBank'`, `'bridge-fallback'`, `'hierarchicalMemory'`, `'memory-store-fallback'`) all written by the same file. `grep -n 'searchPatterns\|\.search(' v3/@claude-flow/cli/src/memory/intelligence.ts` shows neither method exists on `LocalReasoningBank`.
+- Fix-difficulty estimate: medium.
+- Suggested approach: two complementary fixes. (a) In `LocalReasoningBank` add a thin `searchPatterns({ task, k, threshold })` method that wraps `findSimilar()` after embedding the query string (use the same embedder the bridge already loads — `intelligence.ts` has access to it via `sonaCoordinator`). This makes the existing bridge path "just work". (b) In `bridgeSearchPatterns`, when the reasoningBank-path returns 0 results AND a previous `bridgeStorePattern` may have used `bridge-fallback`, ALSO run the SQL fallback and merge results so the two stores can co-exist during migrations. Add a regression test: store via `agentdb_pattern-store`, then `agentdb_pattern-search` for the same text, assert at least one hit regardless of which controller path was chosen.
 
 ## Bug 3 — HNSW counter stuck at 0
+- Source files:
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/mcp-tools/hooks-tools.ts:484-567` — `getIntelligenceStatsFromMemory()`. Builds `memory.indexSize` from `entries.length` of the in-memory `loadMemoryStore()` result.
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/mcp-tools/hooks-tools.ts:464-479` — `getMemoryPath()` / `loadMemoryStore()`. Reads from `resolve(join('.claude-flow/memory', 'store.json'))` — a JSON file, NOT the actual HNSW index, NOT the SQL `memory_entries` table.
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/mcp-tools/hooks-tools.ts:2917-2924` — `hooks_intelligence_stats` hands `memoryStats.memory.indexSize` straight through as `hnsw.indexSize`, plus the fictional fixed `avgSearchTimeMs: 0.12` and the half-fabricated `cacheHitRate` formula based on `totalAccessCount`.
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/mcp-tools/hooks-tools.ts:2611-2625` — `hooks_intelligence_pattern-store` reports `hnswIndexed: success && hasEmbedding`. Patterns get stored via `bridge.bridgeStorePattern()` (which writes into either the LocalReasoningBank in-memory map or the SQL `memory_entries` table + the `addToHNSWIndex` call in `memory-bridge.ts:1370-1381`). Neither path appends to `.claude-flow/memory/store.json`, so the stats counter never moves.
+- Related code: the actual HNSW backend lives in `v3/@claude-flow/cli/src/memory/memory-initializer.ts` (`addToHNSWIndex`). `bridgeStorePattern` calls it directly when an embedding is generated. The size of the live index could be queried at stats-time but currently isn't.
+- Confirmation: `grep -n "indexSize:" v3/@claude-flow/cli/src/mcp-tools/hooks-tools.ts` shows three writers, all reading `entries.length` of `store.json`. `grep -n "addToHNSWIndex" v3/@claude-flow/cli/src/memory/memory-bridge.ts` shows the real index getting populated on the bridge path — disjoint code path from the stats reader.
+- Fix-difficulty estimate: small.
+- Suggested approach: in `hooks_intelligence_stats`, replace the `memoryStats.memory.indexSize` lookup with a real query against the HNSW backend. Easiest: add a `getHNSWIndexSize()` helper to `memory-initializer.ts` that calls `index.getCurrentCount()` (hnswlib API) and returns 0 if the index isn't initialised. Fall back to `bridgeListEntries({ namespace: 'pattern', limit: 0 })`'s `total` if the HNSW handle isn't around. Add a regression test that stores N patterns via `hooks_intelligence_pattern-store` and asserts `hooks_intelligence_stats().hnsw.indexSize >= N`.
 
-- **Source (counter producer)**:
-  `v3/@claude-flow/cli/src/mcp-tools/hooks-tools.ts:558` —
-  `getIntelligenceStatsFromMemory()` sets
-  `memory.indexSize = entries.length`, where `entries` comes from
-  `loadMemoryStore()` reading `.claude-flow/memory/store.json`
-  (constants at lines 461–462).
-- **Source (counter consumer)**:
-  `v3/@claude-flow/cli/src/mcp-tools/hooks-tools.ts:2918` —
-  the `hooks_intelligence_stats` handler emits
-  `hnsw.indexSize: memoryStats.memory.indexSize`.
-- **Source of the spurious `hnswIndexed: true` claim**:
-  `v3/@claude-flow/cli/src/mcp-tools/hooks-tools.ts:2619` —
-  `hnswIndexed: success && hasEmbedding` in `hooks_intelligence_pattern-store`.
-  But the actual HNSW add happens in
-  `v3/@claude-flow/cli/src/memory/memory-bridge.ts:1373-1380` (call to
-  `addToHNSWIndex`) and **never updates the JSON store** that
-  `loadMemoryStore()` reads — so `entries.length` remains the count of
-  legacy memory writes, not actual HNSW-indexed patterns.
-- **Confirmation**: `grep -n "indexSize" hooks-tools.ts` returned hits at
-  487, 558, 2148, 2769, 2918; `grep -n "hnswIndexed" hooks-tools.ts` →
-  line 2619 only.
-- **Difficulty**: small.
-- **Approach**: replace the JSON-store proxy with a real query against the
-  HNSW backend. In `hooks-tools.ts` near line 2917, import
-  `getHNSWIndexSize()` from `../memory/memory-initializer.js` (the same
-  module that exposes `addToHNSWIndex`) and use that as the source of
-  truth. Falls back to `memoryStats.memory.indexSize` only if HNSW isn't
-  initialized. Add a unit test that store-then-stats reports >0.
+## Bug 4 — memory_search_unified hardcoded namespace allowlist
+- Source files:
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/mcp-tools/memory-tools.ts:838-901` — handler. Line 862: `const namespaces = ns ? [ns] : ['default', 'claude-memories', 'auto-memory', 'patterns', 'tasks', 'feedback'];`. Line 896 returns those literal six in `searchedNamespaces`.
+- Related code: `searchEntries` (imported via `getMemoryFunctions()` which lives in `v3/@claude-flow/cli/src/memory/memory-initializer.ts`) supports a `namespace` param but also accepts no namespace, in which case it scans all of `memory_entries`. The bridge equivalent `bridgeSearchEntries` (memory-bridge.ts:626-749) defaults `effectiveNamespace = namespace || 'all'` and skips the `WHERE namespace = ?` clause when `'all'`.
+- Confirmation: `grep -rn "claude-memories\|searchedNamespaces" v3/@claude-flow/` shows the hardcoded list only at `memory-tools.ts:862`.
+- Fix-difficulty estimate: trivial.
+- Suggested approach: replace the hardcoded list with a runtime enumeration. Either (a) call `bridgeListEntries({ limit: 0 })` and `SELECT DISTINCT namespace FROM memory_entries` from the SQL store, or (b) drop the per-namespace loop entirely and just call `searchEntries({ query, limit: limit*2 })` once with no namespace, then group by namespace post-hoc. Option (b) is one line and matches what users expect from a "unified" search. Either way, return the actual namespaces found in `searchedNamespaces` so the response stays self-describing. Add a regression test that stores into a custom namespace (`test`), then calls `memory_search_unified` with no namespace and asserts the test entry shows up.
 
----
+## Bug 5 — Learning loop disconnected
+- Source files:
+  - `/Users/h4ckm1n/dev/ruflo/.claude/helpers/intelligence.cjs:16,202` — minimal stub. `recordEdit()` appends a JSON line to `pending-insights.jsonl`. `consolidate()` (line 209-219) reads + counts + truncates the file but does NOT write into the memory store and does NOT update any counters.
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/.claude/helpers/intelligence.cjs:619-755` — full version. `consolidate()` does promote frequent-edit insights into `auto-memory-store.json` (under `DATA_DIR/auto-memory-store.json`). Still does not touch `.claude-flow/memory/store.json` (which `hooks_metrics` reads).
+  - `/Users/h4ckm1n/dev/ruflo/.claude/helpers/hook-handler.cjs:174-184` — only invoker of `consolidate()`. Fires on `session-end` only; nothing else drains the file.
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/mcp-tools/hooks-tools.ts:1063-1131` — `hooks_metrics` handler. Reads `getIntelligenceStatsFromMemory()` (which scans `.claude-flow/memory/store.json`) plus `loadRoutingOutcomes()`. There is no read or drain of `pending-insights.jsonl` here.
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/mcp-tools/hooks-tools.ts:1921-1931` — the only place in the MCP server that even READS the pending-insights file: `hooks_session-end` reports a count under `summary.pendingInsights`. Read-only — does not drain or aggregate.
+- Related code: the daemon (`v3/@claude-flow/cli/src/services/worker-daemon.ts`) and `learning-service.mjs` both exist as plausible homes for a continuous drainer but neither references `pending-insights`. The two distinct stores in play: `.claude-flow/data/auto-memory-store.json` (the intelligence stub's target) and `.claude-flow/memory/store.json` (what `hooks_metrics` reads).
+- Confirmation: `grep -rn "pending-insights" v3/@claude-flow/ .claude/` returns five hits, none of which are a metrics-side consumer.
+- Fix-difficulty estimate: medium.
+- Suggested approach: introduce a single reconciler. Two options, ordered by how invasive they are. (1) Lightweight: at the top of the `hooks_metrics` handler, drain `pending-insights.jsonl` into the same `loadMemoryStore()` JSON store as auto-generated entries (`type: 'insight'`) before computing counts. Cheap, no new background process, no new state. (2) Robust: extend the worker-daemon (or a new `insights-drainer.cjs` helper) to tail the file every N seconds, dispatch each line into `bridgeStorePattern` (so it lands in the same place patterns do) AND increment a routing-decision counter via the same path `hooks_route` uses. Pick (1) as the bug-fix commit; file (2) as a follow-up. Either way, add a regression test that appends a synthetic insight to `pending-insights.jsonl`, calls `hooks_metrics`, and asserts a non-zero count.
 
-## Bug 4 — `memory_search_unified` hardcoded namespace allowlist (KNOWN)
+## Bug 6 — Subsystems advertised but "not-loaded"
+- Source files:
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/mcp-tools/hooks-tools.ts:68-108,395-410` — lazy loaders for SONA / EWC / MoE / Flash / LoRA. Each wraps `await import('@claude-flow/neural')` (or the local `memory/sona-optimizer.js` etc.) in a bare `try { ... } catch { instance = null; }`. No telemetry on WHY it failed.
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/mcp-tools/hooks-tools.ts:2741-2948` — `hooks_intelligence_stats`. Lines 2807, 2829, 2857, 2874 hardcode `implementation: 'not-loaded'` defaults; lines 2932-2938 expose the loaded/not-loaded matrix.
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/memory/memory-bridge.ts:180-280` (the wiring block called from `getRegistry`'s post-init phase) — wires `gnnService`, `vectorBackend`, `semanticRouter` (or `IntentRouter` / `TaskRouter`) into the registry only if their classes are present in `agentdb`. Each branch silently no-ops when the optional dep isn't installed.
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/package.json:84-100` — `optionalDependencies` block. `@claude-flow/memory`, `agentdb`, `@ruvector/router`, `@ruvector/attention`, `@claude-flow/aidefence`, `@claude-flow/embeddings`, `@claude-flow/security`, `@claude-flow/codex`, `@claude-flow/guidance`, etc. ALL optional. A vanilla `npm install -g @claude-flow/cli` against a registry that's missing the platform-specific arch binary (e.g. `@ruvector/attention-darwin-arm64`) silently lands without them.
+- Related code: marketing claims live in `v3/@claude-flow/neural/src/flash-attention.ts:855` (`getFlashAttentionSpeedup()`), in `v3/@claude-flow/cli/src/mcp-tools/hooks-tools.ts:2942` (`flashSpeedup: flashStats.speedup`), and across `agents/`, `README.md`, generated CLAUDE.md (`v3/@claude-flow/cli/src/init/claudemd-generator.ts`).
+- Confirmation: `grep -n "optionalDependencies" v3/@claude-flow/cli/package.json` shows the optional list. `grep -n "implementation: 'not-loaded'" v3/@claude-flow/cli/src/mcp-tools/hooks-tools.ts` shows the four hardcoded defaults.
+- Fix-difficulty estimate: large (because it's part triage, part packaging, part docs).
+- Suggested approach: do this in three phases. (i) Triage: in each lazy loader, capture the actual error string (not just swallow `catch`) and surface it under `implementationStatus` as `{ loaded: false, error: '...' }`. This converts "mysteriously broken" into "missing module X". (ii) For subsystems whose only blocker is an optional dep that ships fine on the user's platform, move them from `optionalDependencies` to `dependencies` (start with `@claude-flow/memory` and `agentdb` — the user-visible reasoningBank/HNSW chain depends on them). (iii) For subsystems we genuinely can't load on a default install (`@ruvector/attention` arch-specific binaries, `@claude-flow/aidefence`), gate the marketing claims: in `hooks_intelligence_stats`, only report `flash`, `moe`, `ewc` blocks when the underlying instance loaded — drop them entirely otherwise so users don't see contradictory data. Add a regression test that runs `hooks_intelligence_stats` in two modes: deps available (asserts `loaded: true`) and deps stripped (asserts the block is omitted, not that it returns nonsense).
 
-- **Source**: `v3/@claude-flow/cli/src/mcp-tools/memory-tools.ts:862`
-  ```ts
-  const namespaces = ns ? [ns] : ['default', 'claude-memories', 'auto-memory', 'patterns', 'tasks', 'feedback'];
-  ```
-- **Confirmation**: `grep -n "claude-memories" memory-tools.ts` returned
-  matches at 666, 673, 816, 862, 875, plus `searchedNamespaces` echo at
-  896.
-- **Difficulty**: trivial.
-- **Approach**: replace the literal array with a runtime
-  `SELECT DISTINCT namespace FROM memory_entries`. Cache the result for
-  the duration of the request to avoid repeated queries when iterating
-  per-namespace below.
+## Bug 7 — memory_import_claude returns 0 imports
+- Source files:
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/mcp-tools/memory-tools.ts:659-783` — `memory_import_claude` handler. Default `allProjects=false` path (line 695-707): computes `projectHash = cwd.replace(/\//g, '-')` and looks under `~/.claude/projects/${projectHash}/memory/`. Claude Code does NOT use that exact transform — it prepends a `-`, encodes leading `/` differently, and may further mangle paths containing dots/spaces. So the lookup misses every file.
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/mcp-tools/memory-tools.ts:786-807` — `memory_bridge_status`. Iterates `~/.claude/projects/*/memory/*.md` with no filter. That's why it correctly reports 2 files while `memory_import_claude` reports 0 — they use different scan strategies.
+- Related code: the helpers' `bootstrapFromMemoryFiles()` in `.claude/helpers/intelligence.cjs:74-119` uses the same wrong `projectSlug = cwd.replace(/^\//, '').replace(/\//g, '-')` heuristic. Same bug class, same fix likely applies.
+- Confirmation: `grep -n "claudeProjectsDir\|projectHash\|project.name" v3/@claude-flow/cli/src/mcp-tools/memory-tools.ts` shows the two incompatible scan blocks side by side.
+- Fix-difficulty estimate: small.
+- Suggested approach: replace the hand-rolled `projectHash` with a `findClaudeProjectDir(cwd)` helper that reads `~/.claude/projects/` and returns whichever subdir contains a memory file matching the current cwd — or simpler still, when `allProjects=false`, use the same iterator as `memory_bridge_status` but filter to projects whose `name` decodes back to (or contains) the absolute cwd. As a safety net, default `allProjects=true` when the per-project lookup yields nothing and log a one-line warning. Add a regression test that fakes `~/.claude/projects/foo/memory/test.md`, runs `memory_import_claude` from a CWD whose Claude-Code-encoded form is `foo`, and asserts `imported >= 1`.
 
----
-
-## Bug 5 — Learning loop disconnected (pending-insights vs metrics)
-
-- **Source (writer of `pending-insights.jsonl`)**:
-  `v3/@claude-flow/cli/.claude/helpers/intelligence.cjs:564` —
-  `recordEdit(file)` does `fs.appendFileSync(PENDING_PATH, ...)`. Constant
-  defined at `intelligence.cjs:24`.
-- **Source (template that emits the writer)**:
-  `v3/@claude-flow/cli/src/init/helpers-generator.ts:619` injects
-  `const PENDING_PATH = path.join(DATA_DIR, 'pending-insights.jsonl');`
-  into the generated intelligence helper.
-- **Sole reader in MCP layer**:
-  `v3/@claude-flow/cli/src/mcp-tools/hooks-tools.ts:1924` — only used
-  inside `hooks_session-end` to compute `pendingInsights: insightCount`
-  for the response. **No drain, no consume, no counter update.**
-- **`hooks_metrics` handler**:
-  `v3/@claude-flow/cli/src/mcp-tools/hooks-tools.ts:1063` — calls
-  `getIntelligenceStatsFromMemory()` (line 1081) + `loadRoutingOutcomes()`
-  (line 1087). Neither touches `pending-insights.jsonl`. The "No metrics
-  data collected yet" note is at line 1126.
-- **Confirmation**:
-  - `grep -rn "pending-insights" v3/@claude-flow/` → 4 hits (writer in
-    intelligence.cjs:24, comment at intelligence.cjs:12, template at
-    helpers-generator.ts:619, peek-only reader at hooks-tools.ts:1924).
-- **Difficulty**: medium.
-- **Approach**: add a `drainPendingInsights()` helper to `hooks-tools.ts`
-  (or new module `pending-insights-drain.ts`) that:
-  1. Reads + truncates `.claude-flow/data/pending-insights.jsonl`
-     atomically (rename to `.processing`, then unlink on success).
-  2. For each event line: increments the appropriate counter
-     (`patterns.total`, `agents.totalRoutes`, `commands.totalExecuted`)
-     in the same JSON store `loadMemoryStore` reads. For `type: 'edit'`
-     events, append a synthetic trajectory entry so SONA picks it up.
-  3. Call `drainPendingInsights()` at the top of `hooks_metrics`
-     (line 1073) before computing stats. Also wire it into the daemon's
-     periodic tick if `services/worker-daemon.ts` exists.
-  4. Regression test: write 3 lines to a temp jsonl, call
-     `hooks_metrics`, assert non-zero counters.
+## Bug 8 — settings.json hook command template assumes per-project install
+- Source files:
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/init/settings-generator.ts:177-196` — `hookCmd(script, subcommand)` and the two shorthand wrappers (`hookHandlerCmd`, `autoMemoryCmd`). Line 184: `const dir = '${CLAUDE_PROJECT_DIR:-.}';`. Line 190: invoked with `'.claude/helpers/hook-handler.cjs'`. When the install IS `~/.claude` and Claude Code sets `CLAUDE_PROJECT_DIR=$HOME/.claude`, the resulting shell expansion is `$HOME/.claude/.claude/helpers/hook-handler.cjs` → MODULE_NOT_FOUND.
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/init/settings-generator.ts:202-214` — `generateStatusLineConfig`. Same bug pattern with `${dir}/.claude/helpers/statusline.cjs`.
+  - `/Users/h4ckm1n/dev/ruflo/v3/@claude-flow/cli/src/init/executor.ts:423,440-441,1128-1129` — `criticalHelpers` writer and `generateHookHandler` / `generateIntelligenceStub` callers. These DECIDE where the helper files end up but never feed that decision back into the settings template.
+  - `/Users/h4ckm1n/dev/ruflo/.claude/settings.json` (post-init artifact) — every hook entry currently materialises as `sh -c 'exec node "${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/hook-handler.cjs" <subcmd>'`.
+- Related code: `grep -rn 'global.*install\|isGlobal\|os.homedir.*\.claude' v3/@claude-flow/cli/src/init/` returns three hits, none of which detect "init is being run inside `~/.claude`". So there is no existing concept of "global install mode" in the init flow at all.
+- Confirmation: `grep -n 'CLAUDE_PROJECT_DIR\|hook-handler.cjs' v3/@claude-flow/cli/src/init/settings-generator.ts` shows the unconditional `${dir}/.claude/helpers/...` template at lines 184/190/209.
+- Fix-difficulty estimate: medium.
+- Suggested approach: in `init/executor.ts`, detect global-install mode by checking whether the init target is `path.join(os.homedir(), '.claude')`. Pass an `installMode: 'global' | 'project'` flag through `InitOptions` (already plumbed end-to-end) into `generateHooksConfig`. In `settings-generator.ts:hookCmd`, when `installMode === 'global'`, emit `"$HOME/.claude/helpers/hook-handler.cjs"` (no `${CLAUDE_PROJECT_DIR}` prefix and no extra `.claude/` segment). For project mode keep the current template. For Windows (`IS_WINDOWS`), use `%USERPROFILE%\.claude\helpers\...` in global mode. Add a regression test that runs `generateHooksConfig` with both modes and asserts the output strings have the expected prefix shape (no double `.claude/.claude`).
 
 ---
 
-## Bug 6 — Subsystems advertised but `not-loaded`
+## Cross-cutting concerns
 
-- **Source (the literal `'not-loaded'` strings)**:
-  `v3/@claude-flow/cli/src/mcp-tools/hooks-tools.ts:2807` (ewc),
-  `:2829` (moe), `:2857` (flash), `:2874` (lora) — defaults inside
-  `hooks_intelligence_stats` (handler entry near line ~2750).
-  Also the `implementationStatus` block at lines 2933-2937 advertises
-  `loaded`/`not-loaded` for sona/ewc/moe/flash/lora.
-- **Source (advertised but always 1.0)**:
-  `v3/@claude-flow/cli/src/mcp-tools/hooks-tools.ts:2854` —
-  `flashStats.speedup: 1.0` default; only overridden at line 2861 if the
-  flash module loaded. No "actual speedup measured" path.
-- **Marketing-source claims** are also baked into:
-  - `v3/@claude-flow/cli/src/init/claudemd-generator.ts` (the `2.49x-7.47x
-    Flash Attention speedup` string the brief quotes — search the file
-    for `Flash Attention`).
-- **`agentdb_health` semanticRouter / vectorBackend / gnnService flags**:
-  the `agentdb_health` tool handler is at
-  `v3/@claude-flow/cli/src/mcp-tools/agentdb-tools.ts:60` (matched by
-  `grep -n "agentdb_health" agentdb-tools.ts`). The actual booleans for
-  `semanticRouter.enabled`, `vectorBackend.enabled`, `gnnService.enabled`
-  are emitted from inside that handler (the file contains the surrounding
-  comment block at lines 134-159 about the controller-registry fallback).
-- **Confirmation**:
-  - `grep -rn "not-loaded" v3/@claude-flow/` → 7 source hits clustered in
-    `hooks-tools.ts` lines 2807-2937.
-- **Difficulty**: medium (triage + decision per subsystem).
-- **Approach**: split into two PR-sized fixes.
-  1. *Honesty fix* (mechanical): in `hooks_intelligence_stats`, when a
-     subsystem is `null`, omit its key entirely instead of returning a
-     stub with `implementation: 'not-loaded'` and `speedup: 1`. Update
-     `implementationStatus` to only list loaded subsystems.
-  2. *Loader fix*: audit which of `sona`/`ewc`/`moe`/`flash`/`lora` are
-     actually shippable with current deps (`grep -rn "import.*flash\|import.*moe" v3/@claude-flow/cli/src/`)
-     and lazy-load them on first stats call instead of expecting them to
-     be wired by some other path. Same audit applies to
-     `agentdb_health`'s `semanticRouter`/`vectorBackend`/`gnnService`.
+1. **Two memory stores live in parallel.** `.claude-flow/memory/store.json` (read by `hooks_metrics`, `hooks_intelligence_stats`, the in-MCP `loadMemoryStore`) versus `.claude-flow/data/auto-memory-store.json` (written by the helpers' `intelligence.cjs::consolidate()`). Bug 5 is the immediate symptom but Bug 1 (paths), Bug 3 (HNSW counter), and Bug 5 (drain) all touch this split. Whichever coder lands first should pick the canonical location and document it; the others should align.
 
----
+2. **Duck-type-based controller dispatch is brittle.** Bugs 2 and 6 both reduce to the same root cause: `memory-bridge.ts` decides whether a controller is "real" by probing for specific method names. When alpha versions of the upstream packages add or rename methods, the bridge silently downgrades. A small `ControllerCapabilities` interface (or a runtime registration that the controller declares its own capabilities) would let us fix both bugs together without playing whack-a-mole on each new agentdb release.
 
-## Bug 7 — `memory_import_claude` returns 0 imports
+3. **Init has no concept of "where am I being installed".** Bug 8 is the obvious case but Bug 1 and Bug 7 also stem from confusion about CWD vs install root vs Claude's project-encoded dir. A single `resolveInstallContext()` helper used by init AND by every helper that touches the filesystem would prevent the next round of this bug class.
 
-- **Source (importer)**:
-  `v3/@claude-flow/cli/src/mcp-tools/memory-tools.ts:659` —
-  `memory_import_claude` handler. The single-project branch is at lines
-  696-707:
-  ```ts
-  const cwd = process.cwd();
-  const projectHash = cwd.replace(/\//g, '-');   // ← THIS is wrong
-  const memDir = join(claudeProjectsDir, projectHash, 'memory');
-  ```
-- **Source (status, which DOES find the files)**:
-  `v3/@claude-flow/cli/src/mcp-tools/memory-tools.ts:786` —
-  `memory_bridge_status` handler. Line 794-807 enumerates *every*
-  subdirectory under `~/.claude/projects/` and counts files with no
-  CWD-derived hash filter. That's why bridge_status returns
-  `memoryFiles: 2` while the importer returns 0.
-- **The actual encoding** Claude Code uses for project dirs is
-  `cwd.replace(/[\/.]/g, '-')` with a leading `-` (e.g.
-  `/Users/h4ckm1n/dev/ruflo` → `-Users-h4ckm1n-dev-ruflo`) — the current
-  importer drops the `.` replacement and the leading dash.
-- **Confirmation**:
-  - `grep -n "memory_import_claude\|memoryFiles" memory-tools.ts` →
-    importer at 659, status at 786, status `claudeCode.memoryFiles` at
-    829.
-- **Difficulty**: small.
-- **Approach**: factor out an `enumerateClaudeMemoryFiles({ cwd?, allProjects? })`
-  helper used by both `memory_import_claude` and `memory_bridge_status`.
-  When `allProjects=false`, instead of hashing `cwd`, list every project
-  dir and pick the one whose decoded path matches `cwd`. Decoded form =
-  `'/' + dirname.replace(/^-/, '').replace(/-/g, '/')` (with the dot-encoding
-  caveat — easier to just match on suffix or on a sentinel inside the
-  memory frontmatter). Add a test: create
-  `~/.claude/projects/-tmp-foo/memory/x.md` from a temp `cwd=/tmp/foo` and
-  assert the importer finds it.
+4. **Marketing claims drift from runtime reality.** Bug 6 surfaces this as `not-loaded` defaults and fictional `flashSpeedup: 1`, but the same pattern lives in the generated CLAUDE.md (`v3/@claude-flow/cli/src/init/claudemd-generator.ts`) where benchmarks are quoted as facts. Worth a separate hardening pass after Bug 6 lands — out of scope for this swarm.
 
----
-
-## Bug 8 — `settings.json` hook command template assumes per-project install
-
-- **Source**: `v3/@claude-flow/cli/src/init/settings-generator.ts:184`
-  inside `hookCmd(script, subcommand)` (function at line 177):
-  ```ts
-  const dir = '${CLAUDE_PROJECT_DIR:-.}';
-  return `sh -c 'exec node "${dir}/${script}" ${subcommand}'`;
-  ```
-  Same pattern at line 209 inside `generateStatusLineConfig`. The Windows
-  branch at line 179 has the same issue with `%CLAUDE_PROJECT_DIR%/`.
-- **Callers**:
-  - `hookHandlerCmd()` at line 189 emits
-    `.claude/helpers/hook-handler.cjs` paths.
-  - `autoMemoryCmd()` at line 194 emits `.claude/helpers/auto-memory-hook.mjs`.
-- **Confirmation**: `grep -rn 'CLAUDE_PROJECT_DIR' v3/@claude-flow/cli/src/`
-  → 7 hits, all inside `settings-generator.ts` lines 171-209 except a
-  read-only env probe at `commands/doctor.ts:189`.
-- **When global**: `CLAUDE_PROJECT_DIR=/Users/h4ckm1n/.claude` (set by
-  Claude Code), and `script = '.claude/helpers/hook-handler.cjs'`, so the
-  command resolves to
-  `/Users/h4ckm1n/.claude/.claude/helpers/hook-handler.cjs` →
-  MODULE_NOT_FOUND.
-- **Difficulty**: small.
-- **Approach**: detect the global-install case at `init` time
-  (`InitOptions.installRoot === os.homedir() + '/.claude'`) and emit a
-  different `hookCmd`:
-  - global: `sh -c 'exec node "$HOME/.claude/helpers/${basename}" ${subcommand}'`
-    (drops the `${CLAUDE_PROJECT_DIR}/.claude` prefix entirely).
-  - per-project: keep current behavior.
-  Alternative: make the helper path absolute at generate time (the
-  generator already knows the install root) — `${dir}` becomes the
-  literal install path string, no env-var indirection. Add a snapshot
-  test for both modes.
+5. **Tests for these areas are sparse.** Only `v3/@claude-flow/cli/__tests__/agentdb-delete-tools.test.ts` touches `bridge-fallback`; nothing covers `memory_import_claude`, `memory_search_unified`, `hooks_metrics`-vs-`pending-insights`, or the global-install settings template. Every fix should land with a regression test (the brief already mandates this); the tester will need to write 6-8 new tests at minimum.
