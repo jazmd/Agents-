@@ -2954,6 +2954,17 @@ export const hooksIntelligenceStats: MCPTool = {
     // wire).
     const unavailableSubsystems: string[] = [];
 
+    // #bug11.3 — A loaded subsystem with all-zero counters reads identically
+    // to a broken/unloaded one in the JSON wire format, even though Bug 6
+    // separated those cases via _unavailable. Add a `status: 'idle-since-load'`
+    // annotation when (a) the subsystem loaded successfully AND (b) its
+    // primary counter is still 0. The loadedSince timestamp uses process
+    // start time as a proxy (the loaders are lazy-singletons resolved before
+    // the first stats call is served).
+    const loadedSince = new Date(Date.now() - process.uptime() * 1000).toISOString();
+    const idleAnnotation = (primaryCounter: number) =>
+      primaryCounter === 0 ? { status: 'idle-since-load', loadedSince } : {};
+
     // EWC++ stats — only emit when the consolidator actually loaded
     let ewcStats: {
       consolidations: number;
@@ -2962,6 +2973,8 @@ export const hooksIntelligenceStats: MCPTool = {
       avgPenalty: number;
       totalPatterns: number;
       implementation: string;
+      status?: string;
+      loadedSince?: string;
     } | null = null;
     if (ewc) {
       const realEwc = ewc.getConsolidationStats();
@@ -2972,6 +2985,7 @@ export const hooksIntelligenceStats: MCPTool = {
         avgPenalty: Math.round(realEwc.avgPenalty * 1000) / 1000,
         totalPatterns: realEwc.totalPatterns,
         implementation: 'real-ewc++',
+        ...idleAnnotation(realEwc.consolidationCount),
       };
     } else {
       unavailableSubsystems.push('ewc');
@@ -2986,6 +3000,8 @@ export const hooksIntelligenceStats: MCPTool = {
       avgConfidence: number;
       loadBalance: { giniCoefficient: number; coefficientOfVariation: number; expertUsage: Record<string, number> } | null;
       implementation: string;
+      status?: string;
+      loadedSince?: string;
     } | null = null;
     if (moe) {
       const loadBalance = moe.getLoadBalance();
@@ -3005,6 +3021,10 @@ export const hooksIntelligenceStats: MCPTool = {
           expertUsage: loadBalance.routingCounts,
         },
         implementation: 'real-moe',
+        // #bug11.3 — primary counter for MoE is routingDecisions (totalRoutings).
+        // expertsActive=0 alone isn't enough — a router could have routed many
+        // decisions all to the same expert.
+        ...idleAnnotation(loadBalance.totalRoutings),
       };
     } else {
       unavailableSubsystems.push('moe');
@@ -3018,13 +3038,19 @@ export const hooksIntelligenceStats: MCPTool = {
       avgComputeTimeMs: number;
       blockSize: number;
       implementation: string;
+      status?: string;
+      loadedSince?: string;
     } | null = null;
     if (flash) {
+      const speedup = Math.round(flash.getSpeedup() * 100) / 100;
       flashStats = {
-        speedup: Math.round(flash.getSpeedup() * 100) / 100,
+        speedup,
         avgComputeTimeMs: 0, // Would need benchmarking
         blockSize: 64,
         implementation: 'real-flash-attention',
+        // #bug11.3 — speedup of 0 (or 1.0 baseline) means the kernel hasn't
+        // been exercised yet. Flash attention reports 0 until first call.
+        ...idleAnnotation(speedup),
       };
     } else {
       unavailableSubsystems.push('flash');
@@ -3037,6 +3063,8 @@ export const hooksIntelligenceStats: MCPTool = {
       adaptations: number;
       avgLoss: number;
       implementation: string;
+      status?: string;
+      loadedSince?: string;
     } | null = null;
     if (lora) {
       const realLora = lora.getStats();
@@ -3046,6 +3074,7 @@ export const hooksIntelligenceStats: MCPTool = {
         adaptations: realLora.totalAdaptations,
         avgLoss: Math.round(realLora.avgAdaptationNorm * 10000) / 10000,
         implementation: 'real-lora',
+        ...idleAnnotation(realLora.totalAdaptations),
       };
     } else {
       unavailableSubsystems.push('lora');
