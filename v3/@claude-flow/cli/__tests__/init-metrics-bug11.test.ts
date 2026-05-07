@@ -95,37 +95,39 @@ describe('#bug11.1 — hooks_metrics includes bridge-stored HNSW pattern count',
 });
 
 describe('#bug11.2 — auto-memory-hook template uses MCP-aligned resolution and subprocess fallback', () => {
-  it('emits subprocess fallback path before reporting "Memory package not available"', () => {
+  it('uses the subprocess path as the canonical loader (no ESM-import-first stub branch)', () => {
     const rendered = generateAutoMemoryHook();
 
-    // The new fallback must exist — the function name and the spawnSync
+    // The new loader must exist — the function name and the spawnSync
     // import are the load-bearing markers.
     expect(rendered).toContain('trySubprocessImport');
     expect(rendered).toContain("from 'child_process'");
     expect(rendered).toContain('spawnSync');
 
-    // The subprocess fallback must be checked BEFORE the legacy
-    // "not available" message in doImport. We verify the order by index.
-    const tryIdx = rendered.indexOf('trySubprocessImport()');
-    const notAvailIdx = rendered.indexOf('Memory package not available — auto memory import skipped');
-    expect(tryIdx).toBeGreaterThan(0);
-    expect(notAvailIdx).toBeGreaterThan(0);
-    // The function-call site must precede the fallback message in the
-    // doImport flow (so the user sees the subprocess success path first).
-    expect(tryIdx).toBeLessThan(notAvailIdx);
+    // #bug14 — The legacy "Memory package not available" message has been
+    // removed entirely. The subprocess path is now canonical (not a fallback
+    // after a failing ESM-import attempt), so the offending stub-emit branch
+    // no longer exists. doImport must call trySubprocessImport directly,
+    // and the call must live AFTER the function header (i.e. inside doImport).
+    const doImportIdx = rendered.indexOf('async function doImport()');
+    expect(doImportIdx).toBeGreaterThan(0);
+    const tryCallIdx = rendered.indexOf('trySubprocessImport()', doImportIdx);
+    expect(tryCallIdx).toBeGreaterThan(doImportIdx);
   });
 
   it('emits the homedir/.claude resolution strategy aligned with memory_import_claude MCP path', () => {
     const rendered = generateAutoMemoryHook();
 
-    // Strategy 4 anchors on ~/.claude — when ruflo is globally installed,
-    // the @claude-flow/cli package lives there and bundles the memory backend.
+    // The homedir(), '.claude' anchors are still present — they're used
+    // for diagnostic status output (so users can see whether a global
+    // install lives at ~/.claude). The strategy is now subprocess-driven
+    // rather than ESM-resolved, but the home-install awareness remains.
     expect(rendered).toContain("import { homedir } from 'os'");
     expect(rendered).toContain('homedir()');
     expect(rendered).toContain("'.claude'");
-    // The strategy must specifically attempt to resolve @claude-flow/cli
-    // (not just @claude-flow/memory) — that's the MCP-aligned path.
-    expect(rendered).toContain("'@claude-flow/cli/package.json'");
+    // The MCP-aligned reference to the CLI package is preserved (in
+    // diagnostics / comments) so future maintainers see the connection.
+    expect(rendered).toContain('@claude-flow/cli/package.json');
   });
 
   it('subprocess fallback probes claude-flow with bridge-status (a known-working command)', () => {
