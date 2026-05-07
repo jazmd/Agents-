@@ -19,8 +19,15 @@ import { detectPlatform } from './types.js';
  * is correct regardless of CLAUDE_PROJECT_DIR.
  *
  * Per-project installs are unaffected: hookCmd keeps its previous shape.
+ *
+ * Exported because the init executor (#bug9) also needs to detect this case
+ * to avoid joining a redundant `.claude/` segment on top of `targetDir` when
+ * `targetDir` already *is* `~/.claude`. Without this guard, every re-init of
+ * the global install writes to a phantom `~/.claude/.claude/...` tree while
+ * the real `~/.claude/helpers/` (where Claude Code reads from) is never
+ * updated.
  */
-function isGlobalInstall(targetDir: string | undefined): boolean {
+export function isGlobalInstall(targetDir: string | undefined): boolean {
   if (!targetDir) return false;
   try {
     const home = os.homedir();
