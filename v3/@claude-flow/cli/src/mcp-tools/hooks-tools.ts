@@ -2797,15 +2797,26 @@ export const hooksIntelligenceStats: MCPTool = {
       };
     }
 
-    // EWC++ stats from real implementation
-    let ewcStats = {
-      consolidations: 0,
-      catastrophicForgettingPrevented: 0,
-      fisherUpdates: 0,
-      avgPenalty: 0,
-      totalPatterns: 0,
-      implementation: 'not-loaded' as string,
-    };
+    // #bug6 — Honesty fix: only emit stats blocks for subsystems whose
+    // lazy-loader actually resolved a real implementation. Previously every
+    // subsystem returned a stub with `implementation: 'not-loaded'` (and
+    // flash returned `speedup: 1`), which contradicted the README's
+    // 2.49x-7.47x claim and made it impossible to tell from the stats alone
+    // which subsystems were live. Now: null loader -> key omitted from
+    // output, name pushed to `_unavailable`. Loaded subsystems carry their
+    // real `implementation` tag (no `'not-loaded'` placeholder reaches the
+    // wire).
+    const unavailableSubsystems: string[] = [];
+
+    // EWC++ stats — only emit when the consolidator actually loaded
+    let ewcStats: {
+      consolidations: number;
+      catastrophicForgettingPrevented: number;
+      fisherUpdates: number;
+      avgPenalty: number;
+      totalPatterns: number;
+      implementation: string;
+    } | null = null;
     if (ewc) {
       const realEwc = ewc.getConsolidationStats();
       ewcStats = {
@@ -2816,18 +2827,20 @@ export const hooksIntelligenceStats: MCPTool = {
         totalPatterns: realEwc.totalPatterns,
         implementation: 'real-ewc++',
       };
+    } else {
+      unavailableSubsystems.push('ewc');
     }
 
-    // MoE stats from real implementation
-    let moeStats = {
-      expertsTotal: 8,
-      expertsActive: 0,
-      routingDecisions: memoryStats.routing.decisions,
-      avgRoutingTimeMs: 0,
-      avgConfidence: memoryStats.routing.avgConfidence,
-      loadBalance: null as { giniCoefficient: number; coefficientOfVariation: number; expertUsage: Record<string, number> } | null,
-      implementation: 'not-loaded' as string,
-    };
+    // MoE stats — only emit when the router actually loaded
+    let moeStats: {
+      expertsTotal: number;
+      expertsActive: number;
+      routingDecisions: number;
+      avgRoutingTimeMs: number;
+      avgConfidence: number;
+      loadBalance: { giniCoefficient: number; coefficientOfVariation: number; expertUsage: Record<string, number> } | null;
+      implementation: string;
+    } | null = null;
     if (moe) {
       const loadBalance = moe.getLoadBalance();
       const activeExperts = Object.values(loadBalance.routingCounts).filter((u: number) => u > 0).length;
@@ -2847,15 +2860,19 @@ export const hooksIntelligenceStats: MCPTool = {
         },
         implementation: 'real-moe',
       };
+    } else {
+      unavailableSubsystems.push('moe');
     }
 
-    // Flash Attention stats from real implementation
-    let flashStats = {
-      speedup: 1.0,
-      avgComputeTimeMs: 0,
-      blockSize: 64,
-      implementation: 'not-loaded' as string,
-    };
+    // Flash Attention stats — only emit when the kernel actually loaded.
+    // (Previously emitted `speedup: 1` even when not loaded, contradicting
+    // the README's 2.49x-7.47x claim.)
+    let flashStats: {
+      speedup: number;
+      avgComputeTimeMs: number;
+      blockSize: number;
+      implementation: string;
+    } | null = null;
     if (flash) {
       flashStats = {
         speedup: Math.round(flash.getSpeedup() * 100) / 100,
@@ -2863,16 +2880,18 @@ export const hooksIntelligenceStats: MCPTool = {
         blockSize: 64,
         implementation: 'real-flash-attention',
       };
+    } else {
+      unavailableSubsystems.push('flash');
     }
 
-    // LoRA stats from real implementation
-    let loraStats = {
-      rank: 8,
-      alpha: 16,
-      adaptations: 0,
-      avgLoss: 0,
-      implementation: 'not-loaded' as string,
-    };
+    // LoRA stats — only emit when the adapter actually loaded
+    let loraStats: {
+      rank: number;
+      alpha: number;
+      adaptations: number;
+      avgLoss: number;
+      implementation: string;
+    } | null = null;
     if (lora) {
       const realLora = lora.getStats();
       loraStats = {
@@ -2882,7 +2901,14 @@ export const hooksIntelligenceStats: MCPTool = {
         avgLoss: Math.round(realLora.avgAdaptationNorm * 10000) / 10000,
         implementation: 'real-lora',
       };
+    } else {
+      unavailableSubsystems.push('lora');
     }
+
+    // SONA never goes "not-loaded" — it always falls back to memoryStats.
+    // Track unavailability separately so callers know whether the real
+    // optimizer is live vs. the memory-fallback path.
+    if (!sona) unavailableSubsystems.push('sona');
 
     // ruvllm native backend stats
     let ruvllmStats = { coordinator: 'unavailable' as string, trajectories: 0, contrastiveTrainer: 'unavailable' as string | object, trainingBackend: 'unavailable' as string, graphDatabase: { backend: 'unavailable', totalNodes: 0, totalEdges: 0 } as Record<string, unknown> };
@@ -2944,12 +2970,13 @@ export const hooksIntelligenceStats: MCPTool = {
       // bridge not available
     }
 
-    const stats = {
+    // #bug6 — Build the stats payload by including only the subsystems whose
+    // backing implementation actually loaded. Unloaded ones are surfaced via
+    // a top-level `_unavailable: [...]` field so callers can tell what's
+    // optional vs. simply absent. SONA always emits (memory-fallback path),
+    // matching the prior contract for the basic stats response.
+    const stats: Record<string, unknown> = {
       sona: sonaStats,
-      moe: moeStats,
-      ewc: ewcStats,
-      flash: flashStats,
-      lora: loraStats,
       ruvllm: ruvllmStats,
       hnsw: {
         indexSize: hnswIndexSize,
@@ -2963,23 +2990,34 @@ export const hooksIntelligenceStats: MCPTool = {
       dataSource: sona ? 'real-implementations' : 'memory-fallback',
       lastUpdated: new Date().toISOString(),
     };
+    if (moeStats) stats.moe = moeStats;
+    if (ewcStats) stats.ewc = ewcStats;
+    if (flashStats) stats.flash = flashStats;
+    if (loraStats) stats.lora = loraStats;
+    if (unavailableSubsystems.length > 0) stats._unavailable = unavailableSubsystems;
 
     if (detailed) {
+      // implementationStatus mirrors what's actually in `stats` — only
+      // loaded subsystems get a 'loaded' tag. Unloaded ones already appear
+      // in `_unavailable`, so we don't duplicate them with 'not-loaded'.
+      const implementationStatus: Record<string, string> = {};
+      if (sona) implementationStatus.sona = 'loaded';
+      if (ewc) implementationStatus.ewc = 'loaded';
+      if (moe) implementationStatus.moe = 'loaded';
+      if (flash) implementationStatus.flash = 'loaded';
+      if (lora) implementationStatus.lora = 'loaded';
+
+      const performance: Record<string, number> = {
+        sonaLearningMs: sonaStats.avgLearningTimeMs,
+      };
+      if (moeStats) performance.moeRoutingMs = moeStats.avgRoutingTimeMs;
+      if (flashStats) performance.flashSpeedup = flashStats.speedup;
+      if (ewcStats) performance.ewcPenalty = ewcStats.avgPenalty;
+
       return {
         ...stats,
-        implementationStatus: {
-          sona: sona ? 'loaded' : 'not-loaded',
-          ewc: ewc ? 'loaded' : 'not-loaded',
-          moe: moe ? 'loaded' : 'not-loaded',
-          flash: flash ? 'loaded' : 'not-loaded',
-          lora: lora ? 'loaded' : 'not-loaded',
-        },
-        performance: {
-          sonaLearningMs: sonaStats.avgLearningTimeMs,
-          moeRoutingMs: moeStats.avgRoutingTimeMs,
-          flashSpeedup: flashStats.speedup,
-          ewcPenalty: ewcStats.avgPenalty,
-        },
+        implementationStatus,
+        performance,
       };
     }
 
