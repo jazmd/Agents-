@@ -12,10 +12,7 @@
  * lists loaded subsystems (no more `'not-loaded'` strings on the wire).
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
+import { describe, it, expect } from 'vitest';
 
 import { hooksTools } from '../src/mcp-tools/hooks-tools.js';
 import { agentdbHealth } from '../src/mcp-tools/agentdb-tools.js';
@@ -38,20 +35,6 @@ interface AgentdbHealthResult {
 }
 
 describe('hooks_intelligence_stats — unloaded subsystems honesty (#bug6)', () => {
-  const originalCwd = process.cwd();
-  let workDir: string;
-
-  beforeEach(() => {
-    workDir = join(tmpdir(), `hooks-stats-bug6-${Date.now()}-${Math.random().toString(36).slice(2)}`);
-    mkdirSync(workDir, { recursive: true });
-    process.chdir(workDir);
-  });
-
-  afterEach(() => {
-    process.chdir(originalCwd);
-    try { rmSync(workDir, { recursive: true, force: true }); } catch { /* ignore */ }
-  });
-
   it('never reports `implementation: "not-loaded"` on any visible subsystem', async () => {
     const tool = hooksTools.find(t => t.name === 'hooks_intelligence_stats');
     expect(tool).toBeDefined();
