@@ -65,6 +65,38 @@ async function ensureSessionsDir(): Promise<string> {
   return dir;
 }
 
+/**
+ * #bug20 — In-process retrieve from the memory bridge / sql.js+HNSW backend.
+ *
+ * Replaces the previous `npx -y @claude-flow/cli@latest memory retrieve …`
+ * shell-out used by `browser_template_apply` and `browser_cookie_use`.
+ * Reuses `getEntry` from `memory/memory-initializer.js` — the same API the
+ * `memory_retrieve` MCP handler calls directly. Avoids the ~3-5s npm
+ * round-trip, the deprecation-warning JSON pollution, and the conflation
+ * of transient `npx` failures with a logical "key missing".
+ */
+interface RetrieveResult {
+  found: boolean;
+  value?: string;
+  error?: string;
+}
+
+async function retrieveFromMemory(namespace: string, key: string): Promise<RetrieveResult> {
+  try {
+    const { getEntry } = await import('../memory/memory-initializer.js');
+    const result = await getEntry({ key, namespace });
+    if (result.found && result.entry) {
+      return { found: true, value: result.entry.content };
+    }
+    return { found: false, error: result.error };
+  } catch (error) {
+    return {
+      found: false,
+      error: error instanceof Error ? error.message : 'memory backend unavailable',
+    };
+  }
+}
+
 function makeSessionId(taskSlug: string): string {
   const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14);
   const slug = taskSlug.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 32) || 'session';
@@ -288,13 +320,17 @@ export const browserSessionTools: MCPTool[] = [
     handler: async (input) => {
       const vN = validateText(input.name as string, 'name');
       if (!vN.valid) return fail(vN.error || 'invalid name');
-      const r = await shell('npx', ['-y', '@claude-flow/cli@latest', 'memory', 'retrieve',
-        '--namespace', 'browser-templates',
-        '--key', input.name as string], { timeout: 60000 });
-      if (!r.success) return fail('template fetch failed', { detail: r.error, stderr: r.stderr });
+      // #bug20: in-process call into the memory backend instead of
+      // re-spawning `npx @claude-flow/cli@latest memory retrieve`.
+      const r = await retrieveFromMemory('browser-templates', input.name as string);
+      if (!r.found) {
+        return fail('template fetch failed', {
+          detail: r.error ?? `template "${input.name}" not found in browser-templates namespace`,
+        });
+      }
       return ok({
         templateName: input.name,
-        recipe: r.stdout,
+        recipe: r.value,
         nextStep: 'Caller dispatches the recipe via browser_* tools; persist updated selectors to browser-selectors on success.',
       });
     },
@@ -318,15 +354,19 @@ export const browserSessionTools: MCPTool[] = [
     handler: async (input) => {
       const vH = validateText(input.host as string, 'host');
       if (!vH.valid) return fail(vH.error || 'invalid host');
-      const r = await shell('npx', ['-y', '@claude-flow/cli@latest', 'memory', 'retrieve',
-        '--namespace', 'browser-cookies',
-        '--key', input.host as string], { timeout: 60000 });
-      if (!r.success) return fail('cookie lookup failed', { detail: r.error, stderr: r.stderr });
+      // #bug20: in-process call into the memory backend instead of
+      // re-spawning `npx @claude-flow/cli@latest memory retrieve`.
+      const r = await retrieveFromMemory('browser-cookies', input.host as string);
+      if (!r.found) {
+        return fail('cookie lookup failed', {
+          detail: r.error ?? `host "${input.host}" not found in browser-cookies namespace`,
+        });
+      }
       // The contract: the value blob includes a vault_handle, expiry, aidefence_verdict.
       // Raw values do not enter this namespace (browser-login is responsible).
       return ok({
         host: input.host,
-        vault: r.stdout,
+        vault: r.value,
         nextStep: 'Caller mounts the handle via the browser runner; the raw cookie is materialized only inside the browser process, never returned to the model.',
       });
     },
