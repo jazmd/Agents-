@@ -1221,12 +1221,36 @@ export const hooksMetrics: MCPTool = {
     const failed = Math.max(0, total - successful);
 
     const totalRoutes = stats.routing.decisions + pendingDrained.routes;
-    const totalPatterns = stats.patterns.learned + pendingDrained.edits;
+
+    // #bug11.1 — hooks_intelligence_pattern-store writes through the SQL+HNSW
+    // bridge (memory-bridge.bridgeStorePattern), but `stats.patterns.learned`
+    // is sourced from the JSON memory store (loadMemoryStore) which the
+    // bridge never updates. As a result hooks_metrics reported `patterns: 0`
+    // even when `intelligence_stats.hnsw.indexSize > 0`. Mirror the bridge
+    // floor that hooksIntelligenceStats now uses (#bug3) so the dashboard
+    // reflects bridge-stored patterns. Use Math.max — both sources are
+    // valid; the bridge may carry older patterns the JSON store doesn't
+    // know about, while the JSON+drain path may carry in-session edits the
+    // bridge hasn't indexed yet.
+    let bridgePatternCount = 0;
+    try {
+      const { bridgeGetHNSWStatus } = await import('../memory/memory-bridge.js');
+      const bridgeStatus = await bridgeGetHNSWStatus();
+      bridgePatternCount = bridgeStatus?.entryCount ?? 0;
+    } catch { /* bridge not available */ }
+
+    const memoryStorePatternCount = stats.patterns.learned + pendingDrained.edits;
+    const totalPatterns = Math.max(bridgePatternCount, memoryStorePatternCount);
 
     return {
       _real: true,
-      _dataSource: 'intelligence-stats + routing-outcomes + pending-insights',
+      _dataSource: 'intelligence-stats + routing-outcomes + pending-insights + hnsw-bridge',
       _pendingDrained: pendingDrained,
+      _patternsBreakdown: {
+        bridgeHNSW: bridgePatternCount,
+        memoryStore: stats.patterns.learned,
+        drainedEdits: pendingDrained.edits,
+      },
       period,
       patterns: {
         total: totalPatterns,
@@ -1244,7 +1268,7 @@ export const hooksMetrics: MCPTool = {
         successRate,
         avgRiskScore: null,
       },
-      _note: total === 0 && totalCommands === 0 && pendingDrained.drained === 0
+      _note: total === 0 && totalCommands === 0 && pendingDrained.drained === 0 && totalPatterns === 0
         ? 'No metrics data collected yet. Run hooks_post-task / hooks_intelligence_trajectory-end / hooks_route to populate.'
         : undefined,
       lastUpdated: new Date().toISOString(),
