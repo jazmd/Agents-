@@ -867,7 +867,30 @@ export const embeddingsTools: MCPTool[] = [
 
       const ruvectorEnabled = config.neural.ruvector?.enabled ?? false;
 
-      return {
+      // #bug21 — embeddings_status reports `initialized: true` with config
+      // details but no indication of whether any embeddings have actually
+      // been stored. Probe the memory store for an embedding count so the
+      // idle case ("initialized but never populated") is distinguishable
+      // from "active". Mirrors the Bug 11.3 idle-since-load pattern.
+      let embeddingCount: number | null = null;
+      try {
+        const memInit = await import('../memory/memory-initializer.js').catch(() => null);
+        const fn = (memInit as Record<string, unknown> | null)?.searchEntries as
+          | ((args: Record<string, unknown>) => Promise<{ results: unknown[] }>)
+          | undefined;
+        if (typeof fn === 'function') {
+          // Empty query returns the unfiltered set; cap to 1 since we only
+          // need the count distinction (zero vs non-zero).
+          const probe = await fn({ query: '', limit: 1, threshold: 0, namespace: 'all' });
+          embeddingCount = Array.isArray(probe.results) ? probe.results.length : 0;
+        }
+      } catch {
+        // Probe failed — leave embeddingCount null, fall through without
+        // the idle annotation. A backend-broken case is not the bug-21 scope.
+      }
+      const isIdle = embeddingCount === 0;
+
+      const result: Record<string, unknown> = {
         success: true,
         initialized: true,
         config: {
@@ -901,6 +924,13 @@ export const embeddingsTools: MCPTool[] = [
           features: ['semantic search', 'hyperbolic projection', 'neural substrate'],
         },
       };
+
+      if (isIdle) {
+        result._status = 'idle';
+        result._note = 'Embeddings initialized; no embeddings stored yet. Use mcp__claude-flow__embeddings_generate (or memory_store) to populate the index.';
+      }
+
+      return result;
     },
   },
 
