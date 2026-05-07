@@ -245,12 +245,16 @@ if [[ -d "$ruflo_state_dir" ]]; then
 fi
 
 # ── Rate Limit Usage (cached, refreshes every 60s) ──────
+# Cache check verified working — fresh cache (<60s) skips curl entirely
+# (no fork for stat is needed when file is missing; -f short-circuits).
 rate_cache="/tmp/claude/statusline-usage-cache.json"
 rate_cache_age=999
-mkdir -p /tmp/claude
 [[ -f "$rate_cache" ]] && rate_cache_age=$(( $(date +%s) - $(stat -f%m "$rate_cache" 2>/dev/null || stat -c%Y "$rate_cache" 2>/dev/null || echo 0) ))
 
 if [[ $rate_cache_age -gt 60 ]]; then
+    # Only create the cache dir when we're actually about to refresh — saves an
+    # mkdir fork on every render where the cache is fresh.
+    mkdir -p /tmp/claude
     # Resolve OAuth token
     oauth_token=""
     if [[ -n "$CLAUDE_CODE_OAUTH_TOKEN" ]]; then
