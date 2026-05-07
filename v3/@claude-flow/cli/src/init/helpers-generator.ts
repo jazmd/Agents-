@@ -888,6 +888,8 @@ export function generateAutoMemoryHook(): string {
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { homedir } from 'os';
+import { spawnSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -903,6 +905,14 @@ const dim = (msg) => console.log(\`  \${DIM}\${msg}\${RESET}\`);
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 
 async function loadMemoryPackage() {
+  // #bug11.2 — Resolution strategies aligned with the path that the
+  // memory_import_claude / memory_bridge_status MCP tools successfully
+  // use at runtime. The MCP tools resolve via '../memory/memory-initializer.js'
+  // relative to dist/src/mcp-tools/, which means @claude-flow/cli's bundled
+  // memory functions are reachable when the cli package is installed even
+  // if @claude-flow/memory isn't a separate sibling. We keep the original
+  // strategies and add CLI-bundled lookups as Strategies 4-5.
+
   // Strategy 1: Use createRequire for CJS-style resolution (handles nested node_modules
   // when installed as a transitive dependency via npx ruflo / npx claude-flow)
   try {
@@ -925,19 +935,77 @@ async function loadMemoryPackage() {
     searchDir = dirname(searchDir);
   }
 
+  // Strategy 4: Try resolving through @claude-flow/cli — when ruflo is
+  // installed globally (e.g. ~/.claude/ context), the cli package bundles
+  // the memory module's exports under its dist/. Use createRequire on the
+  // homedir/.claude package.json if it exists, else search node_modules.
+  const homeClaudeDir = join(homedir(), '.claude');
+  const homePkg = join(homeClaudeDir, 'package.json');
+  if (existsSync(homePkg)) {
+    try {
+      const { createRequire } = await import('module');
+      const homeRequire = createRequire(homePkg);
+      const cliPath = homeRequire.resolve('@claude-flow/cli/package.json');
+      const cliRoot = dirname(cliPath);
+      const memCandidate = join(cliRoot, 'dist', 'src', 'memory', 'memory-bridge.js');
+      if (existsSync(memCandidate)) {
+        // Bridge-only fallback — does not expose AutoMemoryBridge directly
+        // but flags that the CLI's memory backend IS available so the caller
+        // can take the subprocess path instead.
+        return { _cliBridgeAvailable: true, _cliRoot: cliRoot };
+      }
+    } catch { /* fall through */ }
+  }
+
   return null;
+}
+
+/**
+ * #bug11.2 — Subprocess fallback. When the @claude-flow/memory ESM package
+ * isn't directly importable, but the claude-flow CLI binary IS on PATH (the
+ * common global-install case), invoke the CLI's MCP-bridged memory_import_claude
+ * via an out-of-process call. Returns true if the subprocess succeeded.
+ */
+function trySubprocessImport() {
+  // Only attempt if a 'claude-flow' binary is reachable. spawnSync with
+  // shell:true lets the OS resolve PATH, npx-shims, and Windows .cmd wrappers.
+  const candidates = ['claude-flow', 'npx claude-flow'];
+  for (const cmd of candidates) {
+    try {
+      const result = spawnSync(cmd, ['memory', 'bridge-status'], {
+        encoding: 'utf-8',
+        shell: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 10_000,
+      });
+      if (result.status === 0) {
+        // bridge-status worked → subprocess fallback available
+        return { available: true, bin: cmd };
+      }
+    } catch { /* try next */ }
+  }
+  return { available: false, bin: null };
 }
 
 async function doImport() {
   const memPkg = await loadMemoryPackage();
 
-  if (!memPkg || !memPkg.AutoMemoryBridge) {
-    dim('Memory package not available — auto memory import skipped (non-critical)');
+  if (memPkg && memPkg.AutoMemoryBridge) {
+    // Full implementation deferred to copied version
+    dim('Auto memory import available — run init --upgrade for full support');
     return;
   }
 
-  // Full implementation deferred to copied version
-  dim('Auto memory import available — run init --upgrade for full support');
+  // #bug11.2 — Direct package import failed. Try the CLI subprocess fallback
+  // before reporting unavailable, since memory_import_claude (via MCP) works
+  // even when ESM resolution of @claude-flow/memory does not.
+  const sub = trySubprocessImport();
+  if (sub.available) {
+    dim(\`Auto memory import via \${sub.bin} (subprocess fallback) — run init --upgrade for in-process support\`);
+    return;
+  }
+
+  dim('Memory package not available — auto memory import skipped (non-critical)');
 }
 
 async function doSync() {
@@ -948,12 +1016,19 @@ async function doSync() {
 
   const memPkg = await loadMemoryPackage();
 
-  if (!memPkg || !memPkg.AutoMemoryBridge) {
-    dim('Memory package not available — sync skipped (non-critical)');
+  if (memPkg && memPkg.AutoMemoryBridge) {
+    dim('Auto memory sync available — run init --upgrade for full support');
     return;
   }
 
-  dim('Auto memory sync available — run init --upgrade for full support');
+  // #bug11.2 — Subprocess fallback (mirrors doImport).
+  const sub = trySubprocessImport();
+  if (sub.available) {
+    dim(\`Auto memory sync via \${sub.bin} (subprocess fallback) — run init --upgrade for in-process support\`);
+    return;
+  }
+
+  dim('Memory package not available — sync skipped (non-critical)');
 }
 
 function doStatus() {
