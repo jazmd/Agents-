@@ -12,6 +12,7 @@ import { validateIdentifier, validateText } from './validate-input.js';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { scanClaudeCodeRegistry } from '../registry/claude-code-registry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -381,17 +382,29 @@ const guidanceCapabilities: MCPTool = {
 
     if (area) { const v = validateIdentifier(area, 'area'); if (!v.valid) return { content: [{ type: 'text', text: JSON.stringify({ error: v.error }, null, 2) }], isError: true }; }
 
+    // #bug22.2 — surface user-installed agents/skills/commands as a first-class
+    // capability area so guidance_capabilities is not blind to ~/.claude/.
+    const userArea = await buildUserInstalledArea();
+
     if (area) {
+      if (area === 'user-installed') {
+        return { content: [{ type: 'text', text: JSON.stringify(userArea.detailed, null, 2) }] };
+      }
       const cap = CAPABILITY_CATALOG[area];
       if (!cap) {
-        const available = Object.keys(CAPABILITY_CATALOG).join(', ');
+        const available = [...Object.keys(CAPABILITY_CATALOG), 'user-installed'].join(', ');
         return { content: [{ type: 'text', text: JSON.stringify({ error: `Unknown area: ${area}`, available }, null, 2) }], isError: true };
       }
       return { content: [{ type: 'text', text: JSON.stringify(cap, null, 2) }] };
     }
 
     if (format === 'detailed') {
-      return { content: [{ type: 'text', text: JSON.stringify(CAPABILITY_CATALOG, null, 2) }] };
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({ ...CAPABILITY_CATALOG, 'user-installed': userArea.detailed }, null, 2),
+        }],
+      };
     }
 
     const summary = Object.entries(CAPABILITY_CATALOG).map(([key, val]) => ({
@@ -403,10 +416,55 @@ const guidanceCapabilities: MCPTool = {
       skillCount: val.skills.length,
       whenToUse: val.whenToUse,
     }));
+    summary.push(userArea.summary);
 
     return { content: [{ type: 'text', text: JSON.stringify({ areas: summary, totalAreas: summary.length }, null, 2) }] };
   },
 };
+
+// #bug22.2 — Build the synthetic "user-installed" capability area from the
+// filesystem registry. Returns BOTH the summary (for the list view) and the
+// detailed shape (for `area: 'user-installed'`). Failures during scanning
+// degrade to an empty area rather than throwing — this MUST never break
+// the rest of guidance_capabilities.
+async function buildUserInstalledArea(): Promise<{
+  summary: { area: string; name: string; description: string; toolCount: number; agentCount: number; skillCount: number; whenToUse: string };
+  detailed: CapabilityArea & { commands: string[]; plugins: string[] };
+}> {
+  let registry: { agents: { name: string }[]; skills: { name: string }[]; commands: { name: string }[]; plugins: { name: string }[] };
+  try {
+    registry = await scanClaudeCodeRegistry();
+  } catch {
+    registry = { agents: [], skills: [], commands: [], plugins: [] };
+  }
+
+  const agentNames = registry.agents.map(a => a.name).sort();
+  const skillNames = registry.skills.map(s => s.name).sort();
+  const commandNames = registry.commands.map(c => c.name).sort();
+  const pluginNames = registry.plugins.map(p => p.name).sort();
+
+  return {
+    summary: {
+      area: 'user-installed',
+      name: 'User-Installed (Claude Code)',
+      description: `Agents/skills/commands/plugins discovered on disk under ~/.claude/. Loaded dynamically — counts are accurate as of this scan (cached 60s).`,
+      toolCount: 0,
+      agentCount: agentNames.length,
+      skillCount: skillNames.length,
+      whenToUse: 'When the task matches a user-installed skill domain (polymarket, geo-audit, kali-osint, ceo, polybot-ops, etc.) — these are not in the built-in catalog but are first-class on the user\'s machine.',
+    },
+    detailed: {
+      name: 'User-Installed (Claude Code)',
+      description: `Agents/skills/commands/plugins discovered on disk under ~/.claude/. ${agentNames.length} agents, ${skillNames.length} skills, ${commandNames.length} commands, ${pluginNames.length} plugins.`,
+      tools: [],
+      commands: commandNames,
+      agents: agentNames,
+      skills: skillNames,
+      plugins: pluginNames,
+      whenToUse: 'When the task matches a user-installed skill domain (polymarket, geo-audit, kali-osint, ceo, polybot-ops, etc.).',
+    },
+  };
+}
 
 const guidanceRecommend: MCPTool = {
   name: 'guidance_recommend',
