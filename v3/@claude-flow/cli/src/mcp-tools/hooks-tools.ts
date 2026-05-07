@@ -3,8 +3,9 @@
  * Provides intelligent hooks functionality via MCP protocol
  */
 
-import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync, unlinkSync, readdirSync, rmSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync, unlinkSync, readdirSync, rmSync, appendFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
+import { homedir } from 'os';
 import { type MCPTool, getProjectCwd } from './types.js';
 import { validateIdentifier, validateText, validatePath } from './validate-input.js';
 
@@ -1060,6 +1061,117 @@ export const hooksRoute: MCPTool = {
   },
 };
 
+// ADR-094 / #bug5 — `pending-insights.jsonl` was written by
+// helpers/intelligence.cjs:recordEdit() (post-edit hook) but only consumed
+// at session-end (consolidate()). Between sessions the JSONL grew while
+// hooks_metrics stayed at zero. drainPendingInsights() reads new lines
+// since last drain (tracked via sibling .consumed-offset file) and returns
+// counters per event type. It does NOT truncate — the consolidator still
+// needs the full file at session-end.
+interface PendingInsightsDrainResult {
+  edits: number;
+  files: string[];
+  trajectoriesEnded: number;
+  routes: number;
+  drained: number;
+}
+
+function resolvePendingInsightsPath(): string {
+  // Test/env override — lets callers (and regression tests) point the drain
+  // at an arbitrary path without mutating $HOME or process.cwd().
+  const override = process.env.RUFLO_PENDING_INSIGHTS_PATH;
+  if (override && override.length > 0) return override;
+
+  // Prefer ~/.claude/.claude-flow/data/pending-insights.jsonl (global install
+  // matches what helpers/intelligence.cjs writes when CWD=~/.claude). Fall
+  // back to CWD-relative path for project-local installs.
+  const home = homedir();
+  const globalPath = join(home, '.claude', '.claude-flow', 'data', 'pending-insights.jsonl');
+  if (existsSync(globalPath)) return globalPath;
+  return resolve(join('.claude-flow', 'data', 'pending-insights.jsonl'));
+}
+
+function drainPendingInsights(): PendingInsightsDrainResult {
+  const result: PendingInsightsDrainResult = {
+    edits: 0,
+    files: [],
+    trajectoriesEnded: 0,
+    routes: 0,
+    drained: 0,
+  };
+
+  try {
+    const insightsPath = resolvePendingInsightsPath();
+    if (!existsSync(insightsPath)) return result;
+
+    const offsetPath = `${insightsPath}.consumed-offset`;
+    let lastOffset = 0;
+    if (existsSync(offsetPath)) {
+      try {
+        const raw = readFileSync(offsetPath, 'utf-8').trim();
+        const parsed = parseInt(raw, 10);
+        if (Number.isFinite(parsed) && parsed >= 0) lastOffset = parsed;
+      } catch {
+        // corrupt offset — restart from 0 (worst case = double-count once)
+      }
+    }
+
+    const stat = statSync(insightsPath);
+    // If the file shrank (rotated/truncated), reset offset.
+    if (lastOffset > stat.size) lastOffset = 0;
+    if (lastOffset === stat.size) return result; // no new data
+
+    // Read just the new tail. For typical pending-insights sizes this is
+    // small; readFileSync + slice is fine. Keep it simple over fd-positional
+    // reads to avoid an extra abstraction.
+    const full = readFileSync(insightsPath, 'utf-8');
+    const newSlice = full.slice(lastOffset);
+    const lines = newSlice.split('\n').filter(l => l.trim().length > 0);
+
+    const fileSet = new Set<string>();
+    for (const line of lines) {
+      try {
+        const evt = JSON.parse(line) as { type?: string; file?: string };
+        result.drained++;
+        switch (evt.type) {
+          case 'edit':
+            result.edits++;
+            if (evt.file && typeof evt.file === 'string') fileSet.add(evt.file);
+            break;
+          case 'trajectory-end':
+          case 'trajectoryEnd':
+            result.trajectoriesEnded++;
+            break;
+          case 'route':
+          case 'routing':
+            result.routes++;
+            break;
+          default:
+            // Unknown event — still counted in drained so callers can detect
+            // activity even when event types evolve.
+            break;
+        }
+      } catch {
+        // Malformed line — skip.
+      }
+    }
+    result.files = Array.from(fileSet);
+
+    // Persist new offset (idempotent for next call). Best-effort — failures
+    // here only cause the next drain to re-read (double-count), not data loss.
+    try {
+      mkdirSync(dirname(offsetPath), { recursive: true });
+      writeFileSync(offsetPath, String(stat.size), 'utf-8');
+    } catch {
+      // non-fatal
+    }
+  } catch {
+    // Drain is opportunistic — never fail the metrics call.
+  }
+
+  return result;
+}
+
 export const hooksMetrics: MCPTool = {
   name: 'hooks_metrics',
   description: 'View learning metrics dashboard',
@@ -1087,7 +1199,13 @@ export const hooksMetrics: MCPTool = {
       routingOutcomes = loadRoutingOutcomes() as Array<{ success: boolean; agent?: string }>;
     } catch { /* non-fatal */ }
 
-    const totalCommands = routingOutcomes.length;
+    // ADR-094 / #bug5: helpers/intelligence.cjs:recordEdit() appends edits
+    // to pending-insights.jsonl on every post-edit hook, but the only prior
+    // consumer was session-end consolidation. Drain new lines (with offset
+    // tracking for idempotence) so the dashboard reflects in-session edits.
+    const pendingDrained = drainPendingInsights();
+
+    const totalCommands = routingOutcomes.length + pendingDrained.edits;
     const successfulCommands = routingOutcomes.filter(o => o.success).length;
     const successRate = totalCommands > 0 ? successfulCommands / totalCommands : null;
 
@@ -1098,23 +1216,27 @@ export const hooksMetrics: MCPTool = {
     }
     const topAgent = Object.entries(agentCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 
-    const successful = stats.trajectories.successful;
-    const total = stats.trajectories.total;
+    const successful = stats.trajectories.successful + pendingDrained.trajectoriesEnded;
+    const total = stats.trajectories.total + pendingDrained.trajectoriesEnded;
     const failed = Math.max(0, total - successful);
+
+    const totalRoutes = stats.routing.decisions + pendingDrained.routes;
+    const totalPatterns = stats.patterns.learned + pendingDrained.edits;
 
     return {
       _real: true,
-      _dataSource: 'intelligence-stats + routing-outcomes',
+      _dataSource: 'intelligence-stats + routing-outcomes + pending-insights',
+      _pendingDrained: pendingDrained,
       period,
       patterns: {
-        total: stats.patterns.learned,
+        total: totalPatterns,
         successful,
         failed,
         avgConfidence: stats.routing.avgConfidence || null,
       },
       agents: {
         routingAccuracy: stats.routing.avgConfidence || null,
-        totalRoutes: stats.routing.decisions,
+        totalRoutes,
         topAgent,
       },
       commands: {
@@ -1122,7 +1244,7 @@ export const hooksMetrics: MCPTool = {
         successRate,
         avgRiskScore: null,
       },
-      _note: total === 0 && totalCommands === 0
+      _note: total === 0 && totalCommands === 0 && pendingDrained.drained === 0
         ? 'No metrics data collected yet. Run hooks_post-task / hooks_intelligence_trajectory-end / hooks_route to populate.'
         : undefined,
       lastUpdated: new Date().toISOString(),
