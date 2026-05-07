@@ -18,45 +18,55 @@ fi
 
 output=""
 
-# Git repo-relative path
-if git -C "$cwd" rev-parse --is-inside-work-tree &>/dev/null 2>&1; then
-    repo_root=$(git -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
-    if [[ -n "$repo_root" ]]; then
-        repo_name=$(basename "$repo_root")
-        relative_path="${cwd#$repo_root}"
-        if [[ -z "$relative_path" ]]; then
-            display_dir="$repo_name"
-        else
-            display_dir="$repo_name$relative_path"
-        fi
+# Git info — ONE shell pipeline produces repo_root, branch, status (was 5 separate git invocations).
+# Sections separated by ---SEP--- so we can split with bash parameter expansion (no awk fork).
+repo_root=""
+branch=""
+git_status=""
+if [[ "$(git -C "$cwd" --no-optional-locks rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]]; then
+    git_info=$({ git -C "$cwd" rev-parse --show-toplevel 2>/dev/null; \
+                 echo "---SEP---"; \
+                 git -C "$cwd" branch --show-current 2>/dev/null || git -C "$cwd" rev-parse --short HEAD 2>/dev/null; \
+                 echo "---SEP---"; \
+                 git -C "$cwd" --no-optional-locks status --porcelain 2>/dev/null; })
+    repo_root="${git_info%%$'\n'---SEP---*}"
+    rest="${git_info#*---SEP---$'\n'}"
+    branch="${rest%%$'\n'---SEP---*}"
+    git_status="${rest#*---SEP---}"
+    git_status="${git_status#$'\n'}"
+fi
+
+if [[ -n "$repo_root" ]]; then
+    repo_name=$(basename "$repo_root")
+    relative_path="${cwd#$repo_root}"
+    if [[ -z "$relative_path" ]]; then
+        display_dir="$repo_name"
+    else
+        display_dir="$repo_name$relative_path"
     fi
 fi
 
 output+=$(printf "\033[1;34m%s\033[0m " "$display_dir")
 
-# Git branch and status
-if git -C "$cwd" rev-parse --is-inside-work-tree &>/dev/null 2>&1; then
-    branch=$(git -C "$cwd" branch --show-current 2>/dev/null || git -C "$cwd" rev-parse --short HEAD 2>/dev/null)
-    if [[ -n "$branch" ]]; then
-        output+=$(printf "on \033[1;32m %s\033[0m " "$branch")
+# Git branch and status (uses pre-fetched data — no additional git invocations)
+if [[ -n "$branch" ]]; then
+    output+=$(printf "on \033[1;32m %s\033[0m " "$branch")
 
-        git_status=$(git -C "$cwd" --no-optional-locks status --porcelain 2>/dev/null)
-        status_icons=""
-        echo "$git_status" | grep -q "^??" && status_icons+=""
-        echo "$git_status" | grep -q "^ M" && status_icons+=""
-        echo "$git_status" | grep -q "^M " && status_icons+="++"
-        echo "$git_status" | grep -q "^D " && status_icons+=""
+    status_icons=""
+    echo "$git_status" | grep -q "^??" && status_icons+=""
+    echo "$git_status" | grep -q "^ M" && status_icons+=""
+    echo "$git_status" | grep -q "^M " && status_icons+="++"
+    echo "$git_status" | grep -q "^D " && status_icons+=""
 
-        if [[ -n "$status_icons" ]]; then
-            output+=$(printf "\033[1;32m(%s)\033[0m " "$status_icons")
-        fi
+    if [[ -n "$status_icons" ]]; then
+        output+=$(printf "\033[1;32m(%s)\033[0m " "$status_icons")
     fi
 fi
 
 # Python
 if [[ -f "$cwd/requirements.txt" ]] || [[ -f "$cwd/pyproject.toml" ]] || [[ -f "$cwd/setup.py" ]]; then
     py_version=$(python3 --version 2>/dev/null | cut -d' ' -f2)
-    [[ -n "$py_version" ]] && output+=$(printf "via \033[1;33m %s\033[0m " "$py_version")
+    [[ -n "$py_version" ]] && output+=$(printf "via \033[1;33m %s\033[0m " "$py_version")
 fi
 
 # Node.js
