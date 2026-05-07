@@ -8,6 +8,7 @@ import { dirname, join, resolve } from 'path';
 import { homedir } from 'os';
 import { type MCPTool, getProjectCwd } from './types.js';
 import { validateIdentifier, validateText, validatePath } from './validate-input.js';
+import { scanClaudeCodeRegistry, type UserSkill, type UserAgent } from '../registry/claude-code-registry.js';
 
 // Real vector search functions - lazy loaded to avoid circular imports
 let searchEntriesFn: ((options: {
@@ -883,9 +884,137 @@ export const hooksPostCommand: MCPTool = {
   },
 };
 
+/**
+ * #bug22.3 — Match user-installed skills/agents against a task description.
+ *
+ * MVP keyword approach (intentionally simple — see TODO below). For each
+ * user skill we tokenize:
+ *   - The skill `name` (e.g. "polymarket-analyzer" → ["polymarket",
+ *     "analyzer"]).
+ *   - The first ~20 words of `description` (when present), filtered to
+ *     informative tokens (>= 4 chars, alphanumerics, deduped).
+ *
+ * Each task token that overlaps the skill's bag scores +1, with the bag
+ * built so a direct hit on a unique-noun in the skill name is weighted
+ * heavily (the skill name itself contributes 2× — it's the most reliable
+ * signal that the user wrote a skill specifically for this).
+ *
+ * Returns the top-K matches sorted by score (>= 1). Empty array means no
+ * user skill should be considered.
+ *
+ * TODO(bug22-followup): replace this with proper embedding-based scoring
+ * once we route through `bridgeStorePattern` for skill descriptions. The
+ * keyword scorer is a bridge — it covers the obvious "polymarket" /
+ * "kali" / "geo" / "ceo" cases that the hardcoded built-in catalog
+ * completely misses, but won't catch synonyms or paraphrases.
+ */
+interface UserSkillMatch {
+  type: 'skill' | 'agent';
+  name: string;
+  score: number;
+  description?: string;
+  matchedKeywords: string[];
+}
+
+function tokenizeForSkillMatching(text: string): string[] {
+  return text
+    .toLowerCase()
+    // Split on non-alphanumerics so dashes / underscores yield separate tokens.
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length >= 3);
+}
+
+const COMMON_STOPWORDS = new Set([
+  'the', 'and', 'for', 'with', 'that', 'this', 'use', 'when', 'how', 'has',
+  'are', 'you', 'can', 'all', 'any', 'should', 'will', 'have', 'been', 'was',
+  'were', 'into', 'from', 'about', 'task', 'tasks', 'agent', 'agents', 'skill',
+  'skills', 'using', 'used', 'used', 'than', 'then', 'their', 'there', 'where',
+]);
+
+function buildSkillKeywordBag(skill: UserSkill | UserAgent): { tokens: Set<string>; nameTokens: Set<string> } {
+  const nameTokens = new Set(tokenizeForSkillMatching(skill.name));
+  const bag = new Set<string>(nameTokens);
+
+  // Pull tokens from description but cap how much we mine — long
+  // descriptions otherwise drown out the skill-name signal.
+  if (skill.description) {
+    const descTokens = tokenizeForSkillMatching(skill.description).slice(0, 40);
+    for (const t of descTokens) {
+      if (!COMMON_STOPWORDS.has(t)) bag.add(t);
+    }
+  }
+  return { tokens: bag, nameTokens };
+}
+
+function matchUserSkillsForTask(
+  task: string,
+  context: string | undefined,
+  skills: UserSkill[],
+  agents: UserAgent[],
+  topK = 5,
+): UserSkillMatch[] {
+  const taskTokens = new Set([
+    ...tokenizeForSkillMatching(task),
+    ...(context ? tokenizeForSkillMatching(context) : []),
+  ]);
+  if (taskTokens.size === 0) return [];
+
+  const candidates: UserSkillMatch[] = [];
+
+  for (const skill of skills) {
+    const { tokens, nameTokens } = buildSkillKeywordBag(skill);
+    let score = 0;
+    const matched: string[] = [];
+    for (const t of taskTokens) {
+      if (tokens.has(t)) {
+        // Name-token match weighted 2× because it's the strongest signal.
+        const weight = nameTokens.has(t) ? 2 : 1;
+        score += weight;
+        matched.push(t);
+      }
+    }
+    if (score >= 1) {
+      candidates.push({
+        type: 'skill',
+        name: skill.name,
+        score,
+        description: skill.description,
+        matchedKeywords: matched,
+      });
+    }
+  }
+
+  // Also consider user agents — many agents (polymarket-analyzer, ceo,
+  // polybot-ops) are addressable directly even if there's no skill for them.
+  for (const agent of agents) {
+    const { tokens, nameTokens } = buildSkillKeywordBag(agent);
+    let score = 0;
+    const matched: string[] = [];
+    for (const t of taskTokens) {
+      if (tokens.has(t)) {
+        const weight = nameTokens.has(t) ? 2 : 1;
+        score += weight;
+        matched.push(t);
+      }
+    }
+    if (score >= 1) {
+      candidates.push({
+        type: 'agent',
+        name: agent.name,
+        score,
+        description: agent.description,
+        matchedKeywords: matched,
+      });
+    }
+  }
+
+  candidates.sort((a, b) => b.score - a.score);
+  return candidates.slice(0, topK);
+}
+
 export const hooksRoute: MCPTool = {
   name: 'hooks_route',
-  description: 'Get a 3-tier routing recommendation for a task: Tier 1 (Agent Booster, 0ms / $0 — for var-to-const, add-types, etc.), Tier 2 (Haiku — simple), Tier 3 (Sonnet/Opus — complex). Use this BEFORE spawning an agent to avoid sending simple transforms to Sonnet. Native tools have no equivalent — Claude Code does not introspect its own model-selection cost. Returns the recommended model + a `[AGENT_BOOSTER_AVAILABLE]` literal when the WASM bypass applies.',
+  description: 'Get a 3-tier routing recommendation for a task: Tier 1 (Agent Booster, 0ms / $0 — for var-to-const, add-types, etc.), Tier 2 (Haiku — simple), Tier 3 (Sonnet/Opus — complex). Use this BEFORE spawning an agent to avoid sending simple transforms to Sonnet. Native tools have no equivalent — Claude Code does not introspect its own model-selection cost. Returns the recommended model + a `[AGENT_BOOSTER_AVAILABLE]` literal when the WASM bypass applies. Also surfaces user-installed skills/agents from ~/.claude/ that match the task (e.g. polymarket-analyzer for trading tasks).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -902,6 +1031,19 @@ export const hooksRoute: MCPTool = {
 
     { const v = validateText(task, 'task'); if (!v.valid) return { success: false, error: v.error }; }
     if (context) { const v = validateText(context, 'context'); if (!v.valid) return { success: false, error: v.error }; }
+
+    // #bug22.3 — Always score user-installed skills/agents against the task
+    // BEFORE running the built-in routing logic, so the response can surface
+    // the user's `polymarket-analyzer` / `kali-osint-*` / `ceo` etc. as
+    // alternatives even when AgentDB / semantic router lock onto a built-in
+    // pattern. Failures here must never break routing.
+    let userMatches: UserSkillMatch[] = [];
+    try {
+      const registry = await scanClaudeCodeRegistry();
+      userMatches = matchUserSkillsForTask(task, context, registry.skills, registry.agents);
+    } catch {
+      // Registry unavailable — keep going with built-in routing only.
+    }
 
     // Phase 5: Try AgentDB's SemanticRouter / LearningSystem first
     if (useSemanticRouter) {
@@ -931,6 +1073,11 @@ export const hooksRoute: MCPTool = {
               confidence: Math.round((agentdbRoute.confidence - (0.1 * (i + 1))) * 100) / 100,
               reason: `Alternative from ${agentdbRoute.controller}`,
             })),
+            // #bug22.3 — even when AgentDB is confident, expose user-installed
+            // matches so the caller can override (e.g. "yes route to coder,
+            // but the user has polymarket-analyzer that's literally written
+            // for this exact task").
+            userInstalledMatches: userMatches,
             estimatedMetrics: {
               successProbability: Math.round(agentdbRoute.confidence * 100) / 100,
               estimatedDuration: complexity === 'high' ? '2-4 hours' : complexity === 'medium' ? '30-60 min' : '10-30 min',
@@ -1014,6 +1161,26 @@ export const hooksRoute: MCPTool = {
       backendInfo = 'keyword matching';
     }
 
+    // #bug22.3 — promote a strong user-installed skill/agent to primary
+    // when its score clearly outranks the built-in match. The threshold is
+    // intentionally conservative (>=4 keyword hits, with name-tokens
+    // weighted 2× per matchUserSkillsForTask) so we only override when the
+    // user wrote a skill/agent that's a near-perfect lexical fit. Built-in
+    // results are kept as alternatives so the caller never loses signal.
+    const STRONG_USER_MATCH_THRESHOLD = 4;
+    let primarySource: 'built-in' | 'user' = 'built-in';
+    if (userMatches.length > 0 && userMatches[0].score >= STRONG_USER_MATCH_THRESHOLD) {
+      const topUser = userMatches[0];
+      const builtInAgents = agents;
+      agents = [topUser.name, ...builtInAgents];
+      // Map keyword score (0..N) into a 0..1 confidence — clamp at 0.95.
+      confidence = Math.min(0.6 + topUser.score * 0.05, 0.95);
+      matchedPattern = `user-${topUser.type}:${topUser.name}`;
+      routingMethod = 'user-installed-keyword';
+      backendInfo = 'user-installed registry (keyword match — TODO: upgrade to embedding)';
+      primarySource = 'user';
+    }
+
     // Determine complexity
     const taskLower = task.toLowerCase();
     const complexity = taskLower.includes('complex') || taskLower.includes('architecture') || task.length > 200
@@ -1038,15 +1205,22 @@ export const hooksRoute: MCPTool = {
       primaryAgent: {
         type: agents[0],
         confidence: Math.round(confidence * 100) / 100,
-        reason: routingMethod.startsWith('semantic')
-          ? `Semantic similarity to "${matchedPattern}" pattern (${Math.round(confidence * 100)}%)`
-          : `Task contains keywords matching ${agents[0]} specialization`,
+        source: primarySource,
+        reason: primarySource === 'user'
+          ? `User-installed ${userMatches[0].type} "${userMatches[0].name}" matched ${userMatches[0].matchedKeywords.length} task keywords (${userMatches[0].matchedKeywords.join(', ')})`
+          : routingMethod.startsWith('semantic')
+            ? `Semantic similarity to "${matchedPattern}" pattern (${Math.round(confidence * 100)}%)`
+            : `Task contains keywords matching ${agents[0]} specialization`,
       },
       alternativeAgents: agents.slice(1).map((agent, i) => ({
         type: agent,
         confidence: Math.round((confidence - (0.1 * (i + 1))) * 100) / 100,
         reason: `Alternative agent for ${agent} capabilities`,
       })),
+      // #bug22.3 — full list of user-installed candidates with their scores,
+      // regardless of whether one was promoted to primary. Lets callers
+      // build their own ranking on top of ours.
+      userInstalledMatches: userMatches,
       estimatedMetrics: {
         successProbability: Math.round(confidence * 100) / 100,
         estimatedDuration: complexity === 'high' ? '2-4 hours' : complexity === 'medium' ? '30-60 min' : '10-30 min',
