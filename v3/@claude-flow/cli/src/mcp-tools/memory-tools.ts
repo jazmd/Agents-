@@ -915,7 +915,7 @@ export const memoryTools: MCPTool[] = [
     },
     handler: async (input) => {
       await ensureInitialized();
-      const { searchEntries } = await getMemoryFunctions();
+      const { searchEntries, listEntries } = await getMemoryFunctions();
       validateMemoryInput(undefined, undefined, input.query as string);
 
       const query = input.query as string;
@@ -924,8 +924,32 @@ export const memoryTools: MCPTool[] = [
 
       if (ns) { const vNs = validateIdentifier(ns, 'namespace'); if (!vNs.valid) return { success: false, query, results: [], total: 0, error: vNs.error }; }
 
-      // Search all namespaces unless filtered
-      const namespaces = ns ? [ns] : ['default', 'claude-memories', 'auto-memory', 'patterns', 'tasks', 'feedback'];
+      // #bug4 — enumerate namespaces dynamically from the live store instead
+      // of hardcoding ['default', 'claude-memories', 'auto-memory', 'patterns',
+      // 'tasks', 'feedback']. The previous allowlist hid every user-created
+      // namespace from `memory_search_unified`. We piggyback on `listEntries`
+      // (the same accessor `memory_stats` uses) and dedupe by namespace.
+      // Cached for the duration of this single search invocation.
+      let namespaces: string[];
+      if (ns) {
+        namespaces = [ns];
+      } else {
+        try {
+          const all = await listEntries({ limit: 100000 });
+          const seenNs = new Set<string>();
+          for (const e of all?.entries ?? []) {
+            if (e?.namespace) seenNs.add(e.namespace);
+          }
+          // Always include 'default' so a freshly-initialized store still
+          // matches the previous behavior shape.
+          if (seenNs.size === 0) seenNs.add('default');
+          namespaces = Array.from(seenNs);
+        } catch {
+          // Fall back to the legacy allowlist if listing fails — better than
+          // returning zero results on a transient error.
+          namespaces = ['default', 'claude-memories', 'auto-memory', 'patterns', 'tasks', 'feedback'];
+        }
+      }
       const allResults: Array<{ key: string; content: string; score: number; namespace: string; source: string }> = [];
 
       for (const searchNs of namespaces) {
