@@ -258,7 +258,7 @@ export const agentTools: MCPTool[] = [
         status: 'registered',
         createdAt: agent.createdAt,
         note: 'Agent registered for coordination. Three execution paths: ' +
-          '(1) call agent_execute(agentId, prompt) — direct LLM call via Anthropic Messages API (requires ANTHROPIC_API_KEY); ' +
+          '(1) call agent_execute(agentId, prompt) — direct LLM call via Anthropic Messages API (auto-uses Claude Code OAuth token if available, otherwise ANTHROPIC_API_KEY); ' +
           '(2) Claude Code Task tool — spawns a real subagent; ' +
           '(3) claude -p — headless background instance.',
       };
@@ -286,7 +286,7 @@ export const agentTools: MCPTool[] = [
     // updating the agent record with lastResult / taskCount / status.
     // No mock — actual HTTP request to api.anthropic.com.
     name: 'agent_execute',
-    description: 'Execute a task on a spawned agent — calls the Anthropic Messages API with the agent\'s configured model. Requires ANTHROPIC_API_KEY in env.',
+    description: 'Execute a task on a spawned agent — calls the Anthropic Messages API with the agent\'s configured model. Auto-uses Claude Code OAuth token (env CLAUDE_CODE_OAUTH_TOKEN, macOS Keychain, or ~/.claude/.credentials.json) when available; falls back to ANTHROPIC_API_KEY.',
     category: 'agent',
     inputSchema: {
       type: 'object',

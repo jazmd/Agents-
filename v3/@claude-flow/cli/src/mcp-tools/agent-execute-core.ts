@@ -11,6 +11,11 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getProjectCwd } from './types.js';
+import {
+  buildAnthropicHeaders,
+  resolveClaudeCredential,
+  type CredentialSource,
+} from '../auth/claude-code-token.js';
 
 const STORAGE_DIR = '.claude-flow';
 const AGENT_DIR = 'agents';
@@ -79,6 +84,12 @@ export interface AnthropicCallResult {
   usage?: { inputTokens: number; outputTokens: number; totalTokens: number };
   durationMs?: number;
   error?: string;
+  /**
+   * Bug #24 — surfaces which credential source served the call so callers
+   * (and humans reading logs) can see whether ANTHROPIC_API_KEY or the
+   * Claude Code OAuth token was used. Absent on non-Anthropic providers.
+   */
+  _credSource?: CredentialSource;
 }
 
 /**
@@ -86,8 +97,14 @@ export interface AnthropicCallResult {
  * by agent_execute (with the agent's configured model) and by the WASM
  * agent runtime (G4) when the bundled WASM only echoes input.
  *
- * #1725 — falls back to Ollama Cloud (Tier-2, OpenAI-compat) when
- * ANTHROPIC_API_KEY is unset and OLLAMA_API_KEY is present, or when
+ * Bug #24 — credential resolution prefers a Claude Code OAuth token when
+ * ruflo runs on the same machine as Claude Code (env var → macOS Keychain
+ * → ~/.claude/.credentials.json), and only falls back to ANTHROPIC_API_KEY
+ * when no OAuth token is available. The credential source is surfaced via
+ * `_credSource` on the result so callers can see which path served the call.
+ *
+ * #1725 — falls back to Ollama Cloud (Tier-2, OpenAI-compat) when no
+ * Anthropic credential is available and OLLAMA_API_KEY is present, or when
  * RUFLO_PROVIDER=ollama is explicitly set. Response shape is normalized
  * to the Anthropic-flavored AnthropicCallResult so existing callers
  * don't need to know which provider answered.
@@ -95,18 +112,20 @@ export interface AnthropicCallResult {
 export async function callAnthropicMessages(input: AnthropicCallInput): Promise<AnthropicCallResult> {
   const explicitProvider = (process.env.RUFLO_PROVIDER || '').toLowerCase();
   const ollamaKey = process.env.OLLAMA_API_KEY;
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  const cred = resolveClaudeCredential();
   const useOllama =
-    explicitProvider === 'ollama' || (!anthropicKey && !!ollamaKey);
+    explicitProvider === 'ollama' || (cred.source === 'none' && !!ollamaKey);
 
   if (useOllama && ollamaKey) {
     return callOllamaCompat({ ...input, apiKey: ollamaKey });
   }
-  if (!anthropicKey) {
+  if (cred.source === 'none') {
     return {
       success: false,
       error:
-        'No LLM provider configured. Set ANTHROPIC_API_KEY (Tier-3) or OLLAMA_API_KEY (Tier-2 Ollama Cloud — see issue #1725).',
+        'No Anthropic credentials. Either run from Claude Code (auto-detected via ' +
+        'CLAUDE_CODE_OAUTH_TOKEN, macOS Keychain, or ~/.claude/.credentials.json) ' +
+        'or set ANTHROPIC_API_KEY. Tier-2 Ollama Cloud also works via OLLAMA_API_KEY (#1725).',
     };
   }
   const model = input.model || 'claude-3-5-sonnet-latest';
@@ -116,11 +135,7 @@ export async function callAnthropicMessages(input: AnthropicCallInput): Promise<
     const timer = setTimeout(() => controller.abort(), input.timeoutMs || 60000);
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'x-api-key': anthropicKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
+      headers: buildAnthropicHeaders(cred),
       body: JSON.stringify({
         model,
         max_tokens: input.maxTokens || 1024,
@@ -133,7 +148,12 @@ export async function callAnthropicMessages(input: AnthropicCallInput): Promise<
     clearTimeout(timer);
     if (!res.ok) {
       const errText = await res.text().catch(() => '<unreadable error body>');
-      return { success: false, model, error: `Anthropic API error ${res.status}: ${errText.slice(0, 400)}` };
+      return {
+        success: false,
+        model,
+        error: `Anthropic API error ${res.status}: ${errText.slice(0, 400)}`,
+        _credSource: cred.source,
+      };
     }
     const data = await res.json() as {
       id: string;
@@ -158,6 +178,7 @@ export async function callAnthropicMessages(input: AnthropicCallInput): Promise<
         totalTokens: data.usage.input_tokens + data.usage.output_tokens,
       },
       durationMs: Date.now() - startedAt,
+      _credSource: cred.source,
     };
   } catch (err) {
     return {
@@ -165,6 +186,7 @@ export async function callAnthropicMessages(input: AnthropicCallInput): Promise<
       model,
       error: err instanceof Error ? err.message : String(err),
       durationMs: Date.now() - startedAt,
+      _credSource: cred.source,
     };
   }
 }
@@ -307,23 +329,41 @@ export interface AgentExecuteResult {
   durationMs?: number;
   error?: string;
   remediation?: string;
+  /**
+   * Bug #24 — surfaces which credential source served the call so callers
+   * (and humans reading logs) can see whether ANTHROPIC_API_KEY or the
+   * Claude Code OAuth token was used.
+   */
+  _credSource?: CredentialSource;
 }
 
 export async function executeAgentTask(input: AgentExecuteInput): Promise<AgentExecuteResult> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
+  // Bug #24 — prefer Claude Code OAuth over ANTHROPIC_API_KEY so users
+  // running Claude Code locally don't need a second credential.
+  const cred = resolveClaudeCredential();
+  if (cred.source === 'none') {
     return {
       success: false,
       agentId: input.agentId,
-      error: 'ANTHROPIC_API_KEY not set in environment',
-      remediation: 'Set the env var and re-run. The key is read at call time.',
+      error:
+        'No Anthropic credentials. Either run from Claude Code (auto-detected via ' +
+        'CLAUDE_CODE_OAUTH_TOKEN, macOS Keychain entry "Claude Code-credentials", or ' +
+        '~/.claude/.credentials.json) or set ANTHROPIC_API_KEY.',
+      remediation:
+        'If Claude Code is installed, ensure ~/.claude/.credentials.json exists and ' +
+        'contains claudeAiOauth.accessToken. Otherwise export ANTHROPIC_API_KEY=sk-ant-... ' +
+        'before invoking agent_execute.',
     };
   }
 
   const store = loadAgentStore();
   const agent = store.agents[input.agentId];
-  if (!agent) return { success: false, agentId: input.agentId, error: 'Agent not found' };
-  if (agent.status === 'terminated') return { success: false, agentId: input.agentId, error: 'Agent has been terminated' };
+  if (!agent) {
+    return { success: false, agentId: input.agentId, error: 'Agent not found', _credSource: cred.source };
+  }
+  if (agent.status === 'terminated') {
+    return { success: false, agentId: input.agentId, error: 'Agent has been terminated', _credSource: cred.source };
+  }
 
   const anthropicModel = MODEL_MAP[agent.model || 'sonnet'] || 'claude-3-5-sonnet-latest';
   const systemPrompt = input.systemPrompt ||
@@ -344,11 +384,7 @@ export async function executeAgentTask(input: AgentExecuteInput): Promise<AgentE
 
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
+      headers: buildAnthropicHeaders(cred),
       body: JSON.stringify({
         model: anthropicModel,
         max_tokens: input.maxTokens || 1024,
@@ -369,6 +405,7 @@ export async function executeAgentTask(input: AgentExecuteInput): Promise<AgentE
         agentId: input.agentId,
         model: anthropicModel,
         error: `Anthropic API error ${res.status}: ${errText.slice(0, 400)}`,
+        _credSource: cred.source,
       };
     }
 
@@ -398,6 +435,7 @@ export async function executeAgentTask(input: AgentExecuteInput): Promise<AgentE
         totalTokens: data.usage.input_tokens + data.usage.output_tokens,
       },
       durationMs: Date.now() - startedAt,
+      _credSource: cred.source,
     };
 
     agent.status = 'idle';
@@ -415,6 +453,7 @@ export async function executeAgentTask(input: AgentExecuteInput): Promise<AgentE
       model: anthropicModel,
       error: `agent_execute failed: ${msg}`,
       durationMs: Date.now() - startedAt,
+      _credSource: cred.source,
     };
   }
 }
