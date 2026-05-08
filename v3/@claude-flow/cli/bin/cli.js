@@ -35,11 +35,32 @@ console.log = (...args) => {
   _origLog.apply(console, args);
 };
 
+// Bug #28: when invoked bare in a TTY (no args, interactive terminal),
+// print help and exit instead of silently entering MCP-server mode. The
+// previous behaviour was to hang indefinitely on stdin with only an
+// [INTELLIGENCE] log line — easily the worst first-impression bug in the
+// product. We MUST keep the piped path (echo '...' | ruflo) intact so MCP
+// stdio clients still work; that branch is gated below on
+// !process.stdin.isTTY.
+const cliArgs = process.argv.slice(2);
+const isBareTTY = process.stdin.isTTY === true && process.argv.length === 2;
+if (isBareTTY) {
+  // Delegate to the normal CLI run() with no args — it prints help and resolves.
+  const { CLI } = await import('../dist/src/index.js');
+  const cli = new CLI();
+  try {
+    await cli.run([]);
+    process.exit(0);
+  } catch (error) {
+    console.error('Fatal error:', error.message);
+    process.exit(1);
+  }
+}
+
 // Check if we should run in MCP server mode
 // Conditions:
 //   1. stdin is being piped AND no CLI arguments provided (auto-detect)
 //   2. stdin is being piped AND args are "mcp start" (explicit, e.g. npx claude-flow@alpha mcp start)
-const cliArgs = process.argv.slice(2);
 const isExplicitMCP = cliArgs.length >= 1 && cliArgs[0] === 'mcp' && (cliArgs.length === 1 || cliArgs[1] === 'start');
 const isMCPMode = !process.stdin.isTTY && (process.argv.length === 2 || isExplicitMCP);
 
