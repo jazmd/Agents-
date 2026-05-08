@@ -1,16 +1,112 @@
 <div align="center">
 
+# SwarmOps
+
+**Hardened, optimized fork of [Ruflo](https://github.com/ruvnet/claude-flow) for global `~/.claude` installs**
+
+[![Star on GitHub](https://img.shields.io/github/stars/h4ckm1n-dev/SwarmOps?style=for-the-badge&logo=github&color=gold)](https://github.com/h4ckm1n-dev/SwarmOps)
+[![Upstream PR #1828](https://img.shields.io/badge/Upstream_PR-%231828-D97757?style=for-the-badge&logoColor=white&logo=github)](https://github.com/ruvnet/ruflo/pull/1828)
+[![MIT License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](https://opensource.org/licenses/MIT)
+
+</div>
+
+> **SwarmOps is a fork of [`ruvnet/ruflo`](https://github.com/ruvnet/claude-flow)**. All credit for the original architecture, agent ecosystem, and MCP tooling goes to [`rUv`](https://ruv.io) and contributors. This fork ships **31 bugfixes + perf wins** discovered while running ruflo as a globally-installed `~/.claude` setup, plus integration improvements for users with their own large agent/skill libraries. Most fixes are also tracked in upstream [PR #1828](https://github.com/ruvnet/ruflo/pull/1828) — when that merges, this fork can be archived.
+
+## Why SwarmOps over upstream Ruflo
+
+Upstream Ruflo assumes a per-project install layout (`<project>/.claude/`). Many real-world setups install it globally at `~/.claude/` instead — and **a lot breaks silently** in that mode. SwarmOps fixes 31 systemic issues that surface only on global installs, plus performance and security wins that benefit everyone.
+
+### Measurable improvements (vs upstream)
+
+| Area | Upstream Ruflo | SwarmOps | Δ |
+|---|---|---|---|
+| **`memory_search` (warm)** | 74.2 ms | 1.6 ms | **46× faster** |
+| **`memory_search` (cold first call)** | 355.8 ms | 2.7 ms | **130× faster** |
+| **`memory_store`** | 5.8 ms | 1.3 ms | **4.5× faster** |
+| **Embedding cache hit** | 9.4 ms | 0.01 ms | **1252× faster** |
+| **`ruflo --version` cold start** | 218 ms | 56 ms | **−74%** |
+| **Statusline render** | 361 ms | 295 ms | −18% |
+| **Memory search recall** (paraphrased queries) | 60% (MiniLM 384-dim) | 80% (mxbai-embed-large 1024-dim) | **+33%** |
+| **Hook-route accuracy on user skills** | bag-of-words (false positives like `kali-metasploit` for JWT-auth tasks) | semantic embeddings (`polymarket-analyzer` for "trading bot") | qualitative |
+| **`npm audit` vulnerabilities** | 14 (4 high) | 4 (0 high) | undici/yaml CVEs patched |
+
+### What SwarmOps adds
+
+**1. Works correctly when installed globally at `~/.claude/`** (upstream silently breaks)
+- Hook commands resolve to `$HOME/.claude/helpers/...` instead of double-`.claude` (`/.claude/.claude/...` — `MODULE_NOT_FOUND` chain)
+- `ruflo init --force` writes to the actual install dir, not a phantom `~/.claude/.claude/`
+- Generated helpers (`memory.js`, `session.js`, `intelligence.cjs`) use `resolveFlowPath()` with global fallback — data converges in one place instead of fragmenting per-CWD
+- Bundled statusline templates ship the global-install fixes
+
+**2. Discovers and uses your installed Claude Code content**
+- `agent_list`, `guidance_capabilities`, `hooks_route`, and `swarm_init` all see your `~/.claude/{agents,skills,commands,plugins}/` registry — upstream's MCP layer is blind to it
+- `swarm_init({task, strategy: "specialized"})` auto-picks user-installed agents based on task semantics (Bug 23)
+- Foreign MCP servers (plugin + claude.ai integrations) indexed in `guidance_capabilities` (Bug 39)
+
+**3. Real semantic search via local Ollama**
+- Memory bridge upgraded from bundled `all-MiniLM-L6-v2` (384-dim ONNX) to `mxbai-embed-large` (1024-dim, MTEB 64.68) when Ollama is reachable
+- Skill matcher uses hybrid scoring (`0.7·cosine + 0.3·keyword`) — surfaces conceptual matches like "trading bot" → `polymarket-analyzer` that pure keyword misses
+- Migration tool re-embeds existing entries: `ruflo memory migrate-embeddings`
+- Graceful fallback to MiniLM if Ollama unreachable — no hard dependency
+
+**4. Connected learning loop (was disconnected upstream)**
+- `pending-insights.jsonl` events now drain into `hooks_metrics` counters
+- HNSW counter reads the actual backend size, not a stale JSON cache
+- "Not-loaded" subsystems honestly report `_status: "idle-since-load"` instead of misleading zero-counters
+
+**5. Production performance**
+- In-process DB connection pool eliminates per-call sqlite open (Bug 31, the headline 46× win)
+- mtime-keyed embedding cache skips JSON.parse on hot path (Bug 32, 1252× warm-path)
+- Lazy CLI command loading — `ruflo --version` doesn't load the entire SDK tree
+- Statusline batches git invocations + drops jq forks for bash-native pattern matching
+
+**6. Real security hardening**
+- AIDefence MCP tools now actually wired into `UserPromptSubmit` + `PreToolUse:WebFetch` (upstream ships them but never invokes them)
+- Permission allowlist tightened from prefix wildcards (`Bash(npx claude-flow*)` — exploitable) to exact subcommand grants
+- Deny rules added for `--eval`, pipe-to-shell, wildcard `rm -rf`, `.env`, SSH keys, credentials
+- Path traversal closed in 4 hook sites via session_id regex validation
+- File permissions hardened to `0600` on data files; `ruflo doctor --fix-perms` to remediate
+- 14 npm dependency CVEs patched (undici CRLF + yaml stack overflow)
+
+**7. Better tooling**
+- `ruflo doctor --hooks` detects competing wildcard matchers (e.g., OpenIsland coexistence)
+- `ruflo doctor --fix-perms` chmod's data files to 0600
+- Bare `ruflo` prints help instead of silently launching MCP server
+- `RUFLO_LOG_LEVEL` env var routes init noise to `~/.claude/logs/ruflo.log` instead of polluting stdout (pipes work now)
+- `agent list` table actually readable (no more "Invalid Date" / 13-char truncated names)
+
+**8. Honest test coverage**
+- 330+ regression tests added across 25+ test files
+- Smoke tests for the 6,677-LoC untested zone (`commands/hooks.ts` 5%→30-40%, `services/headless-worker-executor.ts` 0%→45-55%)
+- Per-bug regression suite — fixes can't silently regress
+
+### What SwarmOps does NOT add
+
+- New agent types — uses upstream's
+- New MCP categories — operates within upstream's tool surface
+- Visible UI changes — same CLI, same dashboard
+- Anything Anthropic-specific — works against any Claude Code install
+
+### Architectural debt deferred to future work
+
+Three root causes generate most of the 31 bugs we fixed. Hoisting them into shared infrastructure would prevent the next round of similar issues:
+- **STRAT-1**: `resolveInstallContext()` shared helper (eliminates Bugs 1/7/8/9/12 root cause)
+- **STRAT-2**: `ControllerCapabilities` interface (eliminates Bug 2 root cause)
+- **STRAT-3**: Schema-version envelope on JSON state files (prevents next data-shape change from corrupting user data)
+
+These are design-first refactors not patch-fixes. See [`ANALYSIS.md`](./ANALYSIS.md) for full audit.
+
+---
+
+# Original Ruflo README (upstream)
+
+> The text below is from upstream `ruvnet/ruflo`. SwarmOps is otherwise drop-in compatible — install commands, MCP tool surface, and CLI behavior match upstream unless otherwise noted.
+
+<div align="center">
+
 [![Ruflo Banner](ruflo/assets/ruflo-small.jpeg)](https://flo.ruv.io/)
 
-[![Try the UI Beta — flo.ruv.io](https://img.shields.io/badge/_Try_the_UI_Beta-flo.ruv.io-6366f1?style=for-the-badge&logoColor=white&logo=svelte)](https://flo.ruv.io/)
-[![Goal Planner — goal.ruv.io](https://img.shields.io/badge/_Goal_Planner-goal.ruv.io-8b5cf6?style=for-the-badge&logoColor=white&logo=react)](https://goal.ruv.io/)
-[![Live Agents — goal.ruv.io/agents](https://img.shields.io/badge/_Live_Agents-goal.ruv.io%2Fagents-10b981?style=for-the-badge&logoColor=white&logo=react)](https://goal.ruv.io/agents)
-
-[![Star on GitHub](https://img.shields.io/github/stars/ruvnet/claude-flow?style=for-the-badge&logo=github&color=gold)](https://github.com/ruvnet/claude-flow)
-[![MIT License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](https://opensource.org/licenses/MIT)
-[![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-D97757?style=for-the-badge&logoColor=white&logo=anthropic)](https://github.com/ruvnet/claude-flow)
-[![Codex Plugin](https://img.shields.io/badge/Codex-Plugin-412991?style=for-the-badge&logoColor=white&logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0yMi4yODIgOS44MjFhNS45ODUgNS45ODUgMCAwIDAtLjUxNi00LjkxIDYuMDQ2IDYuMDQ2IDAgMCAwLTYuNTEtMi45QTYuMDY1IDYuMDY1IDAgMCAwIDQuOTgxIDQuMThhNS45ODUgNS45ODUgMCAwIDAtMy45OTggMi45IDYuMDQ2IDYuMDQ2IDAgMCAwIC43NDMgNy4wOTcgNS45OCA1Ljk4IDAgMCAwIC41MSA0LjkxMSA2LjA1MSA2LjA1MSAwIDAgMCA2LjUxNSAyLjlBNS45ODUgNS45ODUgMCAwIDAgMTMuMjYgMjRhNi4wNTYgNi4wNTYgMCAwIDAgNS43NzItNC4yMDYgNS45OSA1Ljk5IDAgMCAwIDMuOTk4LTIuOSA2LjA1NiA2LjA1NiAwIDAgMC0uNzQ3LTcuMDczek0xMy4yNiAyMi40M2E0LjQ3NiA0LjQ3NiAwIDAgMS0yLjg3Ni0xLjA0bC4xNDItLjA4IDQuNzc4LTIuNzU4YS43OTUuNzk1IDAgMCAwIC4zOTMtLjY4MXYtNi43MzdsMi4wMiAxLjE2OGEuMDcxLjA3MSAwIDAgMSAuMDM4LjA1MnY1LjU4M2E0LjUwNCA0LjUwNCAwIDAgMS00LjQ5NSA0LjQ5NHpNMy42IDE4LjMwNGE0LjQ3IDQuNDcgMCAwIDEtLjUzNS0zLjAxNGwuMTQyLjA4NSA0Ljc4MyAyLjc1OWEuNzcxLjc3MSAwIDAgMCAuNzgxIDBsNS44NDMtMy4zNjl2Mi4zMzJhLjA4LjA4IDAgMCAxLS4wMzMuMDYyTDkuNzQgMTkuOTVhNC41IDQuNSAwIDAgMS02LjE0LTEuNjQ2ek0yLjM0IDcuODk2YTQuNDg1IDQuNDg1IDAgMCAxIDIuMzY2LTEuOTczVjExLjZhLjc2Ni43NjYgMCAwIDAgLjM4OC42NzdsNS44MTUgMy4zNTQtMi4wMiAxLjE2OGEuMDc2LjA3NiAwIDAgMS0uMDcyIDBsLTQuODMtMi43ODZBNC41MDQgNC41MDQgMCAwIDEgMi4zNCA3Ljg3MnptMTYuNTk3IDMuODU1LTUuODMzLTMuMzg3IDIuMDE2LTEuMTY1YS4wNzYuMDc2IDAgMCAxIC4wNzEgMGw0LjgzIDIuNzkxYTQuNDk0IDQuNDk0IDAgMCAxLS42NzYgOC4xMDR2LTUuNjc3YS43OS43OSAwIDAgMC0uNDA3LS42Njd6bTIuMDEtMy4wMjMtLjE0MS0uMDg1LTQuNzc0LTIuNzgyYS43NzYuNzc2IDAgMCAwLS43ODUgMEw5LjQwOSA5LjIzVjYuODk3YS4wNjYuMDY2IDAgMCAxIC4wMjgtLjA2Mmw0LjgzLTIuNzg3YTQuNDk5IDQuNDk5IDAgMCAxIDYuNjggNC42NnpNOC4zMDcgMTIuODYzbC0yLjAyLTEuMTY0YS4wOC4wOCAwIDAgMS0uMDM4LS4wNTdWNi4wNzRhNC40OTkgNC40OTkgMCAwIDEgNy4zNzYtMy40NTRsLS4xNDIuMDgtNC43NzggMi43NThhLjc5NS43OTUgMCAwIDAtLjM5My42ODJ6bTEuMDk3LTIuMzY2IDIuNjAyLTEuNSAyLjYwNyAxLjV2Mi45OTlsLTIuNTk3IDEuNS0yLjYwNy0xLjVaIi8%2BPC9zdmc%2B)](https://www.npmjs.com/package/@claude-flow/codex)
-[![🕸️ RuVector Graph Ai](https://img.shields.io/badge/RuVector_Agentic-DB-06b6d4?style=for-the-badge&logoColor=white&logo=graphql)](https://github.com/ruvnet/ruvector)
+[![Star on GitHub (upstream)](https://img.shields.io/github/stars/ruvnet/claude-flow?style=for-the-badge&logo=github&color=gold)](https://github.com/ruvnet/claude-flow)
 
 # Ruflo
 
