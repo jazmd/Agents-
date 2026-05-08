@@ -162,3 +162,6 @@ hive-mind-prompt-*.txt
 .env.*
 !.env.example
 !.env.*.example
+
+# Media-optimizer output dirs (third-party tools drop these next to source media)
+optimised/
