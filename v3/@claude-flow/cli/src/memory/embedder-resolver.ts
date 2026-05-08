@@ -105,17 +105,29 @@ async function probeOllama(
   return {
     embed: async (texts: string[]) => {
       if (texts.length === 0) return [];
-      const r = await ollamaEmbedTexts(texts, {
+      // mxbai-embed-large advertises a 512-token context, but markdown +
+      // code tokenizes denser (~3 chars/token worst case). A 1843-char
+      // markdown blob with backticks + slashes still trips Ollama's
+      // "the input length exceeds the context length" error. Hard-cap at
+      // 1200 chars (≤400 tokens worst case) for safety. Truncation
+      // preserves the lead — semantic search cares about gist not tail.
+      const MAX_CHARS = 1200;
+      const safeTexts = texts.map(t => (t && t.length > MAX_CHARS) ? t.slice(0, MAX_CHARS) : t);
+      const r = await ollamaEmbedTexts(safeTexts, {
         model: PREFERRED_OLLAMA_MODEL,
         fetchImpl: opts.fetchImpl,
         baseUrl: opts.baseUrl,
         cachePath: opts.cachePath,
       });
-      // If a transient failure happens after the initial probe (daemon
-      // restart, model evicted), we surface an empty array instead of a
-      // crash. The bridge handles the empty embedding by storing the row
-      // without one — exactly the same behavior as the old code path.
-      return r.vectors;
+      // Defensive: if Ollama still returned no usable vectors (transient
+      // daemon error, model evicted, oversize-after-truncation edge), pad
+      // a zero-length array per missing row instead of returning shorter
+      // than requested — caller treats `[]` as a per-item failure.
+      const out: number[][] = [];
+      for (let i = 0; i < texts.length; i++) {
+        out.push(r.vectors?.[i] ?? []);
+      }
+      return out;
     },
     dim: PREFERRED_OLLAMA_DIM,
     model: `ollama/${PREFERRED_OLLAMA_MODEL}`,

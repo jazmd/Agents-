@@ -1506,18 +1506,30 @@ export async function bridgeMigrateEmbeddings(options: {
     WHERE id = ?
   `);
 
+  // Embed in batches; on batch failure, retry per-item so one bad row
+  // doesn't kill the whole batch (#bug43-followup).
   for (let i = 0; i < todo.length; i += batchSize) {
     const batch = todo.slice(i, i + batchSize);
     let vectors: number[][] = [];
+    let batchOk = true;
     try {
       vectors = await active.embed(batch.map(b => b.content));
+      if (vectors.length !== batch.length) batchOk = false;
     } catch {
-      errors += batch.length;
-      continue;
+      batchOk = false;
     }
-    if (vectors.length !== batch.length) {
-      errors += batch.length;
-      continue;
+    if (!batchOk) {
+      // Per-item fallback: probe each entry individually so we only count
+      // the genuinely-bad ones as errors (the rest still migrate).
+      vectors = [];
+      for (const item of batch) {
+        try {
+          const single = await active.embed([item.content]);
+          vectors.push(single[0] ?? []);
+        } catch {
+          vectors.push([]);  // marker for per-item failure
+        }
+      }
     }
     const now = Date.now();
     for (let j = 0; j < batch.length; j++) {
