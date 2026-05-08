@@ -38,6 +38,8 @@
 *.log
 *.pid
 *.pid.lock
+.claude/scheduled_tasks.lock
+.claude/*.lock
 *.py[cod]
 *.seed
 *.so
