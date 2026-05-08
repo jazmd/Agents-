@@ -204,18 +204,101 @@ const handlers = {
       console.log('[WARN] Intelligence module not available. Run session-restore first.');
     }
   },
+
+  // #bug33 — wire aidefence_scan into UserPromptSubmit + PreToolUse:WebFetch.
+  // Reads stdin (prompt or fetched URL), invokes the @claude-flow/aidefence
+  // library via dynamic import (ESM-from-CJS), logs verdict to JSONL, and
+  // exits 1 on threat/PII (Claude Code blocks on non-zero).
+  // Falls back to a "stub" entry if the package isn't available.
+  'aidefence-scan': async () => {
+    var os = require('os');
+    var dataDir = path.join(os.homedir(), '.claude', '.claude-flow', 'data');
+    var logFile = path.join(dataDir, 'aidefence-scans.jsonl');
+
+    var toolInput = hookInput.toolInput || hookInput.tool_input || {};
+    var toolName = hookInput.toolName || hookInput.tool_name || '';
+    var url = (toolInput && (toolInput.url || toolInput.URL)) || process.env.TOOL_INPUT_url || '';
+    var content = hookInput.prompt
+      || (toolInput && (toolInput.prompt || toolInput.content))
+      || url
+      || (typeof prompt === 'string' ? prompt : '')
+      || '';
+
+    var unsafe = false;
+    var verdict = { mode: 'stub', safe: true, threat: false, piiDetected: false };
+
+    try {
+      var tryPaths = [
+        '@claude-flow/aidefence',
+        path.join(helpersDir, '..', '..', 'node_modules', '@claude-flow', 'aidefence', 'dist', 'index.js'),
+        path.join(os.homedir(), '.claude', 'node_modules', '@claude-flow', 'aidefence', 'dist', 'index.js'),
+      ];
+      var mod = null;
+      for (var i = 0; i < tryPaths.length; i++) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          mod = await import(tryPaths[i]);
+          if (mod && (mod.createAIDefence || (mod.default && mod.default.createAIDefence))) break;
+          mod = null;
+        } catch (e) { /* try next */ }
+      }
+
+      if (mod && content && content.length > 0) {
+        var create = mod.createAIDefence || (mod.default && mod.default.createAIDefence);
+        var defender = create({ enableLearning: false });
+        var scan = defender.quickScan(content);
+        var pii = false;
+        try { pii = !!defender.hasPII(content); } catch (e) { /* hasPII optional */ }
+        unsafe = !!scan.threat || pii;
+        verdict = {
+          mode: 'live',
+          safe: !unsafe,
+          threat: !!scan.threat,
+          confidence: scan.confidence,
+          piiDetected: pii,
+        };
+      }
+    } catch (e) {
+      verdict = { mode: 'error', safe: true, error: String(e && e.message || e) };
+    }
+
+    try {
+      if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+      var entry = JSON.stringify({
+        ts: new Date().toISOString(),
+        event: hookInput.hook_event_name || hookInput.hookEventName || 'unknown',
+        tool: toolName,
+        contentLen: content.length,
+        mode: verdict.mode,
+        safe: verdict.safe,
+        threat: verdict.threat,
+        piiDetected: verdict.piiDetected,
+        confidence: verdict.confidence,
+        error: verdict.error,
+      });
+      fs.appendFileSync(logFile, entry + '\n');
+    } catch (e) { /* logging best-effort */ }
+
+    if (unsafe) {
+      console.error('[BLOCKED] AIDefence flagged input as unsafe (threat or PII).');
+      process.exit(1);
+    }
+  },
 };
 
 if (command && handlers[command]) {
   try {
-    handlers[command]();
+    // Wrap in Promise.resolve so async handlers (aidefence-scan) work.
+    Promise.resolve(handlers[command]()).catch(function(e) {
+      console.log('[WARN] Hook ' + command + ' encountered an error: ' + e.message);
+    });
   } catch (e) {
     console.log('[WARN] Hook ' + command + ' encountered an error: ' + e.message);
   }
 } else if (command) {
   console.log('[OK] Hook: ' + command);
 } else {
-  console.log('Usage: hook-handler.cjs <route|pre-bash|post-edit|session-restore|session-end|pre-task|post-task|compact-manual|compact-auto|status|stats>');
+  console.log('Usage: hook-handler.cjs <route|pre-bash|post-edit|session-restore|session-end|pre-task|post-task|aidefence-scan|compact-manual|compact-auto|status|stats>');
 }
 } // end main
 
