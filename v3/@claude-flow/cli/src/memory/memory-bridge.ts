@@ -20,6 +20,21 @@
 import * as path from 'path';
 import * as crypto from 'crypto';
 
+import {
+  swallowError,
+  getControllerCapabilities,
+  type ControllerCapabilities,
+} from '@claude-flow/shared';
+
+// #bug43.1 — embedder-resolver: probes Ollama once for `mxbai-embed-large`
+// and falls back to AgentDB's bundled MiniLM if the daemon is down or the
+// model isn't pulled. See `embedder-resolver.ts` for the full design.
+import {
+  getActiveEmbedder,
+  peekActiveEmbedder,
+  type ActiveEmbedder,
+} from './embedder-resolver.js';
+
 // ===== Lazy singleton =====
 
 let registryPromise: Promise<any> | null = null;
@@ -379,7 +394,8 @@ function computeTermDocFreqs(
  */
 async function cacheGet(registry: any, cacheKey: string): Promise<any | null> {
   try {
-    const cache = registry.get('tieredCache');
+    const caps = getControllerCapabilities(registry);
+    const cache = caps.cache;
     if (!cache || typeof cache.get !== 'function') return null;
     return cache.get(cacheKey) ?? null;
   } catch {
@@ -392,7 +408,8 @@ async function cacheGet(registry: any, cacheKey: string): Promise<any | null> {
  */
 async function cacheSet(registry: any, cacheKey: string, value: any): Promise<void> {
   try {
-    const cache = registry.get('tieredCache');
+    const caps = getControllerCapabilities(registry);
+    const cache = caps.cache;
     if (cache && typeof cache.set === 'function') {
       cache.set(cacheKey, value);
     }
@@ -406,7 +423,8 @@ async function cacheSet(registry: any, cacheKey: string, value: any): Promise<vo
  */
 async function cacheInvalidate(registry: any, cacheKey: string): Promise<void> {
   try {
-    const cache = registry.get('tieredCache');
+    const caps = getControllerCapabilities(registry);
+    const cache = caps.cache;
     if (cache && typeof cache.delete === 'function') {
       cache.delete(cacheKey);
     }
@@ -429,7 +447,8 @@ async function guardValidate(
   params: Record<string, unknown>,
 ): Promise<{ allowed: boolean; reason?: string }> {
   try {
-    const guard = registry.get('mutationGuard');
+    const caps = getControllerCapabilities(registry);
+    const guard = caps.mutationGuard;
     if (!guard || typeof guard.validate !== 'function') {
       return { allowed: true }; // No guard installed = allow (degraded mode)
     }
@@ -452,7 +471,8 @@ async function logAttestation(
   metadata?: Record<string, unknown>,
 ): Promise<void> {
   try {
-    const attestation = registry.get('attestationLog');
+    const caps = getControllerCapabilities(registry);
+    const attestation = caps.attestationLog;
     if (!attestation) return;
 
     if (typeof attestation.record === 'function') {
@@ -551,20 +571,39 @@ export async function bridgeStoreEntry(options: {
       return { success: false, id, error: `MutationGuard rejected: ${guardResult.reason}` };
     }
 
-    // Generate embedding via AgentDB's embedder
+    // Generate embedding — #bug43.1: route through the embedder-resolver
+    // so we pick `mxbai-embed-large` (1024-dim) when Ollama is up, falling
+    // back to AgentDB's bundled MiniLM (384-dim) when it isn't. The
+    // `embedding_model` and `embedding_dimensions` columns record which
+    // embedder produced each row so subsequent searches can dim-match.
     let embeddingJson: string | null = null;
     let dimensions = 0;
     let model = 'local';
 
     if (options.generateEmbeddingFlag !== false && value.length > 0) {
       try {
-        const embedder = ctx.agentdb.embedder;
-        if (embedder) {
-          const emb = await embedder.embed(value);
-          if (emb) {
-            embeddingJson = JSON.stringify(Array.from(emb));
-            dimensions = emb.length;
-            model = 'Xenova/all-MiniLM-L6-v2';
+        const active = await getActiveEmbedder();
+        if (active.source === 'ollama') {
+          const vectors = await active.embed([value]);
+          if (vectors[0] && vectors[0].length === active.dim) {
+            embeddingJson = JSON.stringify(vectors[0]);
+            dimensions = active.dim;
+            model = active.model;
+          }
+        }
+        // Either resolver picked MiniLM (Ollama down / model missing), or
+        // the Ollama call returned nothing (transient daemon failure
+        // mid-session). Fall back to AgentDB's bundled embedder so the
+        // store still gets *some* embedding.
+        if (!embeddingJson) {
+          const embedder = ctx.agentdb.embedder;
+          if (embedder) {
+            const emb = await embedder.embed(value);
+            if (emb) {
+              embeddingJson = JSON.stringify(Array.from(emb));
+              dimensions = emb.length;
+              model = 'Xenova/all-MiniLM-L6-v2';
+            }
           }
         }
       } catch {
@@ -654,13 +693,29 @@ export async function bridgeSearchEntries(options: {
     const effectiveNamespace = namespace || 'all';
     const startTime = Date.now();
 
-    // Generate query embedding
+    // Generate query embedding — #bug43.1: use the same embedder the store
+    // path uses so dims line up. If Ollama is up, query will be 1024-dim
+    // (mxbai); if down, 384-dim (MiniLM). When scoring rows below we skip
+    // those whose `embedding_dimensions` doesn't match — heterogeneous
+    // dims would otherwise NaN out cosine.
     let queryEmbedding: number[] | null = null;
+    let queryDim = 0;
     try {
-      const embedder = ctx.agentdb.embedder;
-      if (embedder) {
-        const emb = await embedder.embed(queryStr);
-        queryEmbedding = Array.from(emb);
+      const active = await getActiveEmbedder();
+      if (active.source === 'ollama') {
+        const vectors = await active.embed([queryStr]);
+        if (vectors[0] && vectors[0].length === active.dim) {
+          queryEmbedding = vectors[0];
+          queryDim = active.dim;
+        }
+      }
+      if (!queryEmbedding) {
+        const embedder = ctx.agentdb.embedder;
+        if (embedder) {
+          const emb = await embedder.embed(queryStr);
+          queryEmbedding = Array.from(emb);
+          queryDim = queryEmbedding.length;
+        }
       }
     } catch {
       // Fall back to keyword search
@@ -674,7 +729,7 @@ export async function bridgeSearchEntries(options: {
     let rows: any[];
     try {
       const stmt = ctx.db.prepare(`
-        SELECT id, key, namespace, content, embedding
+        SELECT id, key, namespace, content, embedding, embedding_dimensions
         FROM memory_entries
         WHERE status = 'active' ${nsFilter}
         LIMIT 1000
@@ -695,13 +750,26 @@ export async function bridgeSearchEntries(options: {
       let semanticScore = 0;
       let bm25ScoreVal = 0;
 
-      // Semantic scoring via cosine similarity
+      // Semantic scoring via cosine similarity. #bug43.1: skip rows
+      // whose embedding dim doesn't match the query embedder. A 384-dim
+      // MiniLM row + a 1024-dim mxbai query is meaningless to score —
+      // we let BM25 handle those rows instead. After the migration tool
+      // (Bug 43.2) runs, the whole index is uniform and this branch is
+      // a no-op.
       if (queryEmbedding && row.embedding) {
-        try {
-          const embedding = JSON.parse(row.embedding) as number[];
-          semanticScore = cosineSim(queryEmbedding, embedding);
-        } catch {
-          // Invalid embedding
+        const rowDim = typeof row.embedding_dimensions === 'number'
+          ? row.embedding_dimensions
+          : 0;
+        const dimMatches = rowDim === 0 || queryDim === 0 || rowDim === queryDim;
+        if (dimMatches) {
+          try {
+            const embedding = JSON.parse(row.embedding) as number[];
+            if (embedding.length === queryEmbedding.length) {
+              semanticScore = cosineSim(queryEmbedding, embedding);
+            }
+          } catch {
+            // Invalid embedding
+          }
         }
       }
 
@@ -743,6 +811,188 @@ export async function bridgeSearchEntries(options: {
       results: results.slice(0, limit),
       searchTime: Date.now() - startTime,
       searchMethod: queryEmbedding ? 'hybrid-bm25-semantic' : 'bm25-only',
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Multi-namespace search — collapses N per-namespace passes into a single
+ * SQL scan + scoring loop.
+ *
+ * Background
+ * ----------
+ * `memory_search_unified` previously called `searchEntries({ namespace: ns })`
+ * inside a `for (const ns of namespaces)` loop, which meant N embeddings
+ * generations, N SQL scans, and N BM25 corpus computations for a single user
+ * query. With ~10 namespaces in a typical install the query went from one
+ * pass to ten — see ANALYSIS.md PERF-2.
+ *
+ * Strategy
+ * --------
+ * Embed the query once, run one SQL scan with `namespace IN (?, ?, …)`, then
+ * apply the same hybrid (semantic + BM25) scoring as `bridgeSearchEntries`.
+ * The result shape matches `bridgeSearchEntries.results` so callers can
+ * drop-in replace the loop.
+ *
+ * @param options.namespaces  Allowlist of namespaces to search. Empty array
+ *                            falls back to "all namespaces".
+ * @param options.query       Free-text query.
+ * @param options.limit       Max rows to return (default 10).
+ * @param options.threshold   Minimum score (default 0.3 — same as the
+ *                            per-namespace search default).
+ */
+export async function bridgeSearchEntriesMulti(options: {
+  namespaces: string[];
+  query: string;
+  limit?: number;
+  threshold?: number;
+  dbPath?: string;
+}): Promise<{
+  success: boolean;
+  results: {
+    id: string;
+    key: string;
+    content: string;
+    score: number;
+    namespace: string;
+    provenance?: string;
+  }[];
+  searchTime: number;
+  searchMethod?: string;
+  searchedNamespaces: string[];
+  error?: string;
+} | null> {
+  const registry = await getRegistry(options.dbPath);
+  if (!registry) return null;
+
+  const ctx = getDb(registry);
+  if (!ctx) return null;
+
+  try {
+    const { query: queryStr, limit = 10, threshold = 0.3 } = options;
+    const namespaces = options.namespaces ?? [];
+    const startTime = Date.now();
+
+    // 1) Generate the query embedding ONCE — the per-namespace loop used
+    //    to redo this inside every iteration. See bridgeSearchEntries for
+    //    the dim-pinning rationale.
+    let queryEmbedding: number[] | null = null;
+    let queryDim = 0;
+    try {
+      const active = await getActiveEmbedder();
+      if (active.source === 'ollama') {
+        const vectors = await active.embed([queryStr]);
+        if (vectors[0] && vectors[0].length === active.dim) {
+          queryEmbedding = vectors[0];
+          queryDim = active.dim;
+        }
+      }
+      if (!queryEmbedding) {
+        const embedder = ctx.agentdb.embedder;
+        if (embedder) {
+          const emb = await embedder.embed(queryStr);
+          queryEmbedding = Array.from(emb);
+          queryDim = queryEmbedding.length;
+        }
+      }
+    } catch {
+      // Fall back to keyword search
+    }
+
+    // 2) Build the SQL filter. namespaces=[] means "no allowlist filter"
+    //    (parity with bridgeSearchEntries' 'all' sentinel).
+    let rows: any[];
+    try {
+      if (namespaces.length === 0) {
+        const stmt = ctx.db.prepare(`
+          SELECT id, key, namespace, content, embedding, embedding_dimensions
+          FROM memory_entries
+          WHERE status = 'active'
+          LIMIT 1000
+        `);
+        rows = stmt.all();
+      } else {
+        // IN-clause needs N placeholders. Cap at a sane limit so we don't
+        // build an oversized statement when callers pass huge allowlists.
+        const placeholders = namespaces.map(() => '?').join(',');
+        const stmt = ctx.db.prepare(`
+          SELECT id, key, namespace, content, embedding, embedding_dimensions
+          FROM memory_entries
+          WHERE status = 'active' AND namespace IN (${placeholders})
+          LIMIT 1000
+        `);
+        rows = stmt.all(...namespaces);
+      }
+    } catch {
+      return null;
+    }
+
+    // 3) BM25 stats over the union corpus (matches bridgeSearchEntries).
+    const queryTerms = queryStr.toLowerCase().split(/\s+/).filter(t => t.length > 1);
+    const { termDocFreqs, avgDocLength } = computeTermDocFreqs(queryTerms, rows);
+    const docCount = rows.length;
+
+    const results: { id: string; key: string; content: string; score: number; namespace: string; provenance?: string }[] = [];
+
+    for (const row of rows) {
+      let semanticScore = 0;
+      let bm25ScoreVal = 0;
+
+      // Semantic scoring — same dim-mismatch guard as bridgeSearchEntries.
+      if (queryEmbedding && row.embedding) {
+        const rowDim = typeof row.embedding_dimensions === 'number'
+          ? row.embedding_dimensions
+          : 0;
+        const dimMatches = rowDim === 0 || queryDim === 0 || rowDim === queryDim;
+        if (dimMatches) {
+          try {
+            const embedding = JSON.parse(row.embedding) as number[];
+            if (embedding.length === queryEmbedding.length) {
+              semanticScore = cosineSim(queryEmbedding, embedding);
+            }
+          } catch {
+            // Invalid embedding
+          }
+        }
+      }
+
+      // BM25 keyword scoring (matches bridgeSearchEntries).
+      if (queryTerms.length > 0 && row.content) {
+        bm25ScoreVal = bm25Score(queryTerms, row.content, avgDocLength, docCount, termDocFreqs);
+        bm25ScoreVal = Math.min(bm25ScoreVal / 10, 1.0);
+      }
+
+      // Reciprocal rank fusion — same weights as bridgeSearchEntries.
+      const score = semanticScore > 0
+        ? (0.7 * semanticScore + 0.3 * bm25ScoreVal)
+        : bm25ScoreVal;
+
+      if (score >= threshold) {
+        const provenance = queryEmbedding
+          ? `semantic:${semanticScore.toFixed(3)}+bm25:${bm25ScoreVal.toFixed(3)}`
+          : `bm25:${bm25ScoreVal.toFixed(3)}`;
+
+        results.push({
+          id: String(row.id).substring(0, 12),
+          key: row.key || String(row.id).substring(0, 15),
+          content: (row.content || '').substring(0, 60) + ((row.content || '').length > 60 ? '...' : ''),
+          score,
+          namespace: row.namespace || 'default',
+          provenance,
+        });
+      }
+    }
+
+    results.sort((a, b) => b.score - a.score);
+
+    return {
+      success: true,
+      results: results.slice(0, limit),
+      searchTime: Date.now() - startTime,
+      searchMethod: queryEmbedding ? 'hybrid-bm25-semantic' : 'bm25-only',
+      searchedNamespaces: namespaces,
     };
   } catch {
     return null;
@@ -1029,6 +1279,21 @@ export async function bridgeGenerateEmbedding(
   if (!registry) return null;
 
   try {
+    // #bug43.1: prefer Ollama mxbai-embed-large when available so callers
+    // (skill matcher, hooks, etc.) get the better embedder transparently.
+    const active = await getActiveEmbedder();
+    if (active.source === 'ollama') {
+      const vectors = await active.embed([text]);
+      if (vectors[0] && vectors[0].length === active.dim) {
+        return {
+          embedding: vectors[0],
+          dimensions: active.dim,
+          model: active.model,
+        };
+      }
+    }
+
+    // Fall back to AgentDB's bundled MiniLM.
     const agentdb = registry.getAgentDB();
     const embedder = agentdb?.embedder;
     if (!embedder) return null;
@@ -1057,12 +1322,29 @@ export async function bridgeLoadEmbeddingModel(
   dimensions: number;
   modelName: string;
   loadTime?: number;
+  source?: 'ollama' | 'onnx-miniLM' | 'fallback-hash';
 } | null> {
   const startTime = Date.now();
   const registry = await getRegistry(dbPath);
   if (!registry) return null;
 
   try {
+    // #bug43.1: probe the active embedder. If Ollama is up, this also
+    // primes the resolver cache so subsequent embeds short-circuit.
+    const active = await getActiveEmbedder();
+    if (active.source === 'ollama') {
+      const probe = await active.embed(['test']);
+      if (probe[0] && probe[0].length === active.dim) {
+        return {
+          success: true,
+          dimensions: active.dim,
+          modelName: active.model,
+          loadTime: Date.now() - startTime,
+          source: active.source,
+        };
+      }
+    }
+
     const agentdb = registry.getAgentDB();
     const embedder = agentdb?.embedder;
     if (!embedder) return null;
@@ -1076,6 +1358,7 @@ export async function bridgeLoadEmbeddingModel(
       dimensions: test.length,
       modelName: 'Xenova/all-MiniLM-L6-v2',
       loadTime: Date.now() - startTime,
+      source: 'onnx-miniLM',
     };
   } catch {
     return null;
@@ -1114,11 +1397,16 @@ export async function bridgeGetHNSWStatus(
       // Table might not exist
     }
 
+    // #bug43.1: report the dim of the *active* embedder. This may not
+    // match what's persisted in `embedding_dimensions` for legacy rows
+    // (those stay 384 until the migration runs), but it's the right
+    // value for callers building a query embedding.
+    const active = peekActiveEmbedder();
     return {
       available: true,
       initialized: true,
       entryCount,
-      dimensions: 384,
+      dimensions: active?.dim ?? 384,
     };
   } catch {
     return null;
@@ -1291,6 +1579,187 @@ export async function bridgeListControllers(
 }
 
 /**
+ * #bug43.3 — Aggregate counts grouped by `embedding_dimensions` so
+ * `memory_bridge_status` can report what fraction of the index is on
+ * the new mxbai (1024-dim) vs. the legacy MiniLM (384-dim) vs. embeds-
+ * less rows. Returns `null` if the bridge isn't loaded; an empty array
+ * if the table exists but is empty.
+ */
+export async function bridgeGetEmbeddingDistribution(
+  dbPath?: string,
+): Promise<Array<{ dim: number; count: number; model: string }> | null> {
+  const registry = await getRegistry(dbPath);
+  if (!registry) return null;
+
+  const ctx = getDb(registry);
+  if (!ctx) return null;
+
+  try {
+    const stmt = ctx.db.prepare(`
+      SELECT
+        COALESCE(embedding_dimensions, 0) AS dim,
+        COALESCE(embedding_model, 'none') AS model,
+        COUNT(*) AS count
+      FROM memory_entries
+      WHERE status = 'active'
+      GROUP BY embedding_dimensions, embedding_model
+      ORDER BY count DESC
+    `);
+    const rows = stmt.all() as Array<{ dim: number; model: string; count: number }>;
+    return rows.map(r => ({
+      dim: Number(r.dim) || 0,
+      model: String(r.model || 'none'),
+      count: Number(r.count) || 0,
+    }));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * #bug43.2 — Re-embed all rows with the active embedder. Idempotent:
+ * rows already at the active dim+model are skipped. Caller is expected
+ * to have already verified the active embedder is the desired target.
+ *
+ * Returns counts so callers can report progress; throws nothing — DB
+ * failures surface as `errors`.
+ */
+export async function bridgeMigrateEmbeddings(options: {
+  dryRun?: boolean;
+  batchSize?: number;
+  dbPath?: string;
+  onProgress?: (done: number, total: number) => void;
+}): Promise<{
+  total: number;
+  migrated: number;
+  skipped: number;
+  errors: number;
+  targetDim: number;
+  targetModel: string;
+} | null> {
+  const registry = await getRegistry(options.dbPath);
+  if (!registry) return null;
+
+  const ctx = getDb(registry);
+  if (!ctx) return null;
+
+  const active = await getActiveEmbedder();
+  if (active.source !== 'ollama') {
+    // No point migrating to MiniLM — that's the fallback we're already on.
+    return {
+      total: 0,
+      migrated: 0,
+      skipped: 0,
+      errors: 0,
+      targetDim: active.dim,
+      targetModel: active.model,
+    };
+  }
+
+  let candidates: Array<{ id: string; content: string; dim: number; model: string }>;
+  try {
+    const stmt = ctx.db.prepare(`
+      SELECT id, content,
+             COALESCE(embedding_dimensions, 0) AS dim,
+             COALESCE(embedding_model, '') AS model
+      FROM memory_entries
+      WHERE status = 'active' AND content IS NOT NULL AND content != ''
+    `);
+    candidates = stmt.all() as typeof candidates;
+  } catch {
+    return null;
+  }
+
+  const total = candidates.length;
+  let migrated = 0;
+  let skipped = 0;
+  let errors = 0;
+  const batchSize = Math.max(1, options.batchSize ?? 16);
+
+  // Skip rows already on target.
+  const todo = candidates.filter(
+    c => !(c.dim === active.dim && c.model === active.model),
+  );
+  skipped = total - todo.length;
+
+  if (options.dryRun) {
+    return {
+      total,
+      migrated: 0,
+      skipped,
+      errors: 0,
+      targetDim: active.dim,
+      targetModel: active.model,
+    };
+  }
+
+  const updateStmt = ctx.db.prepare(`
+    UPDATE memory_entries
+    SET embedding = ?, embedding_dimensions = ?, embedding_model = ?, updated_at = ?
+    WHERE id = ?
+  `);
+
+  // Embed in batches; on batch failure, retry per-item so one bad row
+  // doesn't kill the whole batch (#bug43-followup).
+  for (let i = 0; i < todo.length; i += batchSize) {
+    const batch = todo.slice(i, i + batchSize);
+    let vectors: number[][] = [];
+    let batchOk = true;
+    try {
+      vectors = await active.embed(batch.map(b => b.content));
+      if (vectors.length !== batch.length) batchOk = false;
+    } catch {
+      batchOk = false;
+    }
+    if (!batchOk) {
+      // Per-item fallback: probe each entry individually so we only count
+      // the genuinely-bad ones as errors (the rest still migrate).
+      vectors = [];
+      for (const item of batch) {
+        try {
+          const single = await active.embed([item.content]);
+          vectors.push(single[0] ?? []);
+        } catch {
+          vectors.push([]);  // marker for per-item failure
+        }
+      }
+    }
+    const now = Date.now();
+    for (let j = 0; j < batch.length; j++) {
+      const vec = vectors[j];
+      if (!vec || vec.length !== active.dim) {
+        errors++;
+        continue;
+      }
+      try {
+        updateStmt.run(
+          JSON.stringify(vec),
+          active.dim,
+          active.model,
+          now,
+          batch[j].id,
+        );
+        migrated++;
+      } catch {
+        errors++;
+      }
+    }
+    if (options.onProgress) {
+      try { options.onProgress(migrated + errors, todo.length); } catch { /* ignore */ }
+    }
+  }
+
+  return {
+    total,
+    migrated,
+    skipped,
+    errors,
+    targetDim: active.dim,
+    targetModel: active.model,
+  };
+}
+
+/**
  * Check if the AgentDB v3 bridge is available.
  */
 export async function isBridgeAvailable(dbPath?: string): Promise<boolean> {
@@ -1339,7 +1808,8 @@ export async function bridgeStorePattern(options: {
   if (!registry) return null;
 
   try {
-    const reasoningBank = registry.get('reasoningBank');
+    const caps = getControllerCapabilities(registry);
+    const reasoningBank = caps.reasoningBank;
     const patternId = generateId('pattern');
 
     if (reasoningBank && typeof reasoningBank.store === 'function') {
@@ -1399,27 +1869,42 @@ export async function bridgeSearchPatterns(options: {
   if (!registry) return null;
 
   try {
-    const reasoningBank = registry.get('reasoningBank');
+    const caps = getControllerCapabilities(registry);
+    const reasoningBank = caps.reasoningBank;
+    const merged = new Map<string, { id: string; content: string; score: number }>();
+    const sources: string[] = [];
 
     // ReasoningBank may expose .searchPatterns() (agentdb) or .search() (legacy) (#1492 Bug 2)
+    // #bug2: this branch is now ADDITIVE — results from reasoningBank are merged
+    // with the SQL fallback so patterns written via either path are findable
+    // via either path. Previously this branch returned early with [] if the
+    // controller was registered but had no data, masking SQL-stored patterns.
     if (reasoningBank && typeof (reasoningBank.searchPatterns ?? reasoningBank.search) === 'function') {
-      let results: any;
-      if (typeof reasoningBank.searchPatterns === 'function') {
-        results = await reasoningBank.searchPatterns({ task: options.query, k: options.topK || 5, threshold: options.minConfidence || 0.3 });
-      } else {
-        results = await reasoningBank.search(options.query, { topK: options.topK || 5, minScore: options.minConfidence || 0.3 });
-      }
-      return {
-        results: Array.isArray(results) ? results.map((r: any) => ({
-          id: r.id || r.patternId || '',
-          content: r.content || r.pattern || '',
-          score: r.score ?? r.confidence ?? 0,
-        })) : [],
-        controller: 'reasoningBank',
-      };
+      try {
+        let results: any;
+        if (typeof reasoningBank.searchPatterns === 'function') {
+          results = await reasoningBank.searchPatterns({ task: options.query, k: options.topK || 5, threshold: options.minConfidence || 0.3 });
+        } else if (typeof reasoningBank.search === 'function') {
+          results = await reasoningBank.search(options.query, { topK: options.topK || 5, minScore: options.minConfidence || 0.3 });
+        }
+        if (Array.isArray(results)) {
+          for (const r of results) {
+            const id = r.id || r.patternId || '';
+            if (!id) continue;
+            const entry = {
+              id,
+              content: r.content || r.pattern || '',
+              score: r.score ?? r.confidence ?? 0,
+            };
+            const existing = merged.get(id);
+            if (!existing || entry.score > existing.score) merged.set(id, entry);
+          }
+          sources.push('reasoningBank');
+        }
+      } catch { /* fall through to SQL */ }
     }
 
-    // Fallback: search via bridge
+    // Always run the SQL fallback as well, then merge by id.
     const result = await bridgeSearchEntries({
       query: options.query,
       namespace: 'pattern',
@@ -1427,11 +1912,28 @@ export async function bridgeSearchPatterns(options: {
       threshold: options.minConfidence || 0.3,
       dbPath: options.dbPath,
     });
+    if (result) {
+      for (const r of result.results) {
+        const entry = { id: r.id, content: r.content, score: r.score };
+        const existing = merged.get(r.id);
+        if (!existing || entry.score > existing.score) merged.set(r.id, entry);
+      }
+      sources.push('bridge-fallback');
+    }
 
-    return result ? {
-      results: result.results.map(r => ({ id: r.id, content: r.content, score: r.score })),
-      controller: 'bridge-fallback',
-    } : null;
+    if (sources.length === 0) return null;
+
+    // Sort by score descending and apply topK cap.
+    const limit = options.topK || 5;
+    const ordered = Array.from(merged.values())
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit);
+
+    // Preserve back-compat for single-source callers: if only one source ran
+    // emit its name; otherwise emit the union sentinel 'merged'.
+    const controller = sources.length === 1 ? sources[0] : 'merged';
+
+    return { results: ordered, controller };
   } catch {
     return null;
   }
@@ -1456,11 +1958,12 @@ export async function bridgeRecordFeedback(options: {
   if (!registry) return null;
 
   try {
+    const caps = getControllerCapabilities(registry);
     let controller = 'none';
     let updated = 0;
 
     // Try LearningSystem first (Phase 4)
-    const learningSystem = registry.get('learningSystem');
+    const learningSystem = caps.learningSystem;
     if (learningSystem) {
       try {
         if (typeof learningSystem.recordFeedback === 'function') {
@@ -1479,7 +1982,7 @@ export async function bridgeRecordFeedback(options: {
     }
 
     // Also record in ReasoningBank for pattern reinforcement
-    const reasoningBank = registry.get('reasoningBank');
+    const reasoningBank = caps.reasoningBank;
     if (reasoningBank) {
       try {
         if (typeof reasoningBank.recordOutcome === 'function') {
@@ -1499,7 +2002,7 @@ export async function bridgeRecordFeedback(options: {
 
     // Phase 4: SkillLibrary promotion for high-quality patterns
     if (options.success && options.quality >= 0.9 && options.patterns?.length) {
-      const skills = registry.get('skills');
+      const skills = caps.skills;
       if (skills && typeof skills.promote === 'function') {
         for (const pattern of options.patterns) {
           try { await skills.promote(pattern, options.quality); updated++; } catch { /* skip */ }
@@ -1543,7 +2046,8 @@ export async function bridgeRecordCausalEdge(options: {
   if (!registry) return null;
 
   try {
-    const causalGraph = registry.get('causalGraph');
+    const caps = getControllerCapabilities(registry);
+    const causalGraph = caps.causalGraph;
     if (causalGraph && typeof causalGraph.addEdge === 'function') {
       causalGraph.addEdge(options.sourceId, options.targetId, {
         relation: options.relation,
@@ -1616,13 +2120,14 @@ export async function bridgeDeleteHierarchical(options: {
       return { success: false, deleted: false, key, tier, controller: 'guard', error: `MutationGuard rejected: ${guardResult.reason}` };
     }
 
-    const hm = registry.get('hierarchicalMemory');
+    const caps = getControllerCapabilities(registry);
+    const hm = caps.hierarchicalMemory;
 
     // 1. agentdb@3.0.0-alpha.13+: ReflexionMemory.deleteEpisode propagates through
     //    graph adapter / generic graph backend / vector backend AND purges SQL
     //    episodes + episode_embeddings rows. Single call, durably consistent.
     //    See agentic-flow#150/#151 (closes ruvnet/RuVector#427 the cli-visible way).
-    const reflexion = registry.get('reflexionMemory');
+    const reflexion = caps.reflexionMemory;
     if (reflexion && typeof reflexion.deleteEpisode === 'function') {
       try {
         const removed = await reflexion.deleteEpisode(key);
@@ -1641,6 +2146,7 @@ export async function bridgeDeleteHierarchical(options: {
         return { success: true, deleted: true, key, tier, controller: 'hierarchicalMemory', guarded: true };
       } catch (err) {
         // Fall through to SQL fallback
+        swallowError('memory-bridge.bridgeDeleteHierarchical.hm.delete', err, key);
       }
     }
 
@@ -1721,7 +2227,8 @@ export async function bridgeDeleteCausalEdge(options: {
       return { success: false, deleted: false, sourceId, targetId, controller: 'guard', error: `MutationGuard rejected: ${guardResult.reason}` };
     }
 
-    const causalGraph = registry.get('causalGraph');
+    const caps = getControllerCapabilities(registry);
+    const causalGraph = caps.causalGraph;
 
     // 1. agentdb@3.0.0-alpha.13+: GraphDatabaseAdapter.deleteEdgesByEndpoints
     //    handles the (sourceId, targetId, relation?) tuple case directly via
@@ -1729,7 +2236,12 @@ export async function bridgeDeleteCausalEdge(options: {
     //    against /^[A-Za-z_][A-Za-z0-9_]*$/ upstream).
     if (causalGraph && typeof causalGraph.deleteEdgesByEndpoints === 'function') {
       try {
-        const r = await causalGraph.deleteEdgesByEndpoints(sourceId, targetId, relation);
+        const r = (await causalGraph.deleteEdgesByEndpoints(sourceId, targetId, relation)) as
+          | { deleted?: number }
+          | number
+          | boolean
+          | null
+          | undefined;
         const deletedCount = typeof r === 'object' && r ? (r.deleted ?? 0) : (r ? 1 : 0);
         if (deletedCount > 0) {
           await logAttestation(registry, 'delete', edgeKey, { namespace: 'causal-edges', relation, count: deletedCount });
@@ -1808,10 +2320,14 @@ export async function bridgeDeleteCausalNode(options: {
     // 1. agentdb@3.0.0-alpha.13+: GraphDatabaseAdapter.deleteNode(id, {cascade})
     //    counts incident edges before delete so we get accurate audit numbers
     //    regardless of binding stats. Cypher MATCH (n {id}) DETACH DELETE n.
-    const causalGraph = registry.get('causalGraph');
+    const caps = getControllerCapabilities(registry);
+    const causalGraph = caps.causalGraph;
     if (causalGraph && typeof causalGraph.deleteNode === 'function') {
       try {
-        const r = await causalGraph.deleteNode(nodeId, { cascade: true });
+        const r = (await causalGraph.deleteNode(nodeId, { cascade: true })) as
+          | { deletedNode?: boolean; deletedEdges?: number }
+          | null
+          | undefined;
         if (r && typeof r === 'object') {
           const deletedNodeNative = !!r.deletedNode;
           const deletedEdgesNative = typeof r.deletedEdges === 'number' ? r.deletedEdges : 0;
@@ -1891,11 +2407,12 @@ export async function bridgeSessionStart(options: {
   if (!registry) return null;
 
   try {
+    const caps = getControllerCapabilities(registry);
     let restoredPatterns = 0;
     let controller = 'none';
 
     // Try ReflexionMemory for episodic session replay
-    const reflexion = registry.get('reflexion');
+    const reflexion = caps.reflexion;
     if (reflexion && typeof reflexion.startEpisode === 'function') {
       await reflexion.startEpisode(options.sessionId, { context: options.context });
       controller = 'reflexion';
@@ -1943,11 +2460,12 @@ export async function bridgeSessionEnd(options: {
   if (!registry) return null;
 
   try {
+    const caps = getControllerCapabilities(registry);
     let controller = 'none';
     let persisted = false;
 
     // End episode in ReflexionMemory
-    const reflexion = registry.get('reflexion');
+    const reflexion = caps.reflexion;
     if (reflexion && typeof reflexion.endEpisode === 'function') {
       await reflexion.endEpisode(options.sessionId, {
         summary: options.summary,
@@ -1978,7 +2496,7 @@ export async function bridgeSessionEnd(options: {
     persisted = true;
 
     // Phase 3: Trigger NightlyLearner consolidation if available
-    const nightlyLearner = registry.get('nightlyLearner');
+    const nightlyLearner = caps.nightlyLearner;
     if (nightlyLearner && typeof nightlyLearner.consolidate === 'function') {
       try {
         await nightlyLearner.consolidate({ sessionId: options.sessionId });
@@ -2012,10 +2530,15 @@ export async function bridgeRouteTask(options: {
   if (!registry) return null;
 
   try {
+    const caps = getControllerCapabilities(registry);
+
     // Try AgentDB's SemanticRouter
-    const semanticRouter = registry.get('semanticRouter');
+    const semanticRouter = caps.semanticRouter;
     if (semanticRouter && typeof semanticRouter.route === 'function') {
-      const result = await semanticRouter.route(options.task, { context: options.context });
+      const result = (await semanticRouter.route(options.task, { context: options.context })) as
+        | { route?: string; category?: string; confidence?: number; score?: number; agents?: string[]; suggestedAgents?: string[] }
+        | null
+        | undefined;
       if (result) {
         return {
           route: result.route || result.category || 'general',
@@ -2027,9 +2550,12 @@ export async function bridgeRouteTask(options: {
     }
 
     // Try LearningSystem recommendAlgorithm (Phase 4)
-    const learningSystem = registry.get('learningSystem');
+    const learningSystem = caps.learningSystem;
     if (learningSystem && typeof learningSystem.recommendAlgorithm === 'function') {
-      const rec = await learningSystem.recommendAlgorithm(options.task);
+      const rec = (await learningSystem.recommendAlgorithm(options.task)) as
+        | { algorithm?: string; route?: string; confidence?: number; agents?: string[] }
+        | null
+        | undefined;
       if (rec) {
         return {
           route: rec.algorithm || rec.route || 'general',
@@ -2064,20 +2590,21 @@ export async function bridgeHealthCheck(
 
   try {
     const controllers = registry.listControllers();
+    const caps = getControllerCapabilities(registry);
 
     // Phase 4: AttestationLog stats
     let attestationCount = 0;
-    const attestation = registry.get('attestationLog');
+    const attestation = caps.attestationLog;
     if (attestation && typeof attestation.count === 'function') {
       attestationCount = attestation.count();
     }
 
     // Phase 2: TieredCache stats
     let cacheStats = { size: 0, hits: 0, misses: 0 };
-    const cache = registry.get('tieredCache');
+    const cache = caps.cache;
     if (cache && typeof cache.stats === 'function') {
       const s = cache.stats();
-      cacheStats = { size: s.size ?? 0, hits: s.hits ?? 0, misses: s.misses ?? 0 };
+      cacheStats = { size: s?.size ?? 0, hits: s?.hits ?? 0, misses: s?.misses ?? 0 };
     }
 
     return { available: true, controllers, attestationCount, cacheStats };
@@ -2101,8 +2628,9 @@ export async function bridgeHierarchicalStore(params: { key: string; value: stri
   const registry = await getRegistry();
   if (!registry) return null;
   try {
-    const hm = registry.get('hierarchicalMemory');
-    if (!hm) return { success: false, error: 'HierarchicalMemory not available' };
+    const caps = getControllerCapabilities(registry);
+    const hm = caps.hierarchicalMemory;
+    if (!hm || typeof hm.store !== 'function') return { success: false, error: 'HierarchicalMemory not available' };
     const tier = params.tier || 'working';
 
     // Detect real HierarchicalMemory (has async store returning id) vs stub
@@ -2133,8 +2661,9 @@ export async function bridgeHierarchicalRecall(params: { query: string; tier?: s
   const registry = await getRegistry();
   if (!registry) return null;
   try {
-    const hm = registry.get('hierarchicalMemory');
-    if (!hm) return { results: [], error: 'HierarchicalMemory not available' };
+    const caps = getControllerCapabilities(registry);
+    const hm = caps.hierarchicalMemory;
+    if (!hm || typeof hm.recall !== 'function') return { results: [], error: 'HierarchicalMemory not available' };
 
     // Detect real HierarchicalMemory vs stub
     if (typeof hm.getStats === 'function' && typeof hm.promote === 'function') {
@@ -2151,9 +2680,9 @@ export async function bridgeHierarchicalRecall(params: { query: string; tier?: s
     }
 
     // Stub fallback — recall(string, number)
-    const results = hm.recall(params.query, params.topK || 5);
+    const results = (await hm.recall(params.query, params.topK || 5)) as Array<{ tier?: string }>;
     const filtered = params.tier
-      ? results.filter((r: any) => r.tier === params.tier)
+      ? results.filter((r) => r.tier === params.tier)
       : results;
     return { results: filtered, controller: 'hierarchicalMemory' };
   } catch (e: any) { return { results: [], error: e.message }; }
@@ -2172,8 +2701,9 @@ export async function bridgeConsolidate(params: { minAge?: number; maxEntries?: 
   const registry = await getRegistry();
   if (!registry) return null;
   try {
-    const mc = registry.get('memoryConsolidation');
-    if (!mc) return { success: false, error: 'MemoryConsolidation not available' };
+    const caps = getControllerCapabilities(registry);
+    const mc = caps.memoryConsolidation;
+    if (!mc || typeof mc.consolidate !== 'function') return { success: false, error: 'MemoryConsolidation not available' };
     const result = await mc.consolidate();
     return { success: true, consolidated: result };
   } catch (e: any) { return { success: false, error: e.message }; }
@@ -2189,7 +2719,8 @@ export async function bridgeBatchOperation(params: { operation: string; entries:
   const registry = await getRegistry();
   if (!registry) return null;
   try {
-    const batch = registry.get('batchOperations');
+    const caps = getControllerCapabilities(registry);
+    const batch = caps.batchOperations;
     if (!batch) return { success: false, error: 'BatchOperations not available' };
     let result;
     switch (params.operation) {
@@ -2213,6 +2744,9 @@ export async function bridgeBatchOperation(params: { operation: string; entries:
       }
       case 'delete': {
         // bulkDelete(table, conditions) — conditions is a WHERE clause object
+        if (typeof batch.bulkDelete !== 'function') {
+          return { success: false, error: 'BatchOperations.bulkDelete not available' };
+        }
         const keys = params.entries.map((e: any) => e.key).filter(Boolean);
         for (const key of keys) {
           await batch.bulkDelete('episodes', { key });
@@ -2222,6 +2756,9 @@ export async function bridgeBatchOperation(params: { operation: string; entries:
       }
       case 'update': {
         // bulkUpdate(table, updates, conditions)
+        if (typeof batch.bulkUpdate !== 'function') {
+          return { success: false, error: 'BatchOperations.bulkUpdate not available' };
+        }
         for (const entry of params.entries) {
           await batch.bulkUpdate('episodes', { content: entry.value || entry.content }, { key: entry.key });
         }
@@ -2242,22 +2779,23 @@ export async function bridgeContextSynthesize(params: { query: string; maxEntrie
   const registry = await getRegistry();
   if (!registry) return null;
   try {
-    const CS = registry.get('contextSynthesizer');
+    const caps = getControllerCapabilities(registry);
+    const CS = caps.contextSynthesizer;
     if (!CS || typeof CS.synthesize !== 'function') {
       return { success: false, error: 'ContextSynthesizer not available' };
     }
     // Gather memory patterns from hierarchical memory as input
-    const hm = registry.get('hierarchicalMemory');
+    const hm = caps.hierarchicalMemory;
     let memories: any[] = [];
     if (hm && typeof hm.recall === 'function') {
       // Detect real HierarchicalMemory (MemoryQuery object) vs stub (string, number)
       let recalled: any[];
       if (typeof hm.promote === 'function') {
         // Real agentdb HierarchicalMemory
-        recalled = await hm.recall({ query: params.query, k: params.maxEntries || 10 });
+        recalled = (await hm.recall({ query: params.query, k: params.maxEntries || 10 })) as any[];
       } else {
         // Stub
-        recalled = hm.recall(params.query, params.maxEntries || 10);
+        recalled = (await hm.recall(params.query, params.maxEntries || 10)) as any[];
       }
       memories = (recalled || []).map((r: any) => ({
         content: r.value || r.content || '',
@@ -2280,8 +2818,9 @@ export async function bridgeSemanticRoute(params: { input: string }): Promise<an
   const registry = await getRegistry();
   if (!registry) return null;
   try {
-    const router = registry.get('semanticRouter');
-    if (!router) {
+    const caps = getControllerCapabilities(registry);
+    const router = caps.semanticRouter;
+    if (!router || typeof router.route !== 'function') {
       // ADR-093 F9: surface an actionable error pointing callers at the
       // alternative routing surfaces that DO work, instead of just
       // saying "not available".

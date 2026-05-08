@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { type MCPTool, getProjectCwd } from './types.js';
 import { validateIdentifier, validateText, validateAgentSpawn } from './validate-input.js';
 import { executeAgentTask } from './agent-execute-core.js';
+import { scanClaudeCodeRegistry } from '../registry/claude-code-registry.js';
 
 // Storage paths
 const STORAGE_DIR = '.claude-flow';
@@ -257,7 +258,7 @@ export const agentTools: MCPTool[] = [
         status: 'registered',
         createdAt: agent.createdAt,
         note: 'Agent registered for coordination. Three execution paths: ' +
-          '(1) call agent_execute(agentId, prompt) — direct LLM call via Anthropic Messages API (requires ANTHROPIC_API_KEY); ' +
+          '(1) call agent_execute(agentId, prompt) — direct LLM call via Anthropic Messages API (auto-uses Claude Code OAuth token if available, otherwise ANTHROPIC_API_KEY); ' +
           '(2) Claude Code Task tool — spawns a real subagent; ' +
           '(3) claude -p — headless background instance.',
       };
@@ -285,7 +286,7 @@ export const agentTools: MCPTool[] = [
     // updating the agent record with lastResult / taskCount / status.
     // No mock — actual HTTP request to api.anthropic.com.
     name: 'agent_execute',
-    description: 'Execute a task on a spawned agent — calls the Anthropic Messages API with the agent\'s configured model. Requires ANTHROPIC_API_KEY in env.',
+    description: 'Execute a task on a spawned agent — calls the Anthropic Messages API with the agent\'s configured model. Auto-uses Claude Code OAuth token (env CLAUDE_CODE_OAUTH_TOKEN, macOS Keychain, or ~/.claude/.credentials.json) when available; falls back to ANTHROPIC_API_KEY.',
     category: 'agent',
     inputSchema: {
       type: 'object',
@@ -393,7 +394,7 @@ export const agentTools: MCPTool[] = [
   },
   {
     name: 'agent_list',
-    description: 'List all agents',
+    description: 'List all agents — both Ruflo-spawned (in-flight, from .claude-flow/agents/store.json) and user-installed templates discovered on disk under ~/.claude/agents/. Each entry has a `source` field: "built-in" (running), "user" (installed agent template).',
     category: 'agent',
     inputSchema: {
       type: 'object',
@@ -401,6 +402,10 @@ export const agentTools: MCPTool[] = [
         status: { type: 'string', description: 'Filter by status' },
         domain: { type: 'string', description: 'Filter by domain' },
         includeTerminated: { type: 'boolean', description: 'Include terminated agents' },
+        includeUserInstalled: {
+          type: 'boolean',
+          description: 'Include user-installed agent templates from ~/.claude/agents/ (default: true). Pass false to restrict to running agents.',
+        },
       },
     },
     handler: async (input) => {
@@ -428,21 +433,60 @@ export const agentTools: MCPTool[] = [
         agents = agents.filter(a => a.domain === input.domain);
       }
 
+      // #bug22.2 — merge user-installed agents discovered under ~/.claude/agents/.
+      // These are TEMPLATES (i.e. things the user can spawn), not running
+      // agents — they have no status/health/taskCount. We tag every entry with
+      // a `source` field so consumers can tell them apart.
+      const includeUserInstalled = input.includeUserInstalled !== false;
+      const userAgents: Array<Record<string, unknown>> = [];
+      let userAgentTotal = 0;
+      if (includeUserInstalled) {
+        try {
+          const registry = await scanClaudeCodeRegistry();
+          // Apply the same domain filter to user agents (using their `category`
+          // as the equivalent of `domain`).
+          let filtered = registry.agents;
+          if (input.domain) {
+            filtered = filtered.filter(a => a.category === input.domain);
+          }
+          userAgentTotal = filtered.length;
+          for (const ua of filtered) {
+            userAgents.push({
+              agentId: `user:${ua.name}`,
+              agentType: ua.name,
+              status: 'available',
+              source: 'user',
+              category: ua.category,
+              description: ua.description,
+              path: ua.path,
+            });
+          }
+        } catch {
+          // Registry scan failed — degrade gracefully, keep built-in list.
+        }
+      }
+
+      const builtInAgents = agents.map(a => ({
+        agentId: a.agentId,
+        agentType: a.agentType,
+        status: a.status,
+        health: a.health,
+        taskCount: a.taskCount,
+        createdAt: a.createdAt,
+        domain: a.domain,
+        source: 'built-in' as const,
+      }));
+
       return {
-        agents: agents.map(a => ({
-          agentId: a.agentId,
-          agentType: a.agentType,
-          status: a.status,
-          health: a.health,
-          taskCount: a.taskCount,
-          createdAt: a.createdAt,
-          domain: a.domain,
-        })),
-        total: agents.length,
+        agents: [...builtInAgents, ...userAgents],
+        total: builtInAgents.length + userAgents.length,
+        builtInTotal: builtInAgents.length,
+        userInstalledTotal: userAgentTotal,
         filters: {
           status: input.status,
           domain: input.domain,
           includeTerminated: input.includeTerminated,
+          includeUserInstalled,
         },
       };
     },

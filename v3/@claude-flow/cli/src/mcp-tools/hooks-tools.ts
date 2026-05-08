@@ -3,10 +3,17 @@
  * Provides intelligent hooks functionality via MCP protocol
  */
 
-import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync, unlinkSync, readdirSync, rmSync } from 'fs';
+import { mkdirSync, writeFileSync, existsSync, readFileSync, statSync, unlinkSync, readdirSync, rmSync, appendFileSync } from 'fs';
 import { dirname, join, resolve } from 'path';
+import { homedir } from 'os';
 import { type MCPTool, getProjectCwd } from './types.js';
 import { validateIdentifier, validateText, validatePath } from './validate-input.js';
+import { scanClaudeCodeRegistry } from '../registry/claude-code-registry.js';
+import {
+  matchUserSkillsForTask,
+  matchUserSkillsForTaskSemantic,
+  type UserSkillMatch,
+} from '../registry/skill-matcher.js';
 
 // Real vector search functions - lazy loaded to avoid circular imports
 let searchEntriesFn: ((options: {
@@ -882,9 +889,16 @@ export const hooksPostCommand: MCPTool = {
   },
 };
 
+/**
+ * #bug23.0 — `matchUserSkillsForTask` was extracted to
+ * `../registry/skill-matcher.ts` so `swarm_init` (#bug23) can reuse the
+ * same scorer. The function semantics are unchanged from #bug22.3 — see
+ * the extracted module for full docs.
+ */
+
 export const hooksRoute: MCPTool = {
   name: 'hooks_route',
-  description: 'Get a 3-tier routing recommendation for a task: Tier 1 (Agent Booster, 0ms / $0 — for var-to-const, add-types, etc.), Tier 2 (Haiku — simple), Tier 3 (Sonnet/Opus — complex). Use this BEFORE spawning an agent to avoid sending simple transforms to Sonnet. Native tools have no equivalent — Claude Code does not introspect its own model-selection cost. Returns the recommended model + a `[AGENT_BOOSTER_AVAILABLE]` literal when the WASM bypass applies.',
+  description: 'Get a 3-tier routing recommendation for a task: Tier 1 (Agent Booster, 0ms / $0 — for var-to-const, add-types, etc.), Tier 2 (Haiku — simple), Tier 3 (Sonnet/Opus — complex). Use this BEFORE spawning an agent to avoid sending simple transforms to Sonnet. Native tools have no equivalent — Claude Code does not introspect its own model-selection cost. Returns the recommended model + a `[AGENT_BOOSTER_AVAILABLE]` literal when the WASM bypass applies. Also surfaces user-installed skills/agents from ~/.claude/ that match the task (e.g. polymarket-analyzer for trading tasks).',
   inputSchema: {
     type: 'object',
     properties: {
@@ -901,6 +915,45 @@ export const hooksRoute: MCPTool = {
 
     { const v = validateText(task, 'task'); if (!v.valid) return { success: false, error: v.error }; }
     if (context) { const v = validateText(context, 'context'); if (!v.valid) return { success: false, error: v.error }; }
+
+    // #bug22.3 — Always score user-installed skills/agents against the task
+    // BEFORE running the built-in routing logic, so the response can surface
+    // the user's `polymarket-analyzer` / `kali-osint-*` / `ceo` etc. as
+    // alternatives even when AgentDB / semantic router lock onto a built-in
+    // pattern. Failures here must never break routing.
+    //
+    // #bug40 — Use the SEMANTIC matcher (#bug25.2) by default. The keyword
+    // bag-of-words fallback was producing false positives like ranking
+    // `kali-metasploit` top-1 for a "JWT auth refactor" task because of the
+    // shared "auth" token. The semantic path embeds task + skill via Ollama
+    // and uses cosine similarity (with a keyword blend), which correctly
+    // distinguishes "pentest with metasploit" from "JWT auth refactor".
+    // When Ollama is unreachable `matchUserSkillsForTaskSemantic` transparently
+    // falls back to the keyword scorer (`backend: 'keyword'`), so this swap
+    // never reduces availability — only correctness.
+    let userMatches: UserSkillMatch[] = [];
+    let userMatchBackend: 'embedding' | 'keyword' | 'hybrid' | 'none' = 'none';
+    try {
+      const registry = await scanClaudeCodeRegistry();
+      const semanticResult = await matchUserSkillsForTaskSemantic(
+        task,
+        context,
+        registry.skills,
+        registry.agents,
+      );
+      userMatches = semanticResult.matches;
+      userMatchBackend = semanticResult.backend;
+    } catch {
+      // Registry / Ollama unavailable — final safety net, fall back to the
+      // pure keyword scorer rather than dropping user matches entirely.
+      try {
+        const registry = await scanClaudeCodeRegistry();
+        userMatches = matchUserSkillsForTask(task, context, registry.skills, registry.agents);
+        userMatchBackend = 'keyword';
+      } catch {
+        /* registry truly unavailable — keep going with built-in routing only. */
+      }
+    }
 
     // Phase 5: Try AgentDB's SemanticRouter / LearningSystem first
     if (useSemanticRouter) {
@@ -930,6 +983,11 @@ export const hooksRoute: MCPTool = {
               confidence: Math.round((agentdbRoute.confidence - (0.1 * (i + 1))) * 100) / 100,
               reason: `Alternative from ${agentdbRoute.controller}`,
             })),
+            // #bug22.3 — even when AgentDB is confident, expose user-installed
+            // matches so the caller can override (e.g. "yes route to coder,
+            // but the user has polymarket-analyzer that's literally written
+            // for this exact task").
+            userInstalledMatches: userMatches,
             estimatedMetrics: {
               successProbability: Math.round(agentdbRoute.confidence * 100) / 100,
               estimatedDuration: complexity === 'high' ? '2-4 hours' : complexity === 'medium' ? '30-60 min' : '10-30 min',
@@ -1013,6 +1071,32 @@ export const hooksRoute: MCPTool = {
       backendInfo = 'keyword matching';
     }
 
+    // #bug22.3 — promote a strong user-installed skill/agent to primary
+    // when its score clearly outranks the built-in match. The threshold is
+    // intentionally conservative (>=4 keyword hits, with name-tokens
+    // weighted 2× per matchUserSkillsForTask) so we only override when the
+    // user wrote a skill/agent that's a near-perfect lexical fit. Built-in
+    // results are kept as alternatives so the caller never loses signal.
+    const STRONG_USER_MATCH_THRESHOLD = 4;
+    let primarySource: 'built-in' | 'user' = 'built-in';
+    if (userMatches.length > 0 && userMatches[0].score >= STRONG_USER_MATCH_THRESHOLD) {
+      const topUser = userMatches[0];
+      const builtInAgents = agents;
+      agents = [topUser.name, ...builtInAgents];
+      // Map keyword score (0..N) into a 0..1 confidence — clamp at 0.95.
+      confidence = Math.min(0.6 + topUser.score * 0.05, 0.95);
+      matchedPattern = `user-${topUser.type}:${topUser.name}`;
+      // #bug40 — backend label reflects which matcher actually scored this.
+      // `hybrid` = Ollama embed + keyword blend (preferred). `embedding` =
+      // pure semantic. `keyword` = Ollama unreachable, fell back. `none` =
+      // registry itself failed.
+      routingMethod = `user-installed-${userMatchBackend}`;
+      backendInfo = userMatchBackend === 'keyword' || userMatchBackend === 'none'
+        ? 'user-installed registry (keyword match — Ollama unreachable)'
+        : `user-installed registry (semantic ${userMatchBackend} match via Ollama)`;
+      primarySource = 'user';
+    }
+
     // Determine complexity
     const taskLower = task.toLowerCase();
     const complexity = taskLower.includes('complex') || taskLower.includes('architecture') || task.length > 200
@@ -1037,15 +1121,22 @@ export const hooksRoute: MCPTool = {
       primaryAgent: {
         type: agents[0],
         confidence: Math.round(confidence * 100) / 100,
-        reason: routingMethod.startsWith('semantic')
-          ? `Semantic similarity to "${matchedPattern}" pattern (${Math.round(confidence * 100)}%)`
-          : `Task contains keywords matching ${agents[0]} specialization`,
+        source: primarySource,
+        reason: primarySource === 'user'
+          ? `User-installed ${userMatches[0].type} "${userMatches[0].name}" matched ${userMatches[0].matchedKeywords.length} task keywords (${userMatches[0].matchedKeywords.join(', ')})`
+          : routingMethod.startsWith('semantic')
+            ? `Semantic similarity to "${matchedPattern}" pattern (${Math.round(confidence * 100)}%)`
+            : `Task contains keywords matching ${agents[0]} specialization`,
       },
       alternativeAgents: agents.slice(1).map((agent, i) => ({
         type: agent,
         confidence: Math.round((confidence - (0.1 * (i + 1))) * 100) / 100,
         reason: `Alternative agent for ${agent} capabilities`,
       })),
+      // #bug22.3 — full list of user-installed candidates with their scores,
+      // regardless of whether one was promoted to primary. Lets callers
+      // build their own ranking on top of ours.
+      userInstalledMatches: userMatches,
       estimatedMetrics: {
         successProbability: Math.round(confidence * 100) / 100,
         estimatedDuration: complexity === 'high' ? '2-4 hours' : complexity === 'medium' ? '30-60 min' : '10-30 min',
@@ -1059,6 +1150,117 @@ export const hooksRoute: MCPTool = {
     };
   },
 };
+
+// ADR-094 / #bug5 — `pending-insights.jsonl` was written by
+// helpers/intelligence.cjs:recordEdit() (post-edit hook) but only consumed
+// at session-end (consolidate()). Between sessions the JSONL grew while
+// hooks_metrics stayed at zero. drainPendingInsights() reads new lines
+// since last drain (tracked via sibling .consumed-offset file) and returns
+// counters per event type. It does NOT truncate — the consolidator still
+// needs the full file at session-end.
+interface PendingInsightsDrainResult {
+  edits: number;
+  files: string[];
+  trajectoriesEnded: number;
+  routes: number;
+  drained: number;
+}
+
+function resolvePendingInsightsPath(): string {
+  // Test/env override — lets callers (and regression tests) point the drain
+  // at an arbitrary path without mutating $HOME or process.cwd().
+  const override = process.env.RUFLO_PENDING_INSIGHTS_PATH;
+  if (override && override.length > 0) return override;
+
+  // Prefer ~/.claude/.claude-flow/data/pending-insights.jsonl (global install
+  // matches what helpers/intelligence.cjs writes when CWD=~/.claude). Fall
+  // back to CWD-relative path for project-local installs.
+  const home = homedir();
+  const globalPath = join(home, '.claude', '.claude-flow', 'data', 'pending-insights.jsonl');
+  if (existsSync(globalPath)) return globalPath;
+  return resolve(join('.claude-flow', 'data', 'pending-insights.jsonl'));
+}
+
+function drainPendingInsights(): PendingInsightsDrainResult {
+  const result: PendingInsightsDrainResult = {
+    edits: 0,
+    files: [],
+    trajectoriesEnded: 0,
+    routes: 0,
+    drained: 0,
+  };
+
+  try {
+    const insightsPath = resolvePendingInsightsPath();
+    if (!existsSync(insightsPath)) return result;
+
+    const offsetPath = `${insightsPath}.consumed-offset`;
+    let lastOffset = 0;
+    if (existsSync(offsetPath)) {
+      try {
+        const raw = readFileSync(offsetPath, 'utf-8').trim();
+        const parsed = parseInt(raw, 10);
+        if (Number.isFinite(parsed) && parsed >= 0) lastOffset = parsed;
+      } catch {
+        // corrupt offset — restart from 0 (worst case = double-count once)
+      }
+    }
+
+    const stat = statSync(insightsPath);
+    // If the file shrank (rotated/truncated), reset offset.
+    if (lastOffset > stat.size) lastOffset = 0;
+    if (lastOffset === stat.size) return result; // no new data
+
+    // Read just the new tail. For typical pending-insights sizes this is
+    // small; readFileSync + slice is fine. Keep it simple over fd-positional
+    // reads to avoid an extra abstraction.
+    const full = readFileSync(insightsPath, 'utf-8');
+    const newSlice = full.slice(lastOffset);
+    const lines = newSlice.split('\n').filter(l => l.trim().length > 0);
+
+    const fileSet = new Set<string>();
+    for (const line of lines) {
+      try {
+        const evt = JSON.parse(line) as { type?: string; file?: string };
+        result.drained++;
+        switch (evt.type) {
+          case 'edit':
+            result.edits++;
+            if (evt.file && typeof evt.file === 'string') fileSet.add(evt.file);
+            break;
+          case 'trajectory-end':
+          case 'trajectoryEnd':
+            result.trajectoriesEnded++;
+            break;
+          case 'route':
+          case 'routing':
+            result.routes++;
+            break;
+          default:
+            // Unknown event — still counted in drained so callers can detect
+            // activity even when event types evolve.
+            break;
+        }
+      } catch {
+        // Malformed line — skip.
+      }
+    }
+    result.files = Array.from(fileSet);
+
+    // Persist new offset (idempotent for next call). Best-effort — failures
+    // here only cause the next drain to re-read (double-count), not data loss.
+    try {
+      mkdirSync(dirname(offsetPath), { recursive: true });
+      writeFileSync(offsetPath, String(stat.size), 'utf-8');
+    } catch {
+      // non-fatal
+    }
+  } catch {
+    // Drain is opportunistic — never fail the metrics call.
+  }
+
+  return result;
+}
 
 export const hooksMetrics: MCPTool = {
   name: 'hooks_metrics',
@@ -1087,7 +1289,13 @@ export const hooksMetrics: MCPTool = {
       routingOutcomes = loadRoutingOutcomes() as Array<{ success: boolean; agent?: string }>;
     } catch { /* non-fatal */ }
 
-    const totalCommands = routingOutcomes.length;
+    // ADR-094 / #bug5: helpers/intelligence.cjs:recordEdit() appends edits
+    // to pending-insights.jsonl on every post-edit hook, but the only prior
+    // consumer was session-end consolidation. Drain new lines (with offset
+    // tracking for idempotence) so the dashboard reflects in-session edits.
+    const pendingDrained = drainPendingInsights();
+
+    const totalCommands = routingOutcomes.length + pendingDrained.edits;
     const successfulCommands = routingOutcomes.filter(o => o.success).length;
     const successRate = totalCommands > 0 ? successfulCommands / totalCommands : null;
 
@@ -1098,23 +1306,51 @@ export const hooksMetrics: MCPTool = {
     }
     const topAgent = Object.entries(agentCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 
-    const successful = stats.trajectories.successful;
-    const total = stats.trajectories.total;
+    const successful = stats.trajectories.successful + pendingDrained.trajectoriesEnded;
+    const total = stats.trajectories.total + pendingDrained.trajectoriesEnded;
     const failed = Math.max(0, total - successful);
+
+    const totalRoutes = stats.routing.decisions + pendingDrained.routes;
+
+    // #bug11.1 — hooks_intelligence_pattern-store writes through the SQL+HNSW
+    // bridge (memory-bridge.bridgeStorePattern), but `stats.patterns.learned`
+    // is sourced from the JSON memory store (loadMemoryStore) which the
+    // bridge never updates. As a result hooks_metrics reported `patterns: 0`
+    // even when `intelligence_stats.hnsw.indexSize > 0`. Mirror the bridge
+    // floor that hooksIntelligenceStats now uses (#bug3) so the dashboard
+    // reflects bridge-stored patterns. Use Math.max — both sources are
+    // valid; the bridge may carry older patterns the JSON store doesn't
+    // know about, while the JSON+drain path may carry in-session edits the
+    // bridge hasn't indexed yet.
+    let bridgePatternCount = 0;
+    try {
+      const { bridgeGetHNSWStatus } = await import('../memory/memory-bridge.js');
+      const bridgeStatus = await bridgeGetHNSWStatus();
+      bridgePatternCount = bridgeStatus?.entryCount ?? 0;
+    } catch { /* bridge not available */ }
+
+    const memoryStorePatternCount = stats.patterns.learned + pendingDrained.edits;
+    const totalPatterns = Math.max(bridgePatternCount, memoryStorePatternCount);
 
     return {
       _real: true,
-      _dataSource: 'intelligence-stats + routing-outcomes',
+      _dataSource: 'intelligence-stats + routing-outcomes + pending-insights + hnsw-bridge',
+      _pendingDrained: pendingDrained,
+      _patternsBreakdown: {
+        bridgeHNSW: bridgePatternCount,
+        memoryStore: stats.patterns.learned,
+        drainedEdits: pendingDrained.edits,
+      },
       period,
       patterns: {
-        total: stats.patterns.learned,
+        total: totalPatterns,
         successful,
         failed,
         avgConfidence: stats.routing.avgConfidence || null,
       },
       agents: {
         routingAccuracy: stats.routing.avgConfidence || null,
-        totalRoutes: stats.routing.decisions,
+        totalRoutes,
         topAgent,
       },
       commands: {
@@ -1122,7 +1358,7 @@ export const hooksMetrics: MCPTool = {
         successRate,
         avgRiskScore: null,
       },
-      _note: total === 0 && totalCommands === 0
+      _note: total === 0 && totalCommands === 0 && pendingDrained.drained === 0 && totalPatterns === 0
         ? 'No metrics data collected yet. Run hooks_post-task / hooks_intelligence_trajectory-end / hooks_route to populate.'
         : undefined,
       lastUpdated: new Date().toISOString(),
@@ -2797,15 +3033,39 @@ export const hooksIntelligenceStats: MCPTool = {
       };
     }
 
-    // EWC++ stats from real implementation
-    let ewcStats = {
-      consolidations: 0,
-      catastrophicForgettingPrevented: 0,
-      fisherUpdates: 0,
-      avgPenalty: 0,
-      totalPatterns: 0,
-      implementation: 'not-loaded' as string,
-    };
+    // #bug6 — Honesty fix: only emit stats blocks for subsystems whose
+    // lazy-loader actually resolved a real implementation. Previously every
+    // subsystem returned a stub with `implementation: 'not-loaded'` (and
+    // flash returned `speedup: 1`), which contradicted the README's
+    // 2.49x-7.47x claim and made it impossible to tell from the stats alone
+    // which subsystems were live. Now: null loader -> key omitted from
+    // output, name pushed to `_unavailable`. Loaded subsystems carry their
+    // real `implementation` tag (no `'not-loaded'` placeholder reaches the
+    // wire).
+    const unavailableSubsystems: string[] = [];
+
+    // #bug11.3 — A loaded subsystem with all-zero counters reads identically
+    // to a broken/unloaded one in the JSON wire format, even though Bug 6
+    // separated those cases via _unavailable. Add a `status: 'idle-since-load'`
+    // annotation when (a) the subsystem loaded successfully AND (b) its
+    // primary counter is still 0. The loadedSince timestamp uses process
+    // start time as a proxy (the loaders are lazy-singletons resolved before
+    // the first stats call is served).
+    const loadedSince = new Date(Date.now() - process.uptime() * 1000).toISOString();
+    const idleAnnotation = (primaryCounter: number) =>
+      primaryCounter === 0 ? { status: 'idle-since-load', loadedSince } : {};
+
+    // EWC++ stats — only emit when the consolidator actually loaded
+    let ewcStats: {
+      consolidations: number;
+      catastrophicForgettingPrevented: number;
+      fisherUpdates: number;
+      avgPenalty: number;
+      totalPatterns: number;
+      implementation: string;
+      status?: string;
+      loadedSince?: string;
+    } | null = null;
     if (ewc) {
       const realEwc = ewc.getConsolidationStats();
       ewcStats = {
@@ -2815,19 +3075,24 @@ export const hooksIntelligenceStats: MCPTool = {
         avgPenalty: Math.round(realEwc.avgPenalty * 1000) / 1000,
         totalPatterns: realEwc.totalPatterns,
         implementation: 'real-ewc++',
+        ...idleAnnotation(realEwc.consolidationCount),
       };
+    } else {
+      unavailableSubsystems.push('ewc');
     }
 
-    // MoE stats from real implementation
-    let moeStats = {
-      expertsTotal: 8,
-      expertsActive: 0,
-      routingDecisions: memoryStats.routing.decisions,
-      avgRoutingTimeMs: 0,
-      avgConfidence: memoryStats.routing.avgConfidence,
-      loadBalance: null as { giniCoefficient: number; coefficientOfVariation: number; expertUsage: Record<string, number> } | null,
-      implementation: 'not-loaded' as string,
-    };
+    // MoE stats — only emit when the router actually loaded
+    let moeStats: {
+      expertsTotal: number;
+      expertsActive: number;
+      routingDecisions: number;
+      avgRoutingTimeMs: number;
+      avgConfidence: number;
+      loadBalance: { giniCoefficient: number; coefficientOfVariation: number; expertUsage: Record<string, number> } | null;
+      implementation: string;
+      status?: string;
+      loadedSince?: string;
+    } | null = null;
     if (moe) {
       const loadBalance = moe.getLoadBalance();
       const activeExperts = Object.values(loadBalance.routingCounts).filter((u: number) => u > 0).length;
@@ -2846,33 +3111,51 @@ export const hooksIntelligenceStats: MCPTool = {
           expertUsage: loadBalance.routingCounts,
         },
         implementation: 'real-moe',
+        // #bug11.3 — primary counter for MoE is routingDecisions (totalRoutings).
+        // expertsActive=0 alone isn't enough — a router could have routed many
+        // decisions all to the same expert.
+        ...idleAnnotation(loadBalance.totalRoutings),
       };
+    } else {
+      unavailableSubsystems.push('moe');
     }
 
-    // Flash Attention stats from real implementation
-    let flashStats = {
-      speedup: 1.0,
-      avgComputeTimeMs: 0,
-      blockSize: 64,
-      implementation: 'not-loaded' as string,
-    };
+    // Flash Attention stats — only emit when the kernel actually loaded.
+    // (Previously emitted `speedup: 1` even when not loaded, contradicting
+    // the README's 2.49x-7.47x claim.)
+    let flashStats: {
+      speedup: number;
+      avgComputeTimeMs: number;
+      blockSize: number;
+      implementation: string;
+      status?: string;
+      loadedSince?: string;
+    } | null = null;
     if (flash) {
+      const speedup = Math.round(flash.getSpeedup() * 100) / 100;
       flashStats = {
-        speedup: Math.round(flash.getSpeedup() * 100) / 100,
+        speedup,
         avgComputeTimeMs: 0, // Would need benchmarking
         blockSize: 64,
         implementation: 'real-flash-attention',
+        // #bug11.3 — speedup of 0 (or 1.0 baseline) means the kernel hasn't
+        // been exercised yet. Flash attention reports 0 until first call.
+        ...idleAnnotation(speedup),
       };
+    } else {
+      unavailableSubsystems.push('flash');
     }
 
-    // LoRA stats from real implementation
-    let loraStats = {
-      rank: 8,
-      alpha: 16,
-      adaptations: 0,
-      avgLoss: 0,
-      implementation: 'not-loaded' as string,
-    };
+    // LoRA stats — only emit when the adapter actually loaded
+    let loraStats: {
+      rank: number;
+      alpha: number;
+      adaptations: number;
+      avgLoss: number;
+      implementation: string;
+      status?: string;
+      loadedSince?: string;
+    } | null = null;
     if (lora) {
       const realLora = lora.getStats();
       loraStats = {
@@ -2881,8 +3164,16 @@ export const hooksIntelligenceStats: MCPTool = {
         adaptations: realLora.totalAdaptations,
         avgLoss: Math.round(realLora.avgAdaptationNorm * 10000) / 10000,
         implementation: 'real-lora',
+        ...idleAnnotation(realLora.totalAdaptations),
       };
+    } else {
+      unavailableSubsystems.push('lora');
     }
+
+    // SONA never goes "not-loaded" — it always falls back to memoryStats.
+    // Track unavailability separately so callers know whether the real
+    // optimizer is live vs. the memory-fallback path.
+    if (!sona) unavailableSubsystems.push('sona');
 
     // ruvllm native backend stats
     let ruvllmStats = { coordinator: 'unavailable' as string, trajectories: 0, contrastiveTrainer: 'unavailable' as string | object, trainingBackend: 'unavailable' as string, graphDatabase: { backend: 'unavailable', totalNodes: 0, totalEdges: 0 } as Record<string, unknown> };
@@ -2907,15 +3198,54 @@ export const hooksIntelligenceStats: MCPTool = {
       ruvllmStats.graphDatabase = { backend: gs.backend, totalNodes: gs.totalNodes, totalEdges: gs.totalEdges, avgDegree: gs.avgDegree };
     } catch { /* not available */ }
 
-    const stats = {
+    // ADR-094 / #bug3 — HNSW index size used to reflect the JSON memory store
+    // (loadMemoryStore) which the SQL+HNSW bridge never updates. As a result
+    // the counter was stuck at 0 even after pattern-store via
+    // bridgeStorePattern(). Resolve the real backend count by asking the
+    // singleton (memory-initializer.getHNSWStatus → hnswIndex.entries.size)
+    // *and* the bridge (memory-bridge.bridgeGetHNSWStatus → SELECT COUNT(*)
+    // FROM memory_entries WHERE embedding IS NOT NULL), and take the max.
+    // Fall back to the legacy memory-store count if neither backend is
+    // initialized (preserves prior behaviour for legacy data).
+    let hnswIndexSize = memoryStats.memory.indexSize;
+    let hnswSource: 'singleton' | 'bridge' | 'memory-store' = 'memory-store';
+    try {
+      const { getHNSWStatus } = await import('../memory/memory-initializer.js');
+      const singleton = getHNSWStatus();
+      if (singleton && typeof singleton.entryCount === 'number' && singleton.entryCount > hnswIndexSize) {
+        hnswIndexSize = singleton.entryCount;
+        hnswSource = 'singleton';
+      } else if (singleton && typeof singleton.entryCount === 'number' && singleton.entryCount > 0 && hnswSource === 'memory-store') {
+        // singleton has data but doesn't exceed memory-store count; still prefer it
+        // because it's authoritative for the in-memory HNSW index.
+        hnswIndexSize = Math.max(hnswIndexSize, singleton.entryCount);
+        hnswSource = 'singleton';
+      }
+    } catch {
+      // singleton not available
+    }
+    try {
+      const { bridgeGetHNSWStatus } = await import('../memory/memory-bridge.js');
+      const bridgeStatus = await bridgeGetHNSWStatus();
+      if (bridgeStatus && typeof bridgeStatus.entryCount === 'number' && bridgeStatus.entryCount > hnswIndexSize) {
+        hnswIndexSize = bridgeStatus.entryCount;
+        hnswSource = 'bridge';
+      }
+    } catch {
+      // bridge not available
+    }
+
+    // #bug6 — Build the stats payload by including only the subsystems whose
+    // backing implementation actually loaded. Unloaded ones are surfaced via
+    // a top-level `_unavailable: [...]` field so callers can tell what's
+    // optional vs. simply absent. SONA always emits (memory-fallback path),
+    // matching the prior contract for the basic stats response.
+    const stats: Record<string, unknown> = {
       sona: sonaStats,
-      moe: moeStats,
-      ewc: ewcStats,
-      flash: flashStats,
-      lora: loraStats,
       ruvllm: ruvllmStats,
       hnsw: {
-        indexSize: memoryStats.memory.indexSize,
+        indexSize: hnswIndexSize,
+        hnswSource,
         avgSearchTimeMs: 0.12,
         cacheHitRate: memoryStats.memory.totalAccessCount > 0
           ? Math.min(0.95, 0.5 + (memoryStats.memory.totalAccessCount / 1000))
@@ -2925,23 +3255,34 @@ export const hooksIntelligenceStats: MCPTool = {
       dataSource: sona ? 'real-implementations' : 'memory-fallback',
       lastUpdated: new Date().toISOString(),
     };
+    if (moeStats) stats.moe = moeStats;
+    if (ewcStats) stats.ewc = ewcStats;
+    if (flashStats) stats.flash = flashStats;
+    if (loraStats) stats.lora = loraStats;
+    if (unavailableSubsystems.length > 0) stats._unavailable = unavailableSubsystems;
 
     if (detailed) {
+      // implementationStatus mirrors what's actually in `stats` — only
+      // loaded subsystems get a 'loaded' tag. Unloaded ones already appear
+      // in `_unavailable`, so we don't duplicate them with 'not-loaded'.
+      const implementationStatus: Record<string, string> = {};
+      if (sona) implementationStatus.sona = 'loaded';
+      if (ewc) implementationStatus.ewc = 'loaded';
+      if (moe) implementationStatus.moe = 'loaded';
+      if (flash) implementationStatus.flash = 'loaded';
+      if (lora) implementationStatus.lora = 'loaded';
+
+      const performance: Record<string, number> = {
+        sonaLearningMs: sonaStats.avgLearningTimeMs,
+      };
+      if (moeStats) performance.moeRoutingMs = moeStats.avgRoutingTimeMs;
+      if (flashStats) performance.flashSpeedup = flashStats.speedup;
+      if (ewcStats) performance.ewcPenalty = ewcStats.avgPenalty;
+
       return {
         ...stats,
-        implementationStatus: {
-          sona: sona ? 'loaded' : 'not-loaded',
-          ewc: ewc ? 'loaded' : 'not-loaded',
-          moe: moe ? 'loaded' : 'not-loaded',
-          flash: flash ? 'loaded' : 'not-loaded',
-          lora: lora ? 'loaded' : 'not-loaded',
-        },
-        performance: {
-          sonaLearningMs: sonaStats.avgLearningTimeMs,
-          moeRoutingMs: moeStats.avgRoutingTimeMs,
-          flashSpeedup: flashStats.speedup,
-          ewcPenalty: ewcStats.avgPenalty,
-        },
+        implementationStatus,
+        performance,
       };
     }
 

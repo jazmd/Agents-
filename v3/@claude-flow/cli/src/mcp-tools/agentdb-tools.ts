@@ -68,7 +68,26 @@ export const agentdbHealth: MCPTool = {
       const bridge = await getBridge();
       const health = await bridge.bridgeHealthCheck();
       if (!health) return { available: false, error: 'AgentDB bridge not available' };
-      return health;
+
+      // #bug6 — Honesty fix: callers used to receive a controllers list
+      // where vectorBackend / mutationGuard / gnnService / semanticRouter /
+      // guardedVectorBackend / rvfOptimizer / graphAdapter / attestationLog
+      // were emitted with `enabled: false`. That made the response look
+      // like every controller was registered when in fact only a handful
+      // had backing implementations. Split the list: keep `controllers`
+      // for live ones, surface the rest under `_unavailable` so the call
+      // doesn't pretend optional dependencies exist.
+      const allControllers = Array.isArray(health.controllers) ? health.controllers : [];
+      const enabled = allControllers.filter((c: any) => c?.enabled === true);
+      const disabled = allControllers
+        .filter((c: any) => c?.enabled === false)
+        .map((c: any) => (typeof c?.name === 'string' ? c.name : 'unknown'));
+
+      return {
+        ...health,
+        controllers: enabled,
+        ...(disabled.length > 0 ? { _unavailable: disabled } : {}),
+      };
     } catch (error) {
       return { available: false, error: sanitizeError(error) };
     }

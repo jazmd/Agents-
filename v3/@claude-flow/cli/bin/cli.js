@@ -9,6 +9,9 @@
  */
 
 import { randomUUID } from 'crypto';
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 
 // Suppress the SPECIFIC cosmetic "[AgentDB Patch] Controller index not found"
 // warning from agentic-flow's runtime patch — these are emitted because the
@@ -35,11 +38,111 @@ console.log = (...args) => {
   _origLog.apply(console, args);
 };
 
+// Bug #36: lazy-load the SDK. `ruflo --version` and `ruflo --help` previously
+// paid ~165ms to load the entire v3 module tree (agentdb, agentic-flow,
+// @ruvector/*) even though they only need the package version string and a
+// hand-maintained help screen. Cold-start floor was 210ms.
+//
+// The fix: parse argv FIRST. For purely-informational commands that don't
+// need the SDK (`--version`, `-V`, `--help`, `-h`), short-circuit BEFORE
+// importing `../dist/src/index.js`. Only real commands (or the bare-TTY
+// help path, or MCP mode) trigger the dynamic import.
+//
+// Bug #28's bare-TTY path used to do `await import('../dist/src/index.js')`
+// then `cli.run([])`. We replicate that exact behaviour, but the SDK import
+// only happens when we *actually* take that branch — not eagerly at the top.
+const cliArgs = process.argv.slice(2);
+const isBareTTY = process.stdin.isTTY === true && process.argv.length === 2;
+
+// Fast paths that MUST NOT trigger the SDK import (Bug #36).
+const VERSION_FLAGS = new Set(['--version', '-V']);
+const HELP_FLAGS = new Set(['--help', '-h']);
+const isVersionOnly = cliArgs.length === 1 && VERSION_FLAGS.has(cliArgs[0]);
+const isHelpOnly = cliArgs.length === 1 && HELP_FLAGS.has(cliArgs[0]);
+
+if (isVersionOnly) {
+  // Read version directly from package.json — no SDK import, no commands
+  // module load. Should run in <50ms cold.
+  try {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = dirname(__filename);
+    const pkgPath = join(__dirname, '..', 'package.json');
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+    process.stdout.write(`ruflo v${pkg.version || '3.0.0'}\n`);
+    process.exit(0);
+  } catch (error) {
+    process.stderr.write(`Failed to read version: ${error.message}\n`);
+    process.exit(1);
+  }
+}
+
+if (isHelpOnly) {
+  // Hand-maintained top-level help. Mirrors the categories printed by the
+  // SDK's full help screen, but without the cost of loading every command
+  // module and every category index. Users who want full per-command help
+  // run `ruflo <command> --help`, which hits the SDK path and triggers
+  // lazy command loading there.
+  process.stdout.write(`ruflo - RuFlo V3 AI Agent Orchestration Platform
+
+USAGE:
+  ruflo <command> [subcommand] [options]
+  ruflo --version | -V          Print version (no SDK load)
+  ruflo --help    | -h          Print this help
+
+COMMANDS:
+  init                          Initialize ruflo in the current project
+  doctor                        Diagnostics & auto-fix
+  status                        Show daemon / swarm / memory status
+  memory <subcommand>           Memory operations (store, search, list, ...)
+  swarm <subcommand>            Swarm orchestration (init, status, shutdown)
+  hooks <subcommand>            Hooks management & worker dispatch
+  agent <subcommand>            Agent operations (spawn, list, terminate)
+  daemon <subcommand>           Background daemon control
+  hive-mind <subcommand>        Hive-mind coordination
+  routes / route                Route a task to the right agent / model
+  mcp <subcommand>              MCP server / tool management
+  config <subcommand>           Configuration management
+  performance / perf            Benchmarks & profiling
+  security                      Security scan
+  update                        Self-update
+  guidance                      Capabilities & quick reference
+
+For per-command help with all flags and subcommands:
+  ruflo <command> --help
+
+Examples:
+  ruflo init --wizard
+  ruflo memory store --namespace patterns --key foo --value bar
+  ruflo memory search --query "auth flow"
+  ruflo swarm init --topology hierarchical --max-agents 8
+  ruflo doctor --fix
+
+Logging:
+  RUFLO_LOG_LEVEL=warn  (default — subsystem init noise → ~/.claude/logs/ruflo.log)
+  RUFLO_LOG_LEVEL=info  (subsystem init banners → stderr)
+  RUFLO_LOG_LEVEL=debug (everything to stderr + log file)
+  RUFLO_LOG_LEVEL=silent (no logs anywhere)
+`);
+  process.exit(0);
+}
+
+if (isBareTTY) {
+  // Delegate to the normal CLI run() with no args — it prints help and resolves.
+  const { CLI } = await import('../dist/src/index.js');
+  const cli = new CLI();
+  try {
+    await cli.run([]);
+    process.exit(0);
+  } catch (error) {
+    console.error('Fatal error:', error.message);
+    process.exit(1);
+  }
+}
+
 // Check if we should run in MCP server mode
 // Conditions:
 //   1. stdin is being piped AND no CLI arguments provided (auto-detect)
 //   2. stdin is being piped AND args are "mcp start" (explicit, e.g. npx claude-flow@alpha mcp start)
-const cliArgs = process.argv.slice(2);
 const isExplicitMCP = cliArgs.length >= 1 && cliArgs[0] === 'mcp' && (cliArgs.length === 1 || cliArgs[1] === 'start');
 const isMCPMode = !process.stdin.isTTY && (process.argv.length === 2 || isExplicitMCP);
 

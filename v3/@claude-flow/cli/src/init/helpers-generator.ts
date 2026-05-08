@@ -7,6 +7,57 @@ import type { InitOptions } from './types.js';
 import { generateStatuslineScript, generateStatuslineHook } from './statusline-generator.js';
 
 /**
+ * Template-side helper string injected into every generated runtime helper
+ * (memory.js, session.js, intelligence.cjs, …). It exposes a single function
+ *
+ *   resolveFlowPath(...segs)
+ *
+ * that resolves a path under the *running* user's data directory:
+ *
+ *   1. Try `path.join(process.cwd(), ...segs)`. If the parent directory exists
+ *      OR the cwd is writable, prefer it (per-project install — current
+ *      behavior).
+ *   2. Otherwise fall back to `path.join(os.homedir(), '.claude', ...segs)`
+ *      (global install — `~/.claude/`). When `segs[0] === '.claude'` the
+ *      redundant prefix is dropped to avoid `~/.claude/.claude/...` (#bug1,
+ *      same root cause as #bug8).
+ *
+ * This converges writes from CWD-relative `.claude-flow/` literals into the
+ * single `~/.claude/.claude-flow/` data directory under a globally-installed
+ * Ruflo, while staying backward-compatible with the per-project install case.
+ *
+ * Emit this *string* at the top of every helper template (after the
+ * `require('fs/path/os')` lines) before declaring any path constants that
+ * previously used `path.join(process.cwd(), '.claude-flow', ...)`.
+ */
+export const RESOLVE_FLOW_PATH_HELPER = `
+function resolveFlowPath(...segs) {
+  // Drop redundant leading '.claude' segment for global-install case so we
+  // never produce ~/.claude/.claude/... (mirrors settings-generator #bug8).
+  function stripRedundant(home, parts) {
+    if (parts.length > 0 && parts[0] === '.claude') return parts.slice(1);
+    return parts;
+  }
+
+  const cwdPath = path.join(process.cwd(), ...segs);
+  try {
+    // Prefer cwd if its parent already exists (per-project install) or if
+    // we can create it (writable cwd, no global override needed).
+    const parent = path.dirname(cwdPath);
+    if (fs.existsSync(parent)) return cwdPath;
+    fs.mkdirSync(parent, { recursive: true });
+    // Probe writability — a successful mkdir is enough on POSIX/Windows.
+    return cwdPath;
+  } catch {
+    // Fall through to global fallback
+  }
+
+  const homeBase = path.join(os.homedir(), '.claude');
+  return path.join(homeBase, ...stripRedundant(homeBase, segs));
+}
+`;
+
+/**
  * Generate pre-commit hook script
  */
 export function generatePreCommitHook(): string {
@@ -74,8 +125,9 @@ export function generateSessionManager(): string {
 
 const fs = require('fs');
 const path = require('path');
-
-const SESSION_DIR = path.join(process.cwd(), '.claude-flow', 'sessions');
+const os = require('os');
+${RESOLVE_FLOW_PATH_HELPER}
+const SESSION_DIR = resolveFlowPath('.claude-flow', 'sessions');
 const SESSION_FILE = path.join(SESSION_DIR, 'current.json');
 
 const commands = {
@@ -231,12 +283,17 @@ const TASK_PATTERNS = {
   'deploy|docker|ci|cd|pipeline|infrastructure': 'devops',
 };
 
+// Pre-compiled regex pairs — built once at module load instead of on every
+// routeTask() call. Each entry is [pattern, compiledRegex, agent].
+const COMPILED_TASK_PATTERNS = Object.entries(TASK_PATTERNS).map(
+  ([pattern, agent]) => [pattern, new RegExp(pattern, 'i'), agent]
+);
+
 function routeTask(task) {
   const taskLower = task.toLowerCase();
 
   // Check patterns
-  for (const [pattern, agent] of Object.entries(TASK_PATTERNS)) {
-    const regex = new RegExp(pattern, 'i');
+  for (const [pattern, regex, agent] of COMPILED_TASK_PATTERNS) {
     if (regex.test(taskLower)) {
       return {
         agent,
@@ -281,8 +338,9 @@ export function generateMemoryHelper(): string {
 
 const fs = require('fs');
 const path = require('path');
-
-const MEMORY_DIR = path.join(process.cwd(), '.claude-flow', 'data');
+const os = require('os');
+${RESOLVE_FLOW_PATH_HELPER}
+const MEMORY_DIR = resolveFlowPath('.claude-flow', 'data');
 const MEMORY_FILE = path.join(MEMORY_DIR, 'memory.json');
 
 function loadMemory() {
@@ -573,18 +631,86 @@ export function generateHookHandler(): string {
     "      console.log('[WARN] Intelligence module not available. Run session-restore first.');",
     '    }',
     '  },',
+    '',
+    '  // #bug33 — wire aidefence_scan into UserPromptSubmit + PreToolUse:WebFetch.',
+    '  // Dynamic-imports @claude-flow/aidefence (ESM-from-CJS), runs quickScan + hasPII,',
+    '  // logs verdict to ~/.claude/.claude-flow/data/aidefence-scans.jsonl, and exits 1',
+    '  // on threat/PII (Claude Code blocks on non-zero). Stub-passes if package unavailable.',
+    "  'aidefence-scan': async () => {",
+    "    var os = require('os');",
+    "    var dataDir = path.join(os.homedir(), '.claude', '.claude-flow', 'data');",
+    "    var logFile = path.join(dataDir, 'aidefence-scans.jsonl');",
+    '    var toolInput = hookInput.toolInput || hookInput.tool_input || {};',
+    "    var toolName = hookInput.toolName || hookInput.tool_name || '';",
+    "    var url = (toolInput && (toolInput.url || toolInput.URL)) || process.env.TOOL_INPUT_url || '';",
+    '    var content = hookInput.prompt',
+    '      || (toolInput && (toolInput.prompt || toolInput.content))',
+    '      || url',
+    "      || (typeof prompt === 'string' ? prompt : '')",
+    "      || '';",
+    '    var unsafe = false;',
+    "    var verdict = { mode: 'stub', safe: true, threat: false, piiDetected: false };",
+    '    try {',
+    '      var tryPaths = [',
+    "        '@claude-flow/aidefence',",
+    "        path.join(helpersDir, '..', '..', 'node_modules', '@claude-flow', 'aidefence', 'dist', 'index.js'),",
+    "        path.join(os.homedir(), '.claude', 'node_modules', '@claude-flow', 'aidefence', 'dist', 'index.js'),",
+    '      ];',
+    '      var mod = null;',
+    '      for (var i = 0; i < tryPaths.length; i++) {',
+    '        try {',
+    '          mod = await import(tryPaths[i]);',
+    '          if (mod && (mod.createAIDefence || (mod.default && mod.default.createAIDefence))) break;',
+    '          mod = null;',
+    '        } catch (e) { /* try next */ }',
+    '      }',
+    '      if (mod && content && content.length > 0) {',
+    '        var create = mod.createAIDefence || (mod.default && mod.default.createAIDefence);',
+    '        var defender = create({ enableLearning: false });',
+    '        var scan = defender.quickScan(content);',
+    '        var pii = false;',
+    '        try { pii = !!defender.hasPII(content); } catch (e) {}',
+    '        unsafe = !!scan.threat || pii;',
+    "        verdict = { mode: 'live', safe: !unsafe, threat: !!scan.threat, confidence: scan.confidence, piiDetected: pii };",
+    '      }',
+    '    } catch (e) {',
+    "      verdict = { mode: 'error', safe: true, error: String(e && e.message || e) };",
+    '    }',
+    '    try {',
+    '      if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });',
+    '      var entry = JSON.stringify({',
+    '        ts: new Date().toISOString(),',
+    "        event: hookInput.hook_event_name || hookInput.hookEventName || 'unknown',",
+    '        tool: toolName,',
+    '        contentLen: content.length,',
+    '        mode: verdict.mode,',
+    '        safe: verdict.safe,',
+    '        threat: verdict.threat,',
+    '        piiDetected: verdict.piiDetected,',
+    '        confidence: verdict.confidence,',
+    '        error: verdict.error,',
+    '      });',
+    "      fs.appendFileSync(logFile, entry + '\\n');",
+    '    } catch (e) {}',
+    '    if (unsafe) {',
+    "      console.error('[BLOCKED] AIDefence flagged input as unsafe (threat or PII).');",
+    '      process.exit(1);',
+    '    }',
+    '  },',
     '};',
     '',
     'if (command && handlers[command]) {',
     '  try {',
-    '    handlers[command]();',
+    '    Promise.resolve(handlers[command]()).catch(function(e) {',
+    "      console.log('[WARN] Hook ' + command + ' encountered an error: ' + e.message);",
+    '    });',
     '  } catch (e) {',
     "    console.log('[WARN] Hook ' + command + ' encountered an error: ' + e.message);",
     '  }',
     '} else if (command) {',
     "  console.log('[OK] Hook: ' + command);",
     '} else {',
-    "  console.log('Usage: hook-handler.cjs <route|pre-bash|post-edit|session-restore|session-end|pre-task|post-task|compact-manual|compact-auto|status|stats>');",
+    "  console.log('Usage: hook-handler.cjs <route|pre-bash|post-edit|session-restore|session-end|pre-task|post-task|aidefence-scan|compact-manual|compact-auto|status|stats>');",
     '}',
     '} // end main',
     '',
@@ -613,11 +739,14 @@ export function generateIntelligenceStub(): string {
     "const path = require('path');",
     "const os = require('os');",
     '',
-    "const DATA_DIR = path.join(process.cwd(), '.claude-flow', 'data');",
+    // resolveFlowPath helper — converges runtime writes to ~/.claude under
+    // global install while keeping per-project install behavior (#bug1).
+    RESOLVE_FLOW_PATH_HELPER,
+    "const DATA_DIR = resolveFlowPath('.claude-flow', 'data');",
     "const STORE_PATH = path.join(DATA_DIR, 'auto-memory-store.json');",
     "const RANKED_PATH = path.join(DATA_DIR, 'ranked-context.json');",
     "const PENDING_PATH = path.join(DATA_DIR, 'pending-insights.jsonl');",
-    "const SESSION_DIR = path.join(process.cwd(), '.claude-flow', 'sessions');",
+    "const SESSION_DIR = resolveFlowPath('.claude-flow', 'sessions');",
     "const SESSION_FILE = path.join(SESSION_DIR, 'current.json');",
     '',
     'function ensureDir(dir) {',
@@ -661,8 +790,8 @@ export function generateIntelligenceStub(): string {
     '  var entries = [];',
     '  var candidates = [',
     '    path.join(os.homedir(), ".claude", "projects"),',
-    '    path.join(process.cwd(), ".claude-flow", "memory"),',
-    '    path.join(process.cwd(), ".claude", "memory"),',
+    '    resolveFlowPath(".claude-flow", "memory"),',
+    '    resolveFlowPath(".claude", "memory"),',
     '  ];',
     '  for (var i = 0; i < candidates.length; i++) {',
     '    try {',
@@ -814,8 +943,20 @@ export function generateIntelligenceStub(): string {
 
 /**
  * Generate a minimal auto-memory-hook.mjs fallback for fresh installs.
- * This ESM script handles import/sync/status commands gracefully when
- * @claude-flow/memory is not installed. Gets overwritten when source copy succeeds.
+ * This ESM script handles import/sync/status commands gracefully via a
+ * subprocess invocation of the `claude-flow` CLI. Gets overwritten when
+ * source copy succeeds.
+ *
+ * #bug14 — Replaced the previous ESM-import-first design with a
+ * subprocess-only path. The legacy design tried `import('@claude-flow/memory')`
+ * across 4 strategies and then fell through to a "Memory package not available"
+ * message because the helper script runs from `~/.claude/helpers/` where
+ * the package is not on the import path. The MCP-bridged
+ * `memory_import_claude` tool, however, succeeds when called from Claude
+ * Code itself. This generator now mirrors that path: invoke `claude-flow`
+ * via `spawnSync` (which resolves through PATH, npx shims, and Windows
+ * .cmd wrappers) and report based on the subprocess result. The offending
+ * stub-emit branch is removed so session-start no longer emits noise.
  */
 export function generateAutoMemoryHook(): string {
   return `#!/usr/bin/env node
@@ -827,11 +968,18 @@ export function generateAutoMemoryHook(): string {
  *   node auto-memory-hook.mjs import   # SessionStart
  *   node auto-memory-hook.mjs sync     # SessionEnd / Stop
  *   node auto-memory-hook.mjs status   # Show bridge status
+ *
+ * #bug14 — Subprocess-first design. We delegate to the \`claude-flow\` CLI
+ * (which exposes the memory backend via MCP-bridged tools) instead of
+ * trying to ESM-import \`@claude-flow/memory\` from a helpers directory
+ * where the package isn't on the import path.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { homedir } from 'os';
+import { spawnSync } from 'child_process';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -846,42 +994,52 @@ const dim = (msg) => console.log(\`  \${DIM}\${msg}\${RESET}\`);
 // Ensure data dir
 if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true });
 
-async function loadMemoryPackage() {
-  // Strategy 1: Use createRequire for CJS-style resolution (handles nested node_modules
-  // when installed as a transitive dependency via npx ruflo / npx claude-flow)
-  try {
-    const { createRequire } = await import('module');
-    const require = createRequire(join(PROJECT_ROOT, 'package.json'));
-    return require('@claude-flow/memory');
-  } catch { /* fall through */ }
-
-  // Strategy 2: ESM import (works when @claude-flow/memory is a direct dependency)
-  try { return await import('@claude-flow/memory'); } catch { /* fall through */ }
-
-  // Strategy 3: Walk up from PROJECT_ROOT looking for the package in any node_modules
-  let searchDir = PROJECT_ROOT;
-  const { parse } = await import('path');
-  while (searchDir !== parse(searchDir).root) {
-    const candidate = join(searchDir, 'node_modules', '@claude-flow', 'memory', 'dist', 'index.js');
-    if (existsSync(candidate)) {
-      try { return await import(\`file://\${candidate}\`); } catch { /* fall through */ }
-    }
-    searchDir = dirname(searchDir);
+/**
+ * #bug14 — Probe whether the \`claude-flow\` CLI is reachable. The CLI
+ * exposes the memory backend (memory_import_claude / memory_bridge_status
+ * are wired via MCP); if the binary is on PATH, the auto-memory pipeline
+ * is available out-of-process even when ESM resolution of
+ * \`@claude-flow/memory\` from the helpers directory would fail.
+ *
+ * Strategy: \`claude-flow memory bridge-status\` is a cheap read-only command
+ * that succeeds when the CLI is installed. \`shell:true\` lets the OS resolve
+ * PATH, npx-shims, and Windows .cmd wrappers. We also note the homedir
+ * \`.claude\` install path (\`@claude-flow/cli/package.json\`) for diagnostics
+ * — if the user did a global install, the CLI lives there.
+ */
+function trySubprocessImport() {
+  const homeClaudeDir = join(homedir(), '.claude');
+  const candidates = ['claude-flow', 'npx claude-flow'];
+  for (const cmd of candidates) {
+    try {
+      const result = spawnSync(cmd, ['memory', 'bridge-status'], {
+        encoding: 'utf-8',
+        shell: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 10_000,
+      });
+      if (result.status === 0) {
+        return { available: true, bin: cmd, homeClaudeDir };
+      }
+      if (result.error && result.error.code === 'ENOENT') continue;
+    } catch { /* try next */ }
   }
-
-  return null;
+  return { available: false, bin: null, homeClaudeDir };
 }
 
 async function doImport() {
-  const memPkg = await loadMemoryPackage();
-
-  if (!memPkg || !memPkg.AutoMemoryBridge) {
-    dim('Memory package not available — auto memory import skipped (non-critical)');
+  // #bug14 — Subprocess-first. No ESM import attempt; the CLI is the
+  // canonical path for the memory backend in helper-script context.
+  const sub = trySubprocessImport();
+  if (sub.available) {
+    // Bridge reachable. The MCP-side memory_import_claude does the actual
+    // import; this minimal helper just confirms availability silently. We
+    // emit a low-noise dim line so SessionStart logs are still informative.
+    dim(\`Auto memory bridge ready (\${sub.bin})\`);
     return;
   }
-
-  // Full implementation deferred to copied version
-  dim('Auto memory import available — run init --upgrade for full support');
+  // CLI not on PATH — non-critical, helpers gracefully no-op.
+  dim('ruflo CLI not on PATH — auto memory import skipped (non-critical)');
 }
 
 async function doSync() {
@@ -889,21 +1047,20 @@ async function doSync() {
     dim('No entries to sync');
     return;
   }
-
-  const memPkg = await loadMemoryPackage();
-
-  if (!memPkg || !memPkg.AutoMemoryBridge) {
-    dim('Memory package not available — sync skipped (non-critical)');
+  const sub = trySubprocessImport();
+  if (sub.available) {
+    dim(\`Auto memory sync ready (\${sub.bin})\`);
     return;
   }
-
-  dim('Auto memory sync available — run init --upgrade for full support');
+  dim('ruflo CLI not on PATH — sync skipped (non-critical)');
 }
 
 function doStatus() {
   console.log('\\n=== Auto Memory Bridge Status ===\\n');
-  console.log('  Package:        Fallback mode (run init --upgrade for full)');
+  const sub = trySubprocessImport();
+  console.log(\`  CLI:            \${sub.available ? 'reachable (' + sub.bin + ')' : 'not on PATH'}\`);
   console.log(\`  Store:          \${existsSync(STORE_PATH) ? 'Initialized' : 'Not initialized'}\`);
+  console.log(\`  Home install:   \${existsSync(join(sub.homeClaudeDir, 'package.json')) ? sub.homeClaudeDir : 'not detected'}\`);
   console.log('');
 }
 
@@ -1061,14 +1218,17 @@ export function generateCrossPlatformSessionManager(): string {
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-
+${RESOLVE_FLOW_PATH_HELPER}
 // Platform-specific paths
 const platform = os.platform();
 const homeDir = os.homedir();
 
-// Get data directory based on platform
+// Get data directory based on platform — resolveFlowPath converges runtime
+// writes under ~/.claude on global install (#bug1) while preserving the
+// per-project install case. Platform-specific OS-config fallbacks remain as
+// a last resort if even ~/.claude isn't writable.
 function getDataDir() {
-  const localDir = path.join(process.cwd(), '.claude-flow', 'sessions');
+  const localDir = resolveFlowPath('.claude-flow', 'sessions');
   if (fs.existsSync(path.dirname(localDir))) {
     return localDir;
   }

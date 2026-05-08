@@ -190,6 +190,110 @@ async function ensureInitialized(): Promise<void> {
   }
 }
 
+/**
+ * #bug7: Shared enumerator for Claude Code project memory files under
+ * `~/.claude/projects/<project_id>/memory/*.md`.
+ *
+ * The previous `memory_import_claude` single-project branch hashed
+ * `process.cwd()` with `cwd.replace(/\//g, '-')`, but Claude Code's
+ * actual encoding uses BOTH `/` -> `-` and `.` -> `-` and emits a
+ * leading dash (e.g. `/Users/h4ckm1n/.claude` becomes
+ * `-Users-h4ckm1n--claude`). The result was zero matches against the
+ * real on-disk directory while `memory_bridge_status` enumerated all
+ * project dirs and reported the correct count.
+ *
+ * Both tools now route through this helper so the importer count is
+ * guaranteed to match the status count.
+ *
+ * Encoding note: we cannot decode an arbitrary project_id back to its
+ * original cwd losslessly (the encoding is lossy — `/` and `.` collide
+ * onto `-`), so the single-project branch resolves cwd by computing
+ * the encoded form with both substitutions and falling back to a
+ * lookup over all available project dirs whose encoded name matches.
+ */
+export interface ClaudeProjectMemoryFile {
+  path: string;
+  project: string;
+  file: string;
+}
+
+export interface ClaudeProjectMemorySummary {
+  files: ClaudeProjectMemoryFile[];
+  projectsWithMemory: number;
+  projectsScanned: number;
+}
+
+/**
+ * Encode a working-directory path the way Claude Code names project dirs.
+ * Replaces both `/` and `.` with `-`; the leading slash becomes a leading
+ * dash via the `/` substitution, matching Claude Code's on-disk format.
+ */
+export function encodeClaudeProjectId(cwd: string): string {
+  return cwd.replace(/[/.]/g, '-');
+}
+
+/**
+ * Enumerate Claude Code memory files. Used by both `memory_import_claude`
+ * and `memory_bridge_status` so they always agree on what's importable.
+ *
+ * - `allProjects: true`  -> all `~/.claude/projects/*\/memory/*.md`.
+ * - `allProjects: false` (default) -> only the project that matches `cwd`
+ *   under the documented Claude Code encoding.
+ */
+export function getClaudeProjectMemoryFiles(opts: {
+  allProjects?: boolean;
+  cwd?: string;
+} = {}): ClaudeProjectMemorySummary {
+  const claudeProjectsDir = join(homedir(), '.claude', 'projects');
+  const summary: ClaudeProjectMemorySummary = {
+    files: [],
+    projectsWithMemory: 0,
+    projectsScanned: 0,
+  };
+
+  if (!existsSync(claudeProjectsDir)) return summary;
+
+  let projectDirs: string[] = [];
+  try {
+    projectDirs = readdirSync(claudeProjectsDir, { withFileTypes: true })
+      .filter((d) => d.isDirectory())
+      .map((d) => d.name);
+  } catch {
+    return summary;
+  }
+  summary.projectsScanned = projectDirs.length;
+
+  let targetSet: Set<string> | null = null;
+  if (!opts.allProjects) {
+    const cwd = opts.cwd ?? process.cwd();
+    const expected = encodeClaudeProjectId(cwd);
+    targetSet = new Set<string>([expected]);
+    // Tolerate older/legacy encodings that did NOT replace dots — older
+    // ruflo builds wrote dirs like `-Users-h4ckm1n-.claude` instead of
+    // `-Users-h4ckm1n--claude`. If such a dir exists, accept it too.
+    targetSet.add(cwd.replace(/\//g, '-'));
+  }
+
+  for (const project of projectDirs) {
+    if (targetSet && !targetSet.has(project)) continue;
+    const memDir = join(claudeProjectsDir, project, 'memory');
+    if (!existsSync(memDir)) continue;
+    let mdFiles: string[] = [];
+    try {
+      mdFiles = readdirSync(memDir).filter((f: string) => f.endsWith('.md'));
+    } catch {
+      continue;
+    }
+    if (mdFiles.length === 0) continue;
+    summary.projectsWithMemory++;
+    for (const file of mdFiles) {
+      summary.files.push({ path: join(memDir, file), project, file });
+    }
+  }
+
+  return summary;
+}
+
 export const memoryTools: MCPTool[] = [
   {
     name: 'memory_store',
@@ -345,7 +449,7 @@ export const memoryTools: MCPTool[] = [
         query: { type: 'string', description: 'Search query (semantic similarity)' },
         namespace: { type: 'string', description: 'Namespace to search (default: "default")' },
         limit: { type: 'number', description: 'Maximum results (default: 10)' },
-        threshold: { type: 'number', description: 'Minimum similarity threshold 0-1 (default: 0.3)' },
+        threshold: { type: 'number', description: 'Minimum similarity threshold 0-1 (default: 0.2)' },
         smart: { type: 'boolean', description: 'Enable SmartRetrieval pipeline — query expansion, RRF fusion, recency boost, MMR diversity (default: false)' },
       },
       required: ['query'],
@@ -357,7 +461,7 @@ export const memoryTools: MCPTool[] = [
       const query = input.query as string;
       const namespace = (input.namespace as string) || 'default';
       const limit = (input.limit as number) ?? 10;
-      const threshold = (input.threshold as number) ?? 0.3;
+      const threshold = (input.threshold as number) ?? 0.2;
 
       validateMemoryInput(undefined, undefined, query);
 
@@ -366,7 +470,9 @@ export const memoryTools: MCPTool[] = [
       try {
         if (input.smart) {
           // SmartRetrieval pipeline (ADR-090)
-          const { smartSearch } = await import('@claude-flow/memory');
+          // #bug16a: @claude-flow/memory@3.0.0-alpha.14 dropped the smartSearch export.
+          // Use local shim until upstream re-exports the function.
+          const { smartSearch } = await import('../memory/smart-search-shim.js');
 
           // Adapt searchEntries to the SearchFn interface
           const rawSearch = async (req: { query: string; namespace?: string; limit?: number; threshold?: number }) => {
@@ -673,38 +779,10 @@ export const memoryTools: MCPTool[] = [
       const ns = (input.namespace as string) || 'claude-memories';
       if (input.namespace) { const vNs = validateIdentifier(ns, 'namespace'); if (!vNs.valid) return { success: false, imported: 0, error: vNs.error }; }
       const allProjects = input.allProjects as boolean;
-      const claudeProjectsDir = join(homedir(), '.claude', 'projects');
 
-      // Find memory files
-      const memoryFiles: Array<{ path: string; project: string; file: string }> = [];
-
-      if (allProjects) {
-        // Scan all projects
-        if (existsSync(claudeProjectsDir)) {
-          try {
-            for (const project of readdirSync(claudeProjectsDir, { withFileTypes: true })) {
-              if (!project.isDirectory()) continue;
-              const memDir = join(claudeProjectsDir, project.name, 'memory');
-              if (!existsSync(memDir)) continue;
-              for (const file of readdirSync(memDir).filter((f: string) => f.endsWith('.md'))) {
-                memoryFiles.push({ path: join(memDir, file), project: project.name, file });
-              }
-            }
-          } catch { /* scan error */ }
-        }
-      } else {
-        // Current project only — find by CWD hash
-        const cwd = process.cwd();
-        const projectHash = cwd.replace(/\//g, '-');
-        const memDir = join(claudeProjectsDir, projectHash, 'memory');
-        if (existsSync(memDir)) {
-          try {
-            for (const file of readdirSync(memDir).filter((f: string) => f.endsWith('.md'))) {
-              memoryFiles.push({ path: join(memDir, file), project: projectHash, file });
-            }
-          } catch { /* scan error */ }
-        }
-      }
+      // #bug7: route through the shared enumerator so importer count
+      // matches `memory_bridge_status.claudeCode.memoryFiles`.
+      const memoryFiles = getClaudeProjectMemoryFiles({ allProjects }).files;
 
       if (memoryFiles.length === 0) {
         return { success: true, imported: 0, message: 'No Claude memory files found' };
@@ -790,21 +868,11 @@ export const memoryTools: MCPTool[] = [
     handler: async () => {
       await ensureInitialized();
 
-      // Count Claude memory files
-      const claudeProjectsDir = join(homedir(), '.claude', 'projects');
-      let claudeFiles = 0;
-      let claudeProjects = 0;
-      if (existsSync(claudeProjectsDir)) {
-        try {
-          for (const project of readdirSync(claudeProjectsDir, { withFileTypes: true })) {
-            if (!project.isDirectory()) continue;
-            const memDir = join(claudeProjectsDir, project.name, 'memory');
-            if (!existsSync(memDir)) continue;
-            const files = readdirSync(memDir).filter((f: string) => f.endsWith('.md'));
-            if (files.length > 0) { claudeProjects++; claudeFiles += files.length; }
-          }
-        } catch { /* ignore */ }
-      }
+      // #bug7: route through the shared enumerator so this count matches
+      // what `memory_import_claude` (allProjects=true) would actually find.
+      const claudeSummary = getClaudeProjectMemoryFiles({ allProjects: true });
+      const claudeFiles = claudeSummary.files.length;
+      const claudeProjects = claudeSummary.projectsWithMemory;
 
       // AgentDB status
       let agentdbEntries = 0;
@@ -825,11 +893,60 @@ export const memoryTools: MCPTool[] = [
         if (stats) intelligence = { sonaEnabled: stats.sonaEnabled, patternsLearned: stats.patternsLearned, trajectoriesRecorded: stats.trajectoriesRecorded };
       } catch { /* not initialized */ }
 
+      // #bug43.3: report the live embedder, not a hardcoded label. We
+      // probe the resolver here so a freshly-pulled `mxbai-embed-large`
+      // is reflected without needing to bounce the daemon. The status
+      // call is rare so the probe cost (one HTTP roundtrip on first
+      // call) is acceptable.
+      let embedding: { model: string; dim: number; source: string; fallback: boolean } = {
+        model: 'Xenova/all-MiniLM-L6-v2',
+        dim: 384,
+        source: 'onnx-miniLM',
+        fallback: true,
+      };
+      try {
+        const { getActiveEmbedder } = await import('../memory/embedder-resolver.js');
+        const active = await getActiveEmbedder();
+        embedding = {
+          model: active.model,
+          dim: active.dim,
+          source: active.source,
+          fallback: active.isFallback,
+        };
+      } catch { /* keep default */ }
+
+      // Distribution of embeddings by dim across the live store. Tells the
+      // user if the migration to mxbai is complete or partial.
+      let dimDistribution: { dim: number; count: number; model: string }[] = [];
+      try {
+        const { listEntries } = await getMemoryFunctions();
+        const all = await listEntries({});
+        const buckets = new Map<string, { dim: number; count: number; model: string }>();
+        for (const entry of all?.entries ?? []) {
+          // entries don't expose dim/model in the list view, so this
+          // requires direct DB access; we leave it empty if not available.
+          // Best-effort only.
+          void entry;
+        }
+        // Fall back to counting via raw bridge query (Bug 43.2 will fill
+        // this in once migration is shipped).
+        const bridge = await import('../memory/memory-bridge.js');
+        if (typeof bridge.bridgeGetEmbeddingDistribution === 'function') {
+          const dist = await bridge.bridgeGetEmbeddingDistribution();
+          if (Array.isArray(dist)) dimDistribution = dist;
+        }
+        void buckets;
+      } catch { /* non-fatal */ }
+
       return {
         claudeCode: { memoryFiles: claudeFiles, projects: claudeProjects },
         agentdb: { totalEntries: agentdbEntries, claudeMemoryEntries, backend: 'sql.js + ONNX' },
         intelligence,
-        bridge: { status: claudeMemoryEntries > 0 ? 'connected' : 'not-synced', embedding: 'all-MiniLM-L6-v2 (384-dim)' },
+        bridge: {
+          status: claudeMemoryEntries > 0 ? 'connected' : 'not-synced',
+          embedding,
+          dimDistribution,
+        },
       };
     },
   },
@@ -849,7 +966,7 @@ export const memoryTools: MCPTool[] = [
     },
     handler: async (input) => {
       await ensureInitialized();
-      const { searchEntries } = await getMemoryFunctions();
+      const { searchEntries, listEntries } = await getMemoryFunctions();
       validateMemoryInput(undefined, undefined, input.query as string);
 
       const query = input.query as string;
@@ -858,25 +975,75 @@ export const memoryTools: MCPTool[] = [
 
       if (ns) { const vNs = validateIdentifier(ns, 'namespace'); if (!vNs.valid) return { success: false, query, results: [], total: 0, error: vNs.error }; }
 
-      // Search all namespaces unless filtered
-      const namespaces = ns ? [ns] : ['default', 'claude-memories', 'auto-memory', 'patterns', 'tasks', 'feedback'];
-      const allResults: Array<{ key: string; content: string; score: number; namespace: string; source: string }> = [];
-
-      for (const searchNs of namespaces) {
+      // #bug4 — enumerate namespaces dynamically from the live store instead
+      // of hardcoding ['default', 'claude-memories', 'auto-memory', 'patterns',
+      // 'tasks', 'feedback']. The previous allowlist hid every user-created
+      // namespace from `memory_search_unified`. We piggyback on `listEntries`
+      // (the same accessor `memory_stats` uses) and dedupe by namespace.
+      // Cached for the duration of this single search invocation.
+      let namespaces: string[];
+      if (ns) {
+        namespaces = [ns];
+      } else {
         try {
-          const r = await searchEntries({ query, namespace: searchNs, limit: limit * 2 });
-          if (r?.results) {
-            for (const entry of r.results) {
-              allResults.push({
-                key: entry.key || entry.id || '',
-                content: (entry.content || (entry as any).value || '').toString().slice(0, 200),
-                score: entry.score || 0,
-                namespace: searchNs,
-                source: searchNs === 'claude-memories' ? 'claude-code' : searchNs === 'auto-memory' ? 'auto-memory' : 'agentdb',
-              });
-            }
+          const all = await listEntries({ limit: 100000 });
+          const seenNs = new Set<string>();
+          for (const e of all?.entries ?? []) {
+            if (e?.namespace) seenNs.add(e.namespace);
           }
-        } catch { /* namespace may not exist */ }
+          // Always include 'default' so a freshly-initialized store still
+          // matches the previous behavior shape.
+          if (seenNs.size === 0) seenNs.add('default');
+          namespaces = Array.from(seenNs);
+        } catch {
+          // Fall back to the legacy allowlist if listing fails — better than
+          // returning zero results on a transient error.
+          namespaces = ['default', 'claude-memories', 'auto-memory', 'patterns', 'tasks', 'feedback'];
+        }
+      }
+      // PERF-2: collapse N per-namespace searches into ONE union scan.
+      // Embed query once, run a single SQL pass with `namespace IN (…)`, then
+      // score + dedupe in JS. See bridgeSearchEntriesMulti for the impl.
+      const allResults: Array<{ key: string; content: string; score: number; namespace: string; source: string }> = [];
+      try {
+        const bridge = await import('../memory/memory-bridge.js');
+        const multi = await bridge.bridgeSearchEntriesMulti({
+          namespaces,
+          query,
+          limit: limit * 2,
+        });
+        if (multi?.results) {
+          for (const entry of multi.results) {
+            const entryNs = entry.namespace || 'default';
+            allResults.push({
+              key: entry.key || entry.id || '',
+              content: (entry.content || '').toString().slice(0, 200),
+              score: entry.score || 0,
+              namespace: entryNs,
+              source: entryNs === 'claude-memories' ? 'claude-code' : entryNs === 'auto-memory' ? 'auto-memory' : 'agentdb',
+            });
+          }
+        }
+      } catch {
+        // Bridge unavailable — fall back to the legacy per-namespace loop so
+        // the tool still returns something. This branch should be cold in
+        // practice since the bridge is the canonical search path.
+        for (const searchNs of namespaces) {
+          try {
+            const r = await searchEntries({ query, namespace: searchNs, limit: limit * 2 });
+            if (r?.results) {
+              for (const entry of r.results) {
+                allResults.push({
+                  key: entry.key || entry.id || '',
+                  content: (entry.content || (entry as any).value || '').toString().slice(0, 200),
+                  score: entry.score || 0,
+                  namespace: searchNs,
+                  source: searchNs === 'claude-memories' ? 'claude-code' : searchNs === 'auto-memory' ? 'auto-memory' : 'agentdb',
+                });
+              }
+            }
+          } catch { /* namespace may not exist */ }
+        }
       }
 
       // Sort by score, deduplicate by key, take top N

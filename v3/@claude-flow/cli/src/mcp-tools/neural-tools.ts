@@ -438,7 +438,10 @@ export const neuralTools: MCPTool[] = [
         const typeFilter = input.type as string;
         const filtered = typeFilter ? patterns.filter(p => p.type === typeFilter) : patterns;
 
-        return {
+        // #bug21 — empty pattern list is ambiguous: store could have failed
+        // to load OR loaded fine and never been populated. Annotate the
+        // idle case (store loaded, zero patterns total) per Bug 11.3 pattern.
+        const result: Record<string, unknown> = {
           patterns: filtered.map(p => ({
             id: p.id,
             name: p.name,
@@ -448,6 +451,11 @@ export const neuralTools: MCPTool[] = [
           })),
           total: filtered.length,
         };
+        if (patterns.length === 0) {
+          result._status = 'idle';
+          result._note = 'Pattern store loaded; no patterns recorded yet. Use mcp__claude-flow__neural_patterns with action=store to add one.';
+        }
+        return result;
       }
 
       if (action === 'get') {
@@ -674,7 +682,16 @@ export const neuralTools: MCPTool[] = [
       const models = Object.values(store.models);
       const patterns = Object.values(store.patterns);
 
-      return {
+      // #bug21 — neural_status returned 0 models / 0 patterns alongside
+      // `_realEmbeddings: true`, which is ambiguous: the subsystem could
+      // have failed to initialize OR loaded fine and never been exercised.
+      // Mirrors the Bug 11.3 idle-since-load pattern from
+      // hooks_intelligence_stats. The store loaded successfully (we got
+      // here past loadNeuralStore()), so an empty store means "ready,
+      // awaiting first invocation".
+      const isIdle = models.length === 0 && patterns.length === 0;
+
+      const result: Record<string, unknown> = {
         _realEmbeddings: !!realEmbeddings,
         embeddingProvider: realEmbeddings ? `@claude-flow/embeddings (${embeddingServiceName})` : 'hash-based (deterministic)',
         models: {
@@ -712,6 +729,13 @@ export const neuralTools: MCPTool[] = [
           reasoningBank: true,
         },
       };
+
+      if (isIdle) {
+        result._status = 'idle';
+        result._note = 'Neural store loaded; no models or patterns recorded yet. Use mcp__claude-flow__neural_train or mcp__claude-flow__neural_patterns (action=store) to populate.';
+      }
+
+      return result;
     },
   },
   {

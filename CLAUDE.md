@@ -138,7 +138,7 @@ Bash("npx claude-flow-codex dual run --worker 'codex:coder:Implement the solutio
 Bash("npx claude-flow-codex dual run --worker 'codex:optimizer:Optimize performance based on implementation' --namespace collaboration")
 
 // STEP 3: Coordinate via shared memory
-Bash("npx claude-flow@v3alpha memory store --namespace collaboration --key 'task-context' --value '[task description]'")
+Bash("npx ruflo@v3alpha memory store --namespace collaboration --key 'task-context' --value '[task description]'")
 ```
 
 ### Collaboration Templates (Pre-Built Pipelines)
@@ -179,13 +179,13 @@ All workers share state via the `collaboration` namespace:
 
 ```bash
 # Store context for cross-platform sharing
-npx claude-flow@v3alpha memory store --namespace collaboration --key "design-decisions" --value "..."
+npx ruflo@v3alpha memory store --namespace collaboration --key "design-decisions" --value "..."
 
 # Search for patterns across all workers
-npx claude-flow@v3alpha memory search --namespace collaboration --query "authentication patterns"
+npx ruflo@v3alpha memory search --namespace collaboration --query "authentication patterns"
 
 # Retrieve specific findings
-npx claude-flow@v3alpha memory retrieve --namespace collaboration --key "security-findings"
+npx ruflo@v3alpha memory retrieve --namespace collaboration --key "security-findings"
 ```
 
 ### Cross-Platform Learning
@@ -194,13 +194,13 @@ Both platforms learn from each other's outputs:
 
 ```bash
 # After successful collaboration, train patterns
-npx claude-flow@v3alpha hooks post-task --task-id "dual-[id]" --success true --train-neural true
+npx ruflo@v3alpha hooks post-task --task-id "dual-[id]" --success true --train-neural true
 
 # Store successful collaboration patterns
-npx claude-flow@v3alpha memory store --namespace patterns --key "dual-mode-[pattern]" --value "[what worked]"
+npx ruflo@v3alpha memory store --namespace patterns --key "dual-mode-[pattern]" --value "[what worked]"
 
 # Transfer learnings to both platforms
-npx claude-flow@v3alpha hooks transfer store --pattern "dual-collab-success"
+npx ruflo@v3alpha hooks transfer store --pattern "dual-collab-success"
 ```
 
 ### Worker Dependency Levels
@@ -385,28 +385,28 @@ This project is configured with Claude Flow V3 (Anti-Drift Defaults):
 
 ```bash
 # Initialize project
-npx claude-flow@v3alpha init --wizard
+npx ruflo@v3alpha init --wizard
 
 # Start daemon with background workers
-npx claude-flow@v3alpha daemon start
+npx ruflo@v3alpha daemon start
 
 # Spawn an agent
-npx claude-flow@v3alpha agent spawn -t coder --name my-coder
+npx ruflo@v3alpha agent spawn -t coder --name my-coder
 
 # Initialize swarm
-npx claude-flow@v3alpha swarm init --v3-mode
+npx ruflo@v3alpha swarm init --v3-mode
 
 # Search memory (HNSW-indexed)
-npx claude-flow@v3alpha memory search -q "authentication patterns"
+npx ruflo@v3alpha memory search -q "authentication patterns"
 
 # System diagnostics
-npx claude-flow@v3alpha doctor --fix
+npx ruflo@v3alpha doctor --fix
 
 # Security scan
-npx claude-flow@v3alpha security scan --depth full
+npx ruflo@v3alpha security scan --depth full
 
 # Performance benchmark
-npx claude-flow@v3alpha performance benchmark --suite all
+npx ruflo@v3alpha performance benchmark --suite all
 ```
 
 ## Headless Background Instances (claude -p)
@@ -687,8 +687,8 @@ Task({
 | `TaskCompleted` | Task marked complete | Train patterns, notify lead via SendMessage |
 
 ```bash
-npx claude-flow@v3alpha hooks teammate-idle --auto-assign true
-npx claude-flow@v3alpha hooks task-completed -i task-123 --train-patterns true
+npx ruflo@v3alpha hooks teammate-idle --auto-assign true
+npx ruflo@v3alpha hooks task-completed -i task-123 --train-patterns true
 ```
 
 ### Rules
@@ -734,27 +734,27 @@ npx claude-flow@v3alpha hooks task-completed -i task-123 --train-patterns true
 
 ```bash
 # Core hooks
-npx claude-flow@v3alpha hooks pre-task --description "[task]"
-npx claude-flow@v3alpha hooks post-task --task-id "[id]" --success true
-npx claude-flow@v3alpha hooks post-edit --file "[file]" --train-patterns
+npx ruflo@v3alpha hooks pre-task --description "[task]"
+npx ruflo@v3alpha hooks post-task --task-id "[id]" --success true
+npx ruflo@v3alpha hooks post-edit --file "[file]" --train-patterns
 
 # Session management
-npx claude-flow@v3alpha hooks session-start --session-id "[id]"
-npx claude-flow@v3alpha hooks session-end --export-metrics true
-npx claude-flow@v3alpha hooks session-restore --session-id "[id]"
+npx ruflo@v3alpha hooks session-start --session-id "[id]"
+npx ruflo@v3alpha hooks session-end --export-metrics true
+npx ruflo@v3alpha hooks session-restore --session-id "[id]"
 
 # Intelligence routing
-npx claude-flow@v3alpha hooks route --task "[task]"
-npx claude-flow@v3alpha hooks explain --topic "[topic]"
+npx ruflo@v3alpha hooks route --task "[task]"
+npx ruflo@v3alpha hooks explain --topic "[topic]"
 
 # Neural learning
-npx claude-flow@v3alpha hooks pretrain --model-type moe --epochs 10
-npx claude-flow@v3alpha hooks build-agents --agent-types coder,tester
+npx ruflo@v3alpha hooks pretrain --model-type moe --epochs 10
+npx ruflo@v3alpha hooks build-agents --agent-types coder,tester
 
 # Background workers
-npx claude-flow@v3alpha hooks worker list
-npx claude-flow@v3alpha hooks worker dispatch --trigger audit
-npx claude-flow@v3alpha hooks worker status
+npx ruflo@v3alpha hooks worker list
+npx ruflo@v3alpha hooks worker dispatch --trigger audit
+npx ruflo@v3alpha hooks worker status
 ```
 
 ## Intelligence System (RuVector)
@@ -833,7 +833,7 @@ CLAUDE_FLOW_MEMORY_PATH=./data/memory
 
 ## Doctor Health Checks
 
-Run `npx claude-flow@v3alpha doctor` to check:
+Run `npx ruflo@v3alpha doctor` to check:
 - Node.js version (20+)
 - npm version (9+)
 - Git installation
@@ -849,15 +849,15 @@ Run `npx claude-flow@v3alpha doctor` to check:
 
 ```bash
 # Add MCP servers
-claude mcp add claude-flow npx claude-flow@v3alpha mcp start
+claude mcp add claude-flow npx ruflo@v3alpha mcp start
 claude mcp add ruv-swarm npx ruv-swarm mcp start  # Optional
 claude mcp add flow-nexus npx flow-nexus@latest mcp start  # Optional
 
 # Start daemon
-npx claude-flow@v3alpha daemon start
+npx ruflo@v3alpha daemon start
 
 # Run doctor
-npx claude-flow@v3alpha doctor --fix
+npx ruflo@v3alpha doctor --fix
 ```
 
 ## Claude Code vs MCP Tools
@@ -973,7 +973,7 @@ npm view ruflo dist-tags --json
 | `@claude-flow/cli` | `v3alpha` | `npx @claude-flow/cli@v3alpha` |
 | `claude-flow` | `alpha` | `npx claude-flow@alpha` — EASY TO FORGET |
 | `claude-flow` | `latest` | `npx claude-flow@latest` |
-| `claude-flow` | `v3alpha` | `npx claude-flow@v3alpha` |
+| `claude-flow` | `v3alpha` | `npx ruflo@v3alpha` |
 | `ruflo` | `alpha` | `npx ruflo@alpha` — EASY TO FORGET |
 | `ruflo` | `latest` | `npx ruflo@latest` |
 
@@ -1078,14 +1078,14 @@ Plugins are distributed via IPFS and can be installed with the CLI. Browse and i
 
 ```bash
 # List all available plugins
-npx claude-flow@v3alpha plugins list
+npx ruflo@v3alpha plugins list
 
 # Install a plugin
-npx claude-flow@v3alpha plugins install @claude-flow/plugin-name
+npx ruflo@v3alpha plugins install @claude-flow/plugin-name
 
 # Enable/disable
-npx claude-flow@v3alpha plugins enable @claude-flow/plugin-name
-npx claude-flow@v3alpha plugins disable @claude-flow/plugin-name
+npx ruflo@v3alpha plugins enable @claude-flow/plugin-name
+npx ruflo@v3alpha plugins disable @claude-flow/plugin-name
 ```
 
 ### Core Plugins
@@ -1127,13 +1127,13 @@ npx claude-flow@v3alpha plugins disable @claude-flow/plugin-name
 
 ```bash
 # Create a new plugin from template
-npx claude-flow@v3alpha plugins create my-plugin
+npx ruflo@v3alpha plugins create my-plugin
 
 # Test locally
-npx claude-flow@v3alpha plugins install ./path/to/my-plugin
+npx ruflo@v3alpha plugins install ./path/to/my-plugin
 
 # Publish to registry (requires Pinata credentials)
-npx claude-flow@v3alpha plugins publish
+npx ruflo@v3alpha plugins publish
 ```
 
 Registry source: IPFS via Pinata (`QmXbfEAaR7D2Ujm4GAkbwcGZQMHqAMpwDoje4583uNP834`)
