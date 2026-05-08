@@ -157,14 +157,14 @@ function cosineSimilarity(a: number[], b: number[]): number {
 export const embeddingsTools: MCPTool[] = [
   {
     name: 'embeddings_init',
-    description: 'Initialize the ONNX embedding subsystem with hyperbolic support',
+    description: 'Initialize the embedding subsystem. Probes the live Ollama daemon for `mxbai-embed-large` (1024-dim) and falls back to bundled MiniLM (384-dim). Reports the actually-active embedder so callers can route accordingly.',
     category: 'embeddings',
     inputSchema: {
       type: 'object',
       properties: {
         model: {
           type: 'string',
-          description: 'ONNX model ID',
+          description: 'ONNX model ID (used only for the legacy fallback config; the active embedder is auto-detected from Ollama).',
           enum: ['Xenova/all-MiniLM-L6-v2', 'Xenova/all-mpnet-base-v2'],
           default: 'Xenova/all-MiniLM-L6-v2',
         },
@@ -199,13 +199,24 @@ export const embeddingsTools: MCPTool[] = [
 
       const existingConfig = loadConfig();
       if (existingConfig && !force) {
+        // #bug43.3: even when the static config is "already initialized",
+        // probe + report the live embedder so the caller knows what's
+        // actually firing for memory_store / memory_search.
+        let active: { model: string; dim: number; source: string; fallback: boolean } | null = null;
+        try {
+          const { getActiveEmbedder } = await import('../memory/embedder-resolver.js');
+          const a = await getActiveEmbedder();
+          active = { model: a.model, dim: a.dim, source: a.source, fallback: a.isFallback };
+        } catch { /* ignore */ }
         return {
           success: false,
+          initialized: true,
           error: 'Embeddings already initialized. Use force=true to overwrite.',
           existingConfig: {
             model: existingConfig.model,
             initialized: existingConfig.initialized,
           },
+          active,
         };
       }
 
@@ -238,8 +249,20 @@ export const embeddingsTools: MCPTool[] = [
 
       saveConfig(config);
 
+      // #bug43.3: actually initialize the embedder pipeline rather than
+      // returning a dormant `initialized: false`. We probe the resolver
+      // here so a freshly-pulled `mxbai-embed-large` is picked up and
+      // the result reflects what the bridge will actually use.
+      let active: { model: string; dim: number; source: string; fallback: boolean } | null = null;
+      try {
+        const { getActiveEmbedder } = await import('../memory/embedder-resolver.js');
+        const a = await getActiveEmbedder({ force: true });
+        active = { model: a.model, dim: a.dim, source: a.source, fallback: a.isFallback };
+      } catch { /* probe failed, leave null */ }
+
       return {
         success: true,
+        initialized: true,
         config: {
           model,
           dimension,
@@ -247,11 +270,14 @@ export const embeddingsTools: MCPTool[] = [
           hyperbolic: hyperbolic ? { enabled: true, curvature } : { enabled: false },
           neural: { enabled: true },
         },
+        active,
         paths: {
           config: getConfigPath(),
           models: modelPath,
         },
-        message: 'Embedding subsystem initialized successfully',
+        message: active
+          ? `Embedding subsystem initialized — active embedder: ${active.model} (${active.dim}d, source=${active.source})`
+          : 'Embedding subsystem initialized (active embedder unavailable)',
       };
     },
   },

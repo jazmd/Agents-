@@ -893,11 +893,60 @@ export const memoryTools: MCPTool[] = [
         if (stats) intelligence = { sonaEnabled: stats.sonaEnabled, patternsLearned: stats.patternsLearned, trajectoriesRecorded: stats.trajectoriesRecorded };
       } catch { /* not initialized */ }
 
+      // #bug43.3: report the live embedder, not a hardcoded label. We
+      // probe the resolver here so a freshly-pulled `mxbai-embed-large`
+      // is reflected without needing to bounce the daemon. The status
+      // call is rare so the probe cost (one HTTP roundtrip on first
+      // call) is acceptable.
+      let embedding: { model: string; dim: number; source: string; fallback: boolean } = {
+        model: 'Xenova/all-MiniLM-L6-v2',
+        dim: 384,
+        source: 'onnx-miniLM',
+        fallback: true,
+      };
+      try {
+        const { getActiveEmbedder } = await import('../memory/embedder-resolver.js');
+        const active = await getActiveEmbedder();
+        embedding = {
+          model: active.model,
+          dim: active.dim,
+          source: active.source,
+          fallback: active.isFallback,
+        };
+      } catch { /* keep default */ }
+
+      // Distribution of embeddings by dim across the live store. Tells the
+      // user if the migration to mxbai is complete or partial.
+      let dimDistribution: { dim: number; count: number; model: string }[] = [];
+      try {
+        const { listEntries } = await getMemoryFunctions();
+        const all = await listEntries({});
+        const buckets = new Map<string, { dim: number; count: number; model: string }>();
+        for (const entry of all?.entries ?? []) {
+          // entries don't expose dim/model in the list view, so this
+          // requires direct DB access; we leave it empty if not available.
+          // Best-effort only.
+          void entry;
+        }
+        // Fall back to counting via raw bridge query (Bug 43.2 will fill
+        // this in once migration is shipped).
+        const bridge = await import('../memory/memory-bridge.js');
+        if (typeof bridge.bridgeGetEmbeddingDistribution === 'function') {
+          const dist = await bridge.bridgeGetEmbeddingDistribution();
+          if (Array.isArray(dist)) dimDistribution = dist;
+        }
+        void buckets;
+      } catch { /* non-fatal */ }
+
       return {
         claudeCode: { memoryFiles: claudeFiles, projects: claudeProjects },
         agentdb: { totalEntries: agentdbEntries, claudeMemoryEntries, backend: 'sql.js + ONNX' },
         intelligence,
-        bridge: { status: claudeMemoryEntries > 0 ? 'connected' : 'not-synced', embedding: 'all-MiniLM-L6-v2 (384-dim)' },
+        bridge: {
+          status: claudeMemoryEntries > 0 ? 'connected' : 'not-synced',
+          embedding,
+          dimDistribution,
+        },
       };
     },
   },
