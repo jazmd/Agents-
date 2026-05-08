@@ -9,6 +9,7 @@ import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
 import { existsSync, readFileSync, statSync } from 'fs';
 import { join, dirname } from 'path';
+import { findExistingMCPRegistration } from '../init/mcp-detection.js';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import { execSync, exec } from 'child_process';
@@ -270,33 +271,26 @@ async function checkAIDefence(): Promise<HealthCheck> {
   }
 }
 
-// Check MCP servers
+// Check MCP servers — covers Claude Code project-scoped registrations,
+// global ~/.claude.json, Claude Desktop configs, and parent .mcp.json.
 async function checkMcpServers(): Promise<HealthCheck> {
-  const mcpConfigPaths = [
-    join(process.env.HOME || '', '.claude/claude_desktop_config.json'),
-    join(process.env.HOME || '', '.config/claude/mcp.json'),
-    '.mcp.json'
-  ];
-
-  for (const configPath of mcpConfigPaths) {
-    if (existsSync(configPath)) {
-      try {
-        const content = JSON.parse(readFileSync(configPath, 'utf8'));
-        const servers = content.mcpServers || content.servers || {};
-        const count = Object.keys(servers).length;
-        const hasClaudeFlow = 'claude-flow' in servers || 'claude-flow_alpha' in servers || 'ruflo' in servers || 'ruflo_alpha' in servers;
-        if (hasClaudeFlow) {
-          return { name: 'MCP Servers', status: 'pass', message: `${count} servers (ruflo configured)` };
-        } else {
-          return { name: 'MCP Servers', status: 'warn', message: `${count} servers (ruflo not found)`, fix: 'claude mcp add ruflo -- npx -y ruflo@latest mcp start' };
-        }
-      } catch {
-        // continue to next path
-      }
-    }
+  const match = findExistingMCPRegistration(process.cwd());
+  if (match) {
+    const scope = match.projectKey ? ` [project-scoped: ${match.projectKey}]` : '';
+    const aliasNote = match.key === 'claude-flow' ? ' (legacy alias)' : '';
+    return {
+      name: 'MCP Servers',
+      status: 'pass',
+      message: `ruflo MCP configured at ${match.configPath}${scope}${aliasNote}`,
+    };
   }
 
-  return { name: 'MCP Servers', status: 'warn', message: 'No MCP config found', fix: 'claude mcp add claude-flow npx @claude-flow/cli@v3alpha mcp start' };
+  return {
+    name: 'MCP Servers',
+    status: 'warn',
+    message: 'No ruflo MCP registration found',
+    fix: 'claude mcp add ruflo -- npx -y ruflo@latest mcp start',
+  };
 }
 
 // Check disk space (async with proper env inheritance)
