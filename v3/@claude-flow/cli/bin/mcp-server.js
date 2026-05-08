@@ -27,7 +27,7 @@ console.log = (...args) => {
   _origLog.apply(console, args);
 };
 
-import { listMCPTools, callMCPTool, hasTool } from '../dist/src/mcp-client.js';
+import { listMCPTools, callMCPTool, hasTool, ensureMcpToolsLoaded } from '../dist/src/mcp-client.js';
 
 const VERSION = '3.0.0';
 const sessionId = `mcp-${Date.now()}-${randomUUID().slice(0, 8)}`;
@@ -46,6 +46,12 @@ console.error(JSON.stringify({
   sessionId,
   version: VERSION,
 }));
+
+// Bug #49: populate the MCP tool registry before the first tools/list arrives.
+// After Bug #49 importing mcp-client.js no longer eagerly loads the 25+ tool
+// packages — that work is deferred to here so the help/version paths stay
+// fast. We must NOT serve any tools/* method until this resolves.
+await ensureMcpToolsLoaded();
 
 // Handle stdin messages
 // Audit-flagged DoS protection (audit_1776483149979): cap stdin buffer

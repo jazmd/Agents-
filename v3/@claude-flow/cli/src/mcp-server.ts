@@ -309,8 +309,12 @@ export class MCPServerManager extends EventEmitter {
    * Handles stdin/stdout directly like V2 implementation
    */
   private async startStdioServer(): Promise<void> {
-    // Import the tool registry
-    const { listMCPTools, callMCPTool, hasTool } = await import('./mcp-client.js');
+    // Import the tool registry. After Bug #49 importing mcp-client.js is
+    // cheap (no eager tool registration); the heavy tool graph is loaded by
+    // the explicit `ensureMcpToolsLoaded()` await below. We must populate
+    // the registry before the first tools/list arrives.
+    const { listMCPTools, callMCPTool, hasTool, ensureMcpToolsLoaded } = await import('./mcp-client.js');
+    await ensureMcpToolsLoaded();
 
     const VERSION = '3.0.0';
     const sessionId = `mcp-${Date.now()}-${randomUUID().slice(0, 8)}`;
@@ -453,7 +457,10 @@ export class MCPServerManager extends EventEmitter {
     message: { jsonrpc: string; id?: string | number; method?: string; params?: unknown },
     sessionId: string
   ): Promise<{ jsonrpc: string; id?: string | number; result?: unknown; error?: { code: number; message: string } } | null> {
-    const { listMCPTools, callMCPTool, hasTool } = await import('./mcp-client.js');
+    // Bug #49: ensure the tool registry is populated before the sync
+    // listMCPTools/hasTool calls below run. Idempotent — no-op once loaded.
+    const { listMCPTools, callMCPTool, hasTool, ensureMcpToolsLoaded } = await import('./mcp-client.js');
+    await ensureMcpToolsLoaded();
 
     if (!message.method) {
       return {

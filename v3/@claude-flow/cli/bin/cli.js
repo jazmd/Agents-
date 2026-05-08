@@ -208,10 +208,15 @@ const isMCPMode = !process.stdin.isTTY && (process.argv.length === 2 || isExplic
 
 if (isMCPMode) {
   _trace('mcp-mode detected, importing mcp-client');
-  // Lazy-import the MCP client only on this branch. It's a 100ms+ import
-  // (drags onnxruntime, better-sqlite3, tiktoken via the embeddings tools).
-  const { listMCPTools, callMCPTool, hasTool } = await import('../dist/src/mcp-client.js');
+  // Lazy-import the MCP client only on this branch. After Bug #49 importing
+  // mcp-client itself is cheap (no eager tool registration); the heavy tool
+  // graph is loaded by the explicit `ensureMcpToolsLoaded()` await below,
+  // which still has to happen here because MCP serving needs the full tool
+  // registry to answer `tools/list` and `tools/call`.
+  const { listMCPTools, callMCPTool, hasTool, ensureMcpToolsLoaded } = await import('../dist/src/mcp-client.js');
   _trace('mcp-client loaded');
+  await ensureMcpToolsLoaded();
+  _trace('mcp tools loaded');
 
   const VERSION = '3.0.0';
   const sessionId = `mcp-${Date.now()}-${randomUUID().slice(0, 8)}`;
