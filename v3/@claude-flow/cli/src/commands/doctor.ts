@@ -152,24 +152,46 @@ async function checkDaemonStatus(): Promise<HealthCheck> {
   }
 }
 
-// Bug 47 — detect a daemon whose binary path differs from the current
-// SwarmOps install (e.g. an old npx-cached daemon hosting workers while
-// the user's CLI now resolves to a different package). Imported lazily so
-// doctor.ts doesn't pull in fork/spawn machinery just to render this row.
+// Bug 47 + Bug 48 — detect a daemon whose binary path differs from the
+// current SwarmOps install (e.g. an old npx-cached daemon hosting workers
+// while the user's CLI now resolves to a different package). Imported
+// lazily so doctor.ts doesn't pull in fork/spawn machinery just to render
+// this row.
+//
+// Bug 48 widens the scan to BOTH valid state-file locations (cwd-local +
+// global). When multiple stale daemons are detected, each appears on its
+// own line in the message body — the doctor's HealthCheck contract is
+// one-row-per-check, so we keep that and pack the multi-daemon detail
+// into the message field rather than fanning out into the parallel
+// allChecks pipeline (which would require restructuring how findings
+// flow through summary aggregation).
 async function checkStaleDaemonPath(): Promise<HealthCheck> {
   try {
-    const { detectDaemonPathMismatch } = await import('./daemon.js');
-    const mismatch = await detectDaemonPathMismatch();
-    if (!mismatch) {
+    const { detectDaemonPathMismatches } = await import('./daemon.js');
+    const mismatches = await detectDaemonPathMismatches();
+    if (mismatches.length === 0) {
       return { name: 'Daemon Path', status: 'pass', message: 'Matches current install (or no daemon running)' };
     }
-    const ageLabel = mismatch.ageDays > 0
-      ? `${mismatch.ageDays}d old`
-      : 'recently started';
+
+    // Single-line message for the common 1-daemon case (preserves Bug 47
+    // formatting); multi-line listing when 2+ daemons are mismatched.
+    const formatOne = (m: typeof mismatches[number]): string => {
+      const ageLabel = m.ageDays > 0 ? `${m.ageDays}d old` : 'recently started';
+      return `Stale daemon (PID ${m.pid}, ${ageLabel}) running from ${m.runningPath} [tracked at ${m.stateFilePath}]`;
+    };
+
+    let message: string;
+    if (mismatches.length === 1) {
+      message = `${formatOne(mismatches[0])} — workers are not running SwarmOps code`;
+    } else {
+      message = `${mismatches.length} stale daemons detected — workers are not running SwarmOps code:\n` +
+        mismatches.map(m => `    - ${formatOne(m)}`).join('\n');
+    }
+
     return {
       name: 'Daemon Path',
       status: 'warn',
-      message: `Stale daemon (PID ${mismatch.pid}, ${ageLabel}) running from ${mismatch.runningPath} — workers are not running SwarmOps code`,
+      message,
       fix: 'swarmops daemon restart --force-path',
     };
   } catch (err) {

@@ -10,6 +10,7 @@ import { spawn, execFile, execFileSync, fork } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve, isAbsolute } from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { swallowError } from '@claude-flow/shared';
 
 // ---------------------------------------------------------------------------
@@ -41,6 +42,16 @@ export interface DaemonPathInfo {
   startedAt: string;
   /** Floor((now - startedAt) / 1 day), or 0 when startedAt is unknown. */
   ageDays: number;
+  /**
+   * Bug 48 — which `daemon-state.json` (and adjacent `daemon.pid`) location
+   * this daemon was found via. There are two valid roots:
+   *   - `<cwd>/.claude-flow/daemon-state.json` (project-scoped install)
+   *   - `<homedir>/.claude/.claude-flow/daemon-state.json` (global install)
+   * Captured so callers (status / doctor / restart) can tell the user
+   * exactly which file points at which dead/stale daemon, and so that
+   * `restart --force-path` can clean up state files in the right places.
+   */
+  stateFilePath: string;
 }
 
 /**
@@ -58,6 +69,21 @@ export interface DaemonPathDetectorOptions {
   readRunningCommand?: (pid: number) => string | null;
   /** Stub `realpath` canonicalisation. Defaults to `fs.realpathSync` with a passthrough fallback. */
   canonicalize?: (p: string) => string;
+  /**
+   * Bug 48 — explicit override for the candidate state-file locations. When
+   * present, replaces the default `getAllDaemonStatePaths()` enumeration.
+   * Tests use this to point at a tmpdir without monkey-patching `os.homedir`.
+   * For backwards compatibility with the singular `detectDaemonPathMismatch`,
+   * if `projectRoot` is set and `stateFilePaths` is NOT, the singular helper
+   * still scans only the cwd-local location (preserves Bug 47 semantics).
+   */
+  stateFilePaths?: string[];
+  /**
+   * Bug 48 — homedir override for default candidate enumeration. Defaults to
+   * `os.homedir()`. Tests use this to deterministically locate the global
+   * `<home>/.claude/.claude-flow/daemon-state.json` candidate.
+   */
+  homedir?: string;
 }
 
 /**
@@ -121,22 +147,51 @@ function defaultReadRunningCommand(pid: number): string | null {
 }
 
 /**
- * Compare the running daemon's binary path to the currently-installed one.
- * Returns null when:
- *   - no `daemon.pid` file exists (no daemon),
- *   - the PID is dead (stale state — handled elsewhere),
- *   - the canonicalized paths match.
- * Returns a populated DaemonPathInfo otherwise.
+ * Bug 48 — return all locations a `daemon-state.json` could legitimately
+ * live, in priority order. We enumerate BOTH (rather than picking one via
+ * `resolveInstallContext().claudeRoot`) because a daemon may be running in
+ * either location regardless of which install context the caller's cwd
+ * resolves to. Callers filter by `existsSync` to ignore empty slots.
+ *
+ * Order:
+ *   1. `<cwd>/.claude-flow/daemon-state.json` — project-scoped install
+ *   2. `<homedir>/.claude/.claude-flow/daemon-state.json` — global install
+ *
+ * The PID file lives next to the state file; callers derive
+ * `dirname(stateFilePath) + '/daemon.pid'` rather than enumerating both.
  */
-export async function detectDaemonPathMismatch(
-  opts: DaemonPathDetectorOptions = {},
-): Promise<DaemonPathInfo | null> {
-  const projectRoot = opts.projectRoot ?? process.cwd();
-  const pidFile = join(projectRoot, '.claude-flow', 'daemon.pid');
+function getAllDaemonStatePaths(cwd: string = process.cwd(), home: string = os.homedir()): string[] {
+  const paths = [
+    join(cwd, '.claude-flow', 'daemon-state.json'),
+    join(home, '.claude', '.claude-flow', 'daemon-state.json'),
+  ];
+  // Deduplicate in the rare case where cwd is exactly `<home>/.claude` and
+  // both candidates would resolve to the same file. We compare strings only
+  // (no realpath) — symlink resolution happens later in `safeRealpath`.
+  return Array.from(new Set(paths));
+}
 
-  if (!fs.existsSync(pidFile)) {
-    return null;
-  }
+/**
+ * Bug 48 — internal helper that probes ONE state-file location for a
+ * mismatched daemon. Returns null when:
+ *   - the adjacent `daemon.pid` doesn't exist or is malformed,
+ *   - `ps` reports the PID gone,
+ *   - the canonicalized running path matches expected.
+ *
+ * The state file itself is OPTIONAL — we read `startedAt` from it when
+ * present, but the canonical "is this daemon mismatched?" signal comes
+ * from `daemon.pid` + `ps`. This matches Bug 47's original semantics.
+ */
+function detectMismatchAtLocation(
+  stateFilePath: string,
+  expectedPathRaw: string,
+  readRunningCommand: (pid: number) => string | null,
+  canonicalize: (p: string) => string,
+): DaemonPathInfo | null {
+  const stateDir = dirname(stateFilePath);
+  const pidFile = join(stateDir, 'daemon.pid');
+
+  if (!fs.existsSync(pidFile)) return null;
 
   let pid: number;
   try {
@@ -147,30 +202,25 @@ export async function detectDaemonPathMismatch(
   }
   if (!pid || isNaN(pid) || pid <= 0) return null;
 
-  const readRunningCommand = opts.readRunningCommand ?? defaultReadRunningCommand;
   const runningPathRaw = readRunningCommand(pid);
   if (!runningPathRaw) {
-    // PID gone or not readable. The daemon-state cleanup happens in
-    // killBackgroundDaemon / killStaleDaemons; we just decline to report.
+    // PID gone or not readable — caller treats as "no mismatch detectable".
     return null;
   }
 
-  const expectedPathRaw = opts.expectedPath ?? deriveExpectedDaemonBin();
-  const canonicalize = opts.canonicalize ?? safeRealpath;
   const runningPath = canonicalize(runningPathRaw);
   const expectedPath = canonicalize(expectedPathRaw);
 
-  if (runningPath === expectedPath) {
-    return null;
-  }
+  if (runningPath === expectedPath) return null;
 
-  // Pull startedAt + age from daemon-state.json if available.
+  // Pull startedAt + age from daemon-state.json if available. Missing or
+  // malformed state file → 'unknown' / 0 (graceful: we still report the
+  // mismatch even if state metadata is gone).
   let startedAt = 'unknown';
   let ageDays = 0;
-  const stateFile = join(projectRoot, '.claude-flow', 'daemon-state.json');
-  if (fs.existsSync(stateFile)) {
+  if (fs.existsSync(stateFilePath)) {
     try {
-      const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as { startedAt?: string };
+      const state = JSON.parse(fs.readFileSync(stateFilePath, 'utf-8')) as { startedAt?: string };
       if (state.startedAt) {
         startedAt = state.startedAt;
         const startMs = Date.parse(state.startedAt);
@@ -179,7 +229,7 @@ export async function detectDaemonPathMismatch(
         }
       }
     } catch (err) {
-      swallowError('detect-daemon-path-mismatch.read-state', err, stateFile);
+      swallowError('detect-daemon-path-mismatch.read-state', err, stateFilePath);
     }
   }
 
@@ -189,7 +239,79 @@ export async function detectDaemonPathMismatch(
     pid,
     startedAt,
     ageDays,
+    stateFilePath,
   };
+}
+
+/**
+ * Bug 48 — detect ALL running daemons whose binary path doesn't match the
+ * current install. Returns an array (may be empty).
+ *
+ * Why plural: Bug 47's `detectDaemonPathMismatch()` only checked the
+ * cwd-local `.claude-flow/daemon-state.json`. During smoke testing the
+ * lead found a real failure: when a daemon was running from
+ * `~/.claude/.claude-flow/daemon-state.json` but the user invoked
+ * `daemon restart --force-path` from a different cwd, the singular helper
+ * returned null and the restart said "No running daemon to stop" — leaving
+ * the stale daemon alive and forking a SECOND one. The plural variant
+ * scans BOTH possible state-file locations.
+ *
+ * Same null-cases as the singular: missing/malformed pid file, dead PID,
+ * matching canonical paths. PID files at locations that don't exist or
+ * don't match are silently skipped.
+ */
+export async function detectDaemonPathMismatches(
+  opts: DaemonPathDetectorOptions = {},
+): Promise<DaemonPathInfo[]> {
+  const cwd = opts.projectRoot ?? process.cwd();
+  const home = opts.homedir ?? os.homedir();
+  const stateFilePaths = opts.stateFilePaths ?? getAllDaemonStatePaths(cwd, home);
+  const expectedPathRaw = opts.expectedPath ?? deriveExpectedDaemonBin();
+  const readRunningCommand = opts.readRunningCommand ?? defaultReadRunningCommand;
+  const canonicalize = opts.canonicalize ?? safeRealpath;
+
+  // De-duplicate by PID — if both state-file candidates point at the same
+  // running daemon (shouldn't happen in practice, but cheap to guard), we
+  // only report it once.
+  const results: DaemonPathInfo[] = [];
+  const seenPids = new Set<number>();
+  for (const stateFilePath of stateFilePaths) {
+    const info = detectMismatchAtLocation(stateFilePath, expectedPathRaw, readRunningCommand, canonicalize);
+    if (info && !seenPids.has(info.pid)) {
+      seenPids.add(info.pid);
+      results.push(info);
+    }
+  }
+  return results;
+}
+
+/**
+ * Bug 47 backwards-compatibility alias — returns the FIRST mismatched
+ * daemon (or null if there are none). Existing callers (`daemon status`
+ * and `doctor`) and the original Bug 47 tests rely on this signature, so
+ * we keep it as a thin wrapper around `detectDaemonPathMismatches()`.
+ *
+ * Behaviour preserved when `opts.stateFilePaths` is NOT explicitly set
+ * AND `opts.projectRoot` IS set: we scan ONLY the cwd-local location, the
+ * same as the original implementation. This keeps Bug 47's tests (which
+ * write a single tmpdir and never expected to enumerate $HOME) passing.
+ * When neither is overridden, both default locations are scanned.
+ */
+export async function detectDaemonPathMismatch(
+  opts: DaemonPathDetectorOptions = {},
+): Promise<DaemonPathInfo | null> {
+  // Bug 47 compat: if the caller pinned a projectRoot but didn't supply
+  // explicit candidate paths, scan ONLY the cwd-local location. This
+  // preserves the original tmpdir-based test semantics.
+  let resolvedOpts = opts;
+  if (opts.projectRoot && !opts.stateFilePaths) {
+    resolvedOpts = {
+      ...opts,
+      stateFilePaths: [join(opts.projectRoot, '.claude-flow', 'daemon-state.json')],
+    };
+  }
+  const results = await detectDaemonPathMismatches(resolvedOpts);
+  return results.length > 0 ? results[0] : null;
 }
 
 // Start daemon subcommand
@@ -583,6 +705,11 @@ const defaultKiller: ProcessKiller = (pid, signal) => {
  *
  * Exposed for testing — the daemon `restart` subcommand calls this with
  * `killer = process.kill` and `sleep = setTimeout` defaults.
+ *
+ * Bug 48 — accepts an optional explicit `stateFilePath` so the caller can
+ * target a daemon at either of the two valid locations (cwd-local or the
+ * global `<homedir>/.claude/.claude-flow/`). When unset, defaults to the
+ * cwd-local location, preserving Bug 47 behaviour.
  */
 export async function restartBackgroundDaemon(opts: {
   projectRoot: string;
@@ -590,13 +717,19 @@ export async function restartBackgroundDaemon(opts: {
   graceMs?: number;
   killer?: ProcessKiller;
   sleep?: (ms: number) => Promise<void>;
+  /**
+   * Bug 48 — explicit state-file path override. When set, the PID file is
+   * derived as `dirname(stateFilePath) + '/daemon.pid'`. Otherwise we use
+   * `<projectRoot>/.claude-flow/daemon-state.json` (Bug 47 default).
+   */
+  stateFilePath?: string;
 }): Promise<{ killed: boolean; pid: number | null }> {
   const projectRoot = opts.projectRoot;
   const graceMs = opts.graceMs ?? 5000;
   const killer = opts.killer ?? defaultKiller;
   const sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
-  const pidFile = join(projectRoot, '.claude-flow', 'daemon.pid');
-  const stateFile = join(projectRoot, '.claude-flow', 'daemon-state.json');
+  const stateFile = opts.stateFilePath ?? join(projectRoot, '.claude-flow', 'daemon-state.json');
+  const pidFile = join(dirname(stateFile), 'daemon.pid');
 
   let pid: number | null = null;
   if (fs.existsSync(pidFile)) {
@@ -680,29 +813,64 @@ const restartCommand: Command = {
     const forcePath = ctx.flags['force-path'] as boolean;
     const projectRoot = process.cwd();
 
-    // Refuse to restart silently across a path mismatch unless --force-path.
-    const mismatch = await detectDaemonPathMismatch({ projectRoot });
-    if (mismatch && !forcePath) {
+    // Bug 48 — scan ALL valid state-file locations (cwd-local + global).
+    // The Bug 47 implementation only checked the cwd-local one and missed
+    // daemons running from `~/.claude/.claude-flow/daemon-state.json`.
+    const mismatches = await detectDaemonPathMismatches();
+    if (mismatches.length > 0 && !forcePath) {
+      const noun = mismatches.length === 1 ? 'daemon' : 'daemons';
       output.printError(
-        `Existing daemon at ${mismatch.runningPath} doesn't match SwarmOps install (${mismatch.expectedPath}).`
+        `Existing ${noun} (${mismatches.length}) don't match SwarmOps install.`
       );
-      const ageLabel = mismatch.ageDays > 0
-        ? `${mismatch.ageDays} day${mismatch.ageDays === 1 ? '' : 's'}`
-        : 'recently';
-      output.writeln(output.dim(`  Use --force-path to override. This will kill PID ${mismatch.pid} (started ${ageLabel} ago).`));
+      for (const m of mismatches) {
+        const ageLabel = m.ageDays > 0
+          ? `${m.ageDays} day${m.ageDays === 1 ? '' : 's'}`
+          : 'recently';
+        output.writeln(output.dim(`  - PID ${m.pid} (started ${ageLabel} ago)`));
+        output.writeln(output.dim(`      running:  ${m.runningPath}`));
+        output.writeln(output.dim(`      expected: ${m.expectedPath}`));
+        output.writeln(output.dim(`      tracked at: ${m.stateFilePath}`));
+      }
+      output.writeln(output.dim(`  Use --force-path to override. This will kill ${mismatches.length === 1 ? 'this PID' : 'these PIDs'} and clean up state.`));
       return { success: false, exitCode: 1 };
     }
 
     try {
-      const result = await restartBackgroundDaemon({
-        projectRoot,
-        clearState: !!forcePath,
-      });
+      // Bug 48 — when --force-path is set with mismatches, kill EACH one
+      // (was only killing the cwd-local PID before, leaving the global
+      // one alive). Also targets the matching state-file path so we wipe
+      // the right daemon-state.json per location.
+      let totalKilled = 0;
+      const killedPids: number[] = [];
+      if (forcePath && mismatches.length > 0) {
+        for (const m of mismatches) {
+          const result = await restartBackgroundDaemon({
+            projectRoot,
+            clearState: true,
+            stateFilePath: m.stateFilePath,
+          });
+          if (result.killed) {
+            totalKilled++;
+            if (result.pid !== null) killedPids.push(result.pid);
+          }
+        }
+      } else {
+        // No mismatches OR --force-path without mismatches: fall back to the
+        // cwd-local restart path (Bug 47 behaviour for the no-mismatch case).
+        const result = await restartBackgroundDaemon({
+          projectRoot,
+          clearState: !!forcePath,
+        });
+        if (result.killed) {
+          totalKilled++;
+          if (result.pid !== null) killedPids.push(result.pid);
+        }
+      }
 
       if (!quiet) {
-        if (result.killed && result.pid !== null) {
-          output.printInfo(`Stopped existing daemon (PID ${result.pid})`);
-        } else if (result.killed) {
+        if (totalKilled > 0 && killedPids.length > 0) {
+          output.printInfo(`Stopped existing daemon${killedPids.length === 1 ? '' : 's'} (PID${killedPids.length === 1 ? '' : 's'} ${killedPids.join(', ')})`);
+        } else if (totalKilled > 0) {
           output.printInfo('Cleaned up stale daemon state');
         } else {
           output.printInfo('No running daemon to stop');
@@ -957,24 +1125,28 @@ const statusCommand: Command = {
         });
       }
 
-      // Bug 47 — surface stale-daemon-path mismatch.
-      // Only checked when a daemon is actually running; otherwise there's
-      // nothing to compare against.
-      if (isRunning) {
-        const mismatch = await detectDaemonPathMismatch({ projectRoot });
-        if (mismatch) {
-          output.writeln();
-          output.printWarning('STALE DAEMON DETECTED');
-          const ageLabel = mismatch.ageDays > 0
-            ? `${mismatch.ageDays} day${mismatch.ageDays === 1 ? '' : 's'} ago`
-            : 'recently';
-          output.writeln(output.dim(`  Running daemon (PID ${mismatch.pid}, started ${ageLabel}) is from:`));
-          output.writeln(output.dim(`    ${mismatch.runningPath}`));
-          output.writeln(output.dim(`  But your current SwarmOps install is at:`));
-          output.writeln(output.dim(`    ${mismatch.expectedPath}`));
-          output.writeln(output.dim(`  Background workers are NOT running SwarmOps code.`));
-          output.writeln(output.dim(`  Run \`swarmops daemon restart --force-path\` to fix.`));
-        }
+      // Bug 47 + Bug 48 — surface stale-daemon-path mismatch(es).
+      //
+      // Bug 48 widens the scan from just the cwd-local state file to BOTH
+      // candidate locations (cwd-local + global `~/.claude/.claude-flow/`).
+      // We always check (not gated on `isRunning`) because the local
+      // `getDaemon(projectRoot)` may not see a daemon that's actually live
+      // in the OTHER location. One warning block per detected stale daemon.
+      const mismatches = await detectDaemonPathMismatches();
+      for (const mismatch of mismatches) {
+        output.writeln();
+        output.printWarning('STALE DAEMON DETECTED');
+        const ageLabel = mismatch.ageDays > 0
+          ? `${mismatch.ageDays} day${mismatch.ageDays === 1 ? '' : 's'} ago`
+          : 'recently';
+        output.writeln(output.dim(`  Running daemon (PID ${mismatch.pid}, started ${ageLabel}) is from:`));
+        output.writeln(output.dim(`    ${mismatch.runningPath}`));
+        output.writeln(output.dim(`  But your current SwarmOps install is at:`));
+        output.writeln(output.dim(`    ${mismatch.expectedPath}`));
+        output.writeln(output.dim(`  Tracked in state file:`));
+        output.writeln(output.dim(`    ${mismatch.stateFilePath}`));
+        output.writeln(output.dim(`  Background workers are NOT running SwarmOps code.`));
+        output.writeln(output.dim(`  Run \`swarmops daemon restart --force-path\` to fix.`));
       }
 
       return { success: true, data: status };
