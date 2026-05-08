@@ -63,11 +63,47 @@ export interface UserPlugin {
   version?: string;
 }
 
+/**
+ * #bug39 — Foreign MCP server: an MCP entry from a `.mcp.json` file that is
+ * NOT one of the user's own ruflo/claude-flow/flow-nexus/ruv-swarm servers.
+ * These come from Claude Code plugins (`mcp__plugin_<...>__*`), claude.ai
+ * integrations (`mcp__claude_ai_<...>__*`), or arbitrary user-added MCPs.
+ *
+ * Ruflo's routing was previously blind to these — `guidance_capabilities`
+ * never inspected the MCP registry, so the router never knew that mongodb /
+ * pinecone / context7 / chrome-devtools / Notion / Gmail / Drive existed.
+ * This type lets `guidance_capabilities` surface them so the LLM can decide
+ * to call `mcp__<server>__*` directly when the task matches.
+ */
+export interface ForeignMcpServer {
+  /** The `mcpServers` key — also the prefix for `mcp__<name>__*` tool names. */
+  name: string;
+  /**
+   * Provenance bucket:
+   *   - `user`: the user's own ruflo/claude-flow/flow-nexus/ruv-swarm
+   *     instances (NOT foreign — kept here for completeness so callers can
+   *     filter them out cleanly).
+   *   - `plugin`: bundled by a Claude Code plugin (typically prefixed
+   *     `plugin_…` in the registry; may also live in `~/.claude/.mcp.json`).
+   *   - `claude-ai`: a hosted claude.ai integration (HuggingFace, Notion,
+   *     Gmail, Drive, Calendar, Canva, …) — usually prefixed `claude_ai_`.
+   */
+  source: 'user' | 'plugin' | 'claude-ai';
+  /** The `command` field — useful to know what the server actually runs. */
+  command?: string;
+  /** Args array (if present). Captured raw — never executed. */
+  args?: string[];
+  /** Which `.mcp.json` file declared this server (absolute path). */
+  origin: string;
+}
+
 export interface ClaudeCodeRegistry {
   agents: UserAgent[];
   skills: UserSkill[];
   commands: UserCommand[];
   plugins: UserPlugin[];
+  /** #bug39 — MCP servers from Claude Code config (plugins + claude.ai). */
+  foreignMcpServers: ForeignMcpServer[];
   /** Epoch millis when this snapshot was produced. */
   scannedAt: number;
   /** Absolute root path that was scanned. */
@@ -345,6 +381,150 @@ function scanPlugins(claudeRoot: string): UserPlugin[] {
   return plugins.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+// ── #bug39 — Foreign MCP server scanner ──────────────────────
+
+/**
+ * Server names that belong to the user's OWN ruflo stack, NOT a foreign
+ * plugin or claude.ai integration. We classify these as `source: 'user'`
+ * so callers can easily filter them out (or include them) without
+ * needing to re-implement the same name list.
+ *
+ * NOTE: this is intentionally a small, conservative set. A user who
+ * adds a *second* claude-flow instance under a different name would have
+ * it classified as `plugin` — which is the safer default (foreign) than
+ * silently treating it as one of ours.
+ */
+const RUFLO_OWN_MCP_NAMES = new Set([
+  'claude-flow',
+  'ruflo',
+  'flow-nexus',
+  'ruv-swarm',
+]);
+
+/**
+ * Classify a single MCP server name into a provenance bucket. The
+ * heuristic mirrors how Claude Code's tool prefixes are formed:
+ *   - `mcp__plugin_*__*`     → plugin
+ *   - `mcp__claude_ai_*__*`  → claude.ai integration
+ *   - everything else        → either ours (RUFLO_OWN_MCP_NAMES) or
+ *                              an arbitrary user-added foreign server
+ *                              (which we still bucket as `plugin` —
+ *                              "foreign-but-not-claude.ai" is the
+ *                              cleanest fit for that bucket).
+ */
+function classifyMcpSource(name: string): 'user' | 'plugin' | 'claude-ai' {
+  if (RUFLO_OWN_MCP_NAMES.has(name)) return 'user';
+  if (name.startsWith('claude_ai_') || name.startsWith('claude-ai-')) {
+    return 'claude-ai';
+  }
+  return 'plugin';
+}
+
+/**
+ * Read + parse a single `.mcp.json` file. Returns `[]` when the file is
+ * missing, unreadable, or malformed — never throws. The `mcpServers`
+ * dict is the canonical shape Claude Code itself uses.
+ */
+function readMcpJson(path: string): Array<{ name: string; command?: string; args?: string[] }> {
+  if (!existsSync(path)) return [];
+  let raw: string;
+  try {
+    raw = readFileSync(path, 'utf-8');
+  } catch {
+    return [];
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!parsed || typeof parsed !== 'object') return [];
+
+  // Canonical shape: `{ mcpServers: { "<name>": { command, args, ... } } }`.
+  const obj = parsed as Record<string, unknown>;
+  const serversField = obj.mcpServers;
+  if (!serversField || typeof serversField !== 'object') return [];
+
+  const out: Array<{ name: string; command?: string; args?: string[] }> = [];
+  for (const [name, val] of Object.entries(serversField as Record<string, unknown>)) {
+    if (!name || typeof name !== 'string') continue;
+    let command: string | undefined;
+    let args: string[] | undefined;
+    if (val && typeof val === 'object') {
+      const cfg = val as Record<string, unknown>;
+      if (typeof cfg.command === 'string') command = cfg.command;
+      if (Array.isArray(cfg.args)) {
+        // Filter to strings only — defensive against malformed configs.
+        args = (cfg.args as unknown[]).filter((a): a is string => typeof a === 'string');
+      }
+    }
+    out.push({ name, command, args });
+  }
+  return out;
+}
+
+/**
+ * Resolve the list of `.mcp.json` paths to scan, in priority order.
+ * Earlier entries win on duplicate server names — Claude Code itself
+ * resolves user-level config before project-level, and we mirror that
+ * so the scanner agrees with the runtime.
+ *
+ * Sources, in order:
+ *   1. `~/.mcp.json` (legacy global location — some installs use this)
+ *   2. `~/.claude/.mcp.json` (canonical Claude Code global location)
+ *   3. `<cwd>/.mcp.json` (project-local override; only when cwd is set)
+ */
+function resolveMcpJsonPaths(claudeRoot: string, projectCwd?: string): string[] {
+  // #bug39 — `RUFLO_MCP_HOME_OVERRIDE` lets tests redirect `~/.mcp.json`
+  // to a controlled path so the scanner doesn't accidentally read the
+  // real user's config. Empty string explicitly disables the home lookup.
+  const homeOverride = process.env.RUFLO_MCP_HOME_OVERRIDE;
+  const home = homeOverride !== undefined ? homeOverride : homedir();
+
+  const paths: string[] = [];
+  if (home.length > 0) {
+    paths.push(join(home, '.mcp.json'));
+  }
+  paths.push(join(claudeRoot, '.mcp.json'));
+  if (projectCwd && projectCwd !== home && projectCwd !== claudeRoot) {
+    paths.push(join(projectCwd, '.mcp.json'));
+  }
+  return paths;
+}
+
+/**
+ * Scan all `.mcp.json` files for MCP server entries and return a
+ * deduplicated, classified list. The first occurrence of a given
+ * server name wins — see `resolveMcpJsonPaths` for ordering.
+ *
+ * NEVER throws. Missing / unreadable / malformed files are silently
+ * skipped — the registry must always return a well-formed result so
+ * downstream MCP tools (`guidance_capabilities`, `agent_list`) keep
+ * working even when the user's config is broken.
+ */
+export function scanForeignMcpServers(claudeRoot: string, projectCwd?: string): ForeignMcpServer[] {
+  const paths = resolveMcpJsonPaths(claudeRoot, projectCwd);
+  const seen = new Map<string, ForeignMcpServer>();
+
+  for (const path of paths) {
+    const entries = readMcpJson(path);
+    for (const entry of entries) {
+      // Earlier files win — skip if we've already recorded this name.
+      if (seen.has(entry.name)) continue;
+      seen.set(entry.name, {
+        name: entry.name,
+        source: classifyMcpSource(entry.name),
+        command: entry.command,
+        args: entry.args,
+        origin: path,
+      });
+    }
+  }
+
+  return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
 // ── Public API ────────────────────────────────────────────────
 
 /**
@@ -365,14 +545,32 @@ export async function scanClaudeCodeRegistry(claudeRoot?: string): Promise<Claud
     return cached.registry;
   }
 
+  // Project cwd matters for the project-local `.mcp.json` lookup. We
+  // probe `process.cwd()` here so foreign-MCP scanning works even when
+  // the Claude Code root itself is empty/missing.
+  // #bug39 — `RUFLO_MCP_PROJECT_CWD` lets tests inject a project cwd
+  // without `process.chdir()` (unsupported in vitest workers).
+  const projectCwd = (() => {
+    const override = process.env.RUFLO_MCP_PROJECT_CWD;
+    if (override && override.length > 0) return override;
+    try {
+      return process.cwd();
+    } catch {
+      return undefined;
+    }
+  })();
+
   // If the root doesn't exist, return an empty (but well-formed) registry.
-  // Cache the empty result so we don't keep stat-ing a missing path.
+  // Cache the empty result so we don't keep stat-ing a missing path. We
+  // STILL run the foreign-MCP scan because `~/.mcp.json` and
+  // `<cwd>/.mcp.json` can exist independently of the `~/.claude/` root.
   if (!existsSync(root)) {
     const empty: ClaudeCodeRegistry = {
       agents: [],
       skills: [],
       commands: [],
       plugins: [],
+      foreignMcpServers: scanForeignMcpServers(root, projectCwd),
       scannedAt: now,
       root,
     };
@@ -388,6 +586,7 @@ export async function scanClaudeCodeRegistry(claudeRoot?: string): Promise<Claud
         skills: [],
         commands: [],
         plugins: [],
+        foreignMcpServers: scanForeignMcpServers(root, projectCwd),
         scannedAt: now,
         root,
       };
@@ -403,6 +602,7 @@ export async function scanClaudeCodeRegistry(claudeRoot?: string): Promise<Claud
     skills: scanSkills(root),
     commands: scanCommands(root),
     plugins: scanPlugins(root),
+    foreignMcpServers: scanForeignMcpServers(root, projectCwd),
     scannedAt: now,
     root,
   };
