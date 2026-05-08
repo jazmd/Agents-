@@ -9,7 +9,11 @@ import { homedir } from 'os';
 import { type MCPTool, getProjectCwd } from './types.js';
 import { validateIdentifier, validateText, validatePath } from './validate-input.js';
 import { scanClaudeCodeRegistry } from '../registry/claude-code-registry.js';
-import { matchUserSkillsForTask, type UserSkillMatch } from '../registry/skill-matcher.js';
+import {
+  matchUserSkillsForTask,
+  matchUserSkillsForTaskSemantic,
+  type UserSkillMatch,
+} from '../registry/skill-matcher.js';
 
 // Real vector search functions - lazy loaded to avoid circular imports
 let searchEntriesFn: ((options: {
@@ -917,12 +921,38 @@ export const hooksRoute: MCPTool = {
     // the user's `polymarket-analyzer` / `kali-osint-*` / `ceo` etc. as
     // alternatives even when AgentDB / semantic router lock onto a built-in
     // pattern. Failures here must never break routing.
+    //
+    // #bug40 — Use the SEMANTIC matcher (#bug25.2) by default. The keyword
+    // bag-of-words fallback was producing false positives like ranking
+    // `kali-metasploit` top-1 for a "JWT auth refactor" task because of the
+    // shared "auth" token. The semantic path embeds task + skill via Ollama
+    // and uses cosine similarity (with a keyword blend), which correctly
+    // distinguishes "pentest with metasploit" from "JWT auth refactor".
+    // When Ollama is unreachable `matchUserSkillsForTaskSemantic` transparently
+    // falls back to the keyword scorer (`backend: 'keyword'`), so this swap
+    // never reduces availability — only correctness.
     let userMatches: UserSkillMatch[] = [];
+    let userMatchBackend: 'embedding' | 'keyword' | 'hybrid' | 'none' = 'none';
     try {
       const registry = await scanClaudeCodeRegistry();
-      userMatches = matchUserSkillsForTask(task, context, registry.skills, registry.agents);
+      const semanticResult = await matchUserSkillsForTaskSemantic(
+        task,
+        context,
+        registry.skills,
+        registry.agents,
+      );
+      userMatches = semanticResult.matches;
+      userMatchBackend = semanticResult.backend;
     } catch {
-      // Registry unavailable — keep going with built-in routing only.
+      // Registry / Ollama unavailable — final safety net, fall back to the
+      // pure keyword scorer rather than dropping user matches entirely.
+      try {
+        const registry = await scanClaudeCodeRegistry();
+        userMatches = matchUserSkillsForTask(task, context, registry.skills, registry.agents);
+        userMatchBackend = 'keyword';
+      } catch {
+        /* registry truly unavailable — keep going with built-in routing only. */
+      }
     }
 
     // Phase 5: Try AgentDB's SemanticRouter / LearningSystem first
@@ -1056,8 +1086,14 @@ export const hooksRoute: MCPTool = {
       // Map keyword score (0..N) into a 0..1 confidence — clamp at 0.95.
       confidence = Math.min(0.6 + topUser.score * 0.05, 0.95);
       matchedPattern = `user-${topUser.type}:${topUser.name}`;
-      routingMethod = 'user-installed-keyword';
-      backendInfo = 'user-installed registry (keyword match — TODO: upgrade to embedding)';
+      // #bug40 — backend label reflects which matcher actually scored this.
+      // `hybrid` = Ollama embed + keyword blend (preferred). `embedding` =
+      // pure semantic. `keyword` = Ollama unreachable, fell back. `none` =
+      // registry itself failed.
+      routingMethod = `user-installed-${userMatchBackend}`;
+      backendInfo = userMatchBackend === 'keyword' || userMatchBackend === 'none'
+        ? 'user-installed registry (keyword match — Ollama unreachable)'
+        : `user-installed registry (semantic ${userMatchBackend} match via Ollama)`;
       primarySource = 'user';
     }
 
