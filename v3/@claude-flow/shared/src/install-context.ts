@@ -123,14 +123,31 @@ export function resolveInstallContext(
   const homeClaude = path.join(home, '.claude');
   const cwdClaude = path.join(cwd, '.claude');
 
-  const cwdHasClaude = safeExists(cwdClaude);
+  // Bug 46: degenerate case — cwd IS itself a `.claude` directory (most
+  // commonly: user invoked `ruflo` from inside `~/.claude` directly). In
+  // that scenario, `cwd/.claude/` becomes the double-`.claude` path the
+  // entire STRAT-1 hoist was meant to eliminate. Detect via:
+  //   (a) cwd basename === ".claude" — covers any `*/.claude` parent
+  //   (b) cwd === homeClaude — covers the canonical "I'm in ~/.claude" case
+  // When detected, force global mode rooted at cwd itself (NOT cwd/.claude).
+  // This handles the legitimate stray `~/.claude/.claude/settings.local.json`
+  // that Claude Code creates without falling for it as a "project".
+  const cwdIsClaudeDir = path.basename(cwd) === '.claude' || cwd === homeClaude;
+
+  const cwdHasClaude = !cwdIsClaudeDir && safeExists(cwdClaude);
   const homeHasClaude = safeExists(homeClaude);
 
   let claudeRoot: string;
   let isGlobalInstall: boolean;
   let projectRoot: string | null;
 
-  if (opts.forceGlobal || (!cwdHasClaude && homeHasClaude)) {
+  if (cwdIsClaudeDir) {
+    // Bug 46: the user is already inside the .claude config dir.
+    // claudeRoot IS cwd; never descend into a child .claude.
+    claudeRoot = cwd;
+    isGlobalInstall = true;
+    projectRoot = null;
+  } else if (opts.forceGlobal || (!cwdHasClaude && homeHasClaude)) {
     // Global mode — claudeRoot is ~/.claude, no project tree.
     claudeRoot = homeClaude;
     isGlobalInstall = true;
