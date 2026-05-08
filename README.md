@@ -6,7 +6,7 @@ Multi-agent orchestration for Claude Code. Fork of [ruvnet/ruflo](https://github
 
 [![Stars](https://img.shields.io/github/stars/h4ckm1n-dev/SwarmOps?style=flat-square&logo=github&color=gold)](https://github.com/h4ckm1n-dev/SwarmOps)
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](https://opensource.org/licenses/MIT)
-[![Tests](https://img.shields.io/badge/tests-2400%2B-brightgreen?style=flat-square)](https://github.com/h4ckm1n-dev/SwarmOps/tree/main/v3/%40claude-flow/cli/__tests__)
+[![Tests](https://img.shields.io/badge/tests-2675%2B-brightgreen?style=flat-square)](https://github.com/h4ckm1n-dev/SwarmOps/tree/main/v3/%40claude-flow/cli/__tests__)
 [![Roadmap](https://img.shields.io/badge/roadmap-research--roadmap%2F-blueviolet?style=flat-square)](./research-roadmap/)
 [![Forked from ruvnet/ruflo](https://img.shields.io/badge/forked_from-ruvnet/ruflo-blue?style=flat-square&logo=git)](https://github.com/ruvnet/ruflo)
 
@@ -67,9 +67,9 @@ We started as a 31-bug audit of ruflo's global-install behavior. We're now a sep
 
 We track upstream's `main` for shared bug fixes and security patches (last sync: 2026-05-08, clean 4-commit merge). Beyond that, the products diverge.
 
-## Recent changelog (2026-05-08)
+## Recent changelog (2026-05-08 → 2026-05-09)
 
-A single day of intensive development shipped both the architectural deleveraging the v3.6 audit asked for AND the first Tier 2 product features. Each commit landed on `main` after passing the full 2,500+ test suite with zero net regression.
+Two days shipped the architectural deleveraging the v3.6 audit asked for, four Tier 2 product features (Gap 1 traces, Gap 4 cost telemetry, daemon hardening, routing intelligence), and the meta-improvement (specialist agents now actually get picked over generic `coder`). Each commit landed on `main` after passing the full 2,600+ test suite with zero net regression.
 
 **Tier 0/1 architectural batch** (commit `cd44c55f8`):
 - **3 `cache_control` breakpoints** in agent dispatch (tools / system / CLAUDE.md+project context), all with 1h TTL via the `extended-cache-ttl-2025-04-11` beta header. Healthy agent loops now run **>80% cache-read ratio** after first call. Estimated **50-90% input-token cost cut** on warm dispatches. New `swarmops cache-stats` command tracks rolling-100 hit ratio.
@@ -87,9 +87,12 @@ A single day of intensive development shipped both the architectural deleveragin
 - **Bug 46**: `resolveInstallContext()` handles the degenerate case where CWD is itself a `.claude` directory — was returning the very double-`.claude` path the helper was designed to eliminate.
 
 **Tier 2 features**:
-- **Gap 1 — Replayable agent traces** (commit `064b2e365`): the `swarmops trace list / replay / prune` CLI + a self-contained Gantt-swimlane HTML viewer. See the killer-features section above.
-- **Bug 47 — Daemon path-mismatch detection** (commit prior to `0051aa437`): `detectDaemonPathMismatch()` + `daemon restart --force-path` + `swarmops doctor` warning catch the case where a stale daemon (e.g. from `~/.npm/_npx/...` cache) keeps running after the install moves.
-- **Lazy-load `bin/cli.js`** (commit `0051aa437`): bare-TTY help renders in 60ms (was 180ms). 11 bootstrap tests assert no heavy module families load on early-exit paths.
+- **Gap 1 — Replayable agent traces** (commit `064b2e365`): the `swarmops trace list / replay / prune` CLI + a self-contained Gantt-swimlane HTML viewer. See the dedicated section above.
+- **Gap 4 — Per-agent cost telemetry** (commits `0327c0083`, `992a620f8`): `swarmops cost stats / session / models / reset` + cost data flows into the trace viewer's HTML header AND per-bar overlays (each Gantt bar shows its individual `$0.0042`). v1.5 (`992a620f8`) closed the per-step granularity loop via an in-process `Map<sessionId, currentStepIndex>` consulted by `callAnthropicMessages` as an auto-fallback — no caller threading needed.
+- **Bug 47 — Daemon path-mismatch detection** (commit prior to `0051aa437`): `detectDaemonPathMismatch()` + `daemon restart --force-path` + `swarmops doctor` warning catch the stale-daemon case (e.g. from `~/.npm/_npx/...` cache).
+- **Bug 48 — Dual daemon-state.json detection** (commit `e0702f9d4`): both `<cwd>/.claude-flow/` and `<homedir>/.claude/.claude-flow/` checked; `daemon restart --force-path` cleans up daemons in either location.
+- **Lazy-load CLI** (commits `0051aa437`, `ab76bf304`): bare-TTY help renders in 60ms (was 180ms); `trace --help` from 200ms → 110ms via `mcp-client.ts` lazy tool registration. 11 + 8 bootstrap tests assert heavy modules (hnswlib, onnxruntime, transformers, tiktoken, better-sqlite3) don't load on early-exit paths.
+- **Routing intelligence** (commit `efddbdc3d`): the `[INFO] Routing task:` notification now detects language tokens (typescript, python, swift, rust), framework tokens (react, fastapi, nextjs), and domain tokens (security, performance, refactor, architecture) — recommends specialists over generic `coder`. New `hooks_route_specialist(task)` MCP tool exposes the same ranker as a queryable API. Verified live in this session.
 
 Full execution dossier in [`research-roadmap/execution/`](./research-roadmap/execution/).
 
@@ -139,7 +142,7 @@ Full execution dossier in [`research-roadmap/execution/`](./research-roadmap/exe
 - `agent list` table actually readable (no more "Invalid Date" / 13-char truncated names)
 
 **8. Honest test coverage**
-- 2,400+ tests pass cleanly across 88 test files
+- 2,675+ tests pass cleanly across 100+ test files
 - Smoke tests for the 6,677-LoC untested zone (`commands/hooks.ts` 5%→30-40%, `services/headless-worker-executor.ts` 0%→45-55%)
 - Per-bug regression suite — fixes can't silently regress
 - 9 known-failing tests are all pre-existing in unrelated subsystems (router-bandit's `process.chdir-in-workers` limitation, integration-docker, commands-deep, pq-validation) — not introduced by SwarmOps
@@ -157,7 +160,20 @@ Full execution dossier in [`research-roadmap/execution/`](./research-roadmap/exe
 - `swallowError(label, err, hint?)` — single recipient for intentional silent catches, debug-level gated. Replaces `} catch { /* defensive */ }` in the 8 hottest sites (memory-bridge, db-pool, embedder-resolver, rabitq-index)
 
 See the Replayable agent traces and Semantic routing sections above for details on the trace viewer (Gap 1) and user-agent routing capabilities.
-- 19 of 22 probes converted; the 3 deferred are generic `bridgeGetController(name)` accessors that legitimately need string-keyed dispatch
+
+**11. Per-agent cost telemetry**
+- `swarmops cost stats / session / models / reset` CLI surface
+- Per-step cost attribution flows automatically when running inside a trajectory (in-process `Map<sessionId, currentStepIndex>` tracked by `hooks_intelligence_trajectory-step` and consulted by `callAnthropicMessages`)
+- Each Gantt bar in the trace viewer shows its individual `$0.0042` overlay; HTML header shows aggregate session cost
+- Pricing table covers Claude 4.x (Opus 4.7, Sonnet 4.6, Haiku 4.5) + 3.x legacy aliases; override via `~/.claude/.claude-flow/pricing-override.json`
+- Persistence: `cost-stats.json` rolling-100 with atomic writes
+- Failure-tolerant: persistence errors swallow without breaking dispatch
+
+**12. Smart agent routing**
+- `[INFO] Routing task:` notification detects language tokens (typescript, python, rust, swift, go), framework tokens (react, nextjs, fastapi, django, express), and domain tokens (security, performance, refactor, architecture, database, api, mobile, deploy, debug, test) — recommends `typescript-expert` / `python-expert` / `security-architect` / etc. over the generic `coder` fallback
+- New `hooks_route_specialist({ task, limit, includeGenerics })` MCP tool exposes the ranker as an active query path
+- Specialist-boost: when a specialist matches, generic agents (coder/tester/reviewer/general-purpose) drop out unless no specialist scored above threshold
+- 28 router-pattern tests + 23 hooks-route-specialist tests cover the matcher
 
 ### What SwarmOps does NOT add
 
@@ -167,14 +183,22 @@ See the Replayable agent traces and Semantic routing sections above for details 
 
 ## Roadmap
 
-The full strategic plan is in [`research-roadmap/00-SYNTHESIS.md`](./research-roadmap/00-SYNTHESIS.md) — synthesized from 5 independent research agents (upstream pulse, competitive landscape, internal debt, performance frontier, adoption playbook). The next features in flight:
+Full strategic plan in [`research-roadmap/00-SYNTHESIS.md`](./research-roadmap/00-SYNTHESIS.md) — synthesized from 5 independent research agents (upstream pulse, competitive landscape, internal debt, performance frontier, adoption playbook).
 
-- **[Gap 1] Replayable agent traces** — `swarmops trace replay <session-id>` opens a Gantt swimlane HTML viewer over the existing `TrajectoryData` (one row per agent, time on X axis, click bars for full step JSON). Self-contained HTML, no CDN deps. Design spec in [`research-roadmap/GAP-1-DESIGN.md`](./research-roadmap/GAP-1-DESIGN.md). Estimated 5.5 dev-days. **No competitor in the Claude Code orchestration space ships this.**
-- **[Gap 4] Per-agent cost telemetry** — instrument `SendMessage` and `agent_execute` with token counts; `swarmops cost estimate <task>` predicts Max-plan burn before dispatch. Estimated 2-4 weeks.
-- **Local-model fallback** — harden the Ollama path the memory bridge already uses; "free tier" mode where memory + routing run on local mxbai + Llama-3, only escalating to Claude for actual agent work. Driven by Anthropic's April 4 2026 policy change blocking Pro/Max subs from third-party agent frameworks. Estimated 1-2 weeks.
-- **Daemon warm-mode hardening** — long-lived daemon process amortizes Node startup + hnswlib load + DB pool warmup. Already partially in place; hardening it gives ~30× warm-path improvement (5-15ms per dispatch instead of 300-500ms).
+**Shipped (2026-05-08 → 2026-05-09)**:
+- ✅ Tier 1 architectural batch — STRAT-1 (`resolveInstallContext`), STRAT-2 (`ControllerCapabilities`), CLASS-1 (`swallowError`), PERF-2 (memory-search N→1 collapse), PROMPT-CACHE shaping
+- ✅ Gap 1 — Replayable agent traces ([design spec](./research-roadmap/GAP-1-DESIGN.md))
+- ✅ Gap 4 v1 + v1.5 — Per-agent cost telemetry with per-step granularity ([design spec](./research-roadmap/GAP-4-DESIGN.md))
+- ✅ Daemon hardening — Bug 47 (stale-path detection), Bug 48 (dual state-file locations), lazy-load (cold-start −120ms), Bug 49 (mcp-client lazy tool registration, `trace --help` 200ms→110ms)
+- ✅ Routing intelligence — language/framework/domain pattern matching + `hooks_route_specialist` MCP tool
+- ✅ Connected-component bug fixes — Bug 44 (security audit persistence), Bug 45 (Tests field shows `─` outside projects), Bug 46 (`resolveInstallContext` cwd-is-`.claude` degenerate case)
 
-Already shipped strategic improvements (the architectural deleveraging the v3.6 audit asked for): STRAT-1 (`resolveInstallContext`), STRAT-2 (`ControllerCapabilities`), CLASS-1 (`swallowError`), PERF-2 (memory-search N+1 collapse), PROMPT-CACHE shaping. See [`ANALYSIS.md`](./ANALYSIS.md) for the original 6-analyst audit and [`research-roadmap/03-internal-debt.md`](./research-roadmap/03-internal-debt.md) for the post-Tier-1 audit.
+**Queued**:
+- **Local-model fallback** — harden the Ollama path memory bridge already uses; "free tier" mode where memory + routing + simple agent work runs on local mxbai + Llama-3, only escalating to Claude for hard tasks. Driven by Anthropic's April 4 2026 policy change blocking Pro/Max subs from third-party agent frameworks. Estimated 1-2 weeks.
+- **Daemon IPC mode** — the 30× warm-path piece. Long-lived daemon hosts a stdio server; CLI dispatches go to running daemon instead of subprocess fork (5-15ms per dispatch instead of 300-500ms). Estimated 1-2 weeks. Defer until measurement justifies.
+- **Deeper `mcp-client.ts` lazy-load** — next 100ms-class target after Bug 49. Estimated 3-5 hours.
+
+See [`ANALYSIS.md`](./ANALYSIS.md) for the original 6-analyst audit and [`research-roadmap/03-internal-debt.md`](./research-roadmap/03-internal-debt.md) for the post-Tier-1 audit.
 
 ---
 
