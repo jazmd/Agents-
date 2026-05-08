@@ -1160,6 +1160,398 @@ export const hooksRoute: MCPTool = {
   },
 };
 
+// =============================================================================
+// ROUTING-B — `hooks_route_specialist` MCP tool
+// -----------------------------------------------------------------------------
+// Companion to `hooksRoute`. Where `hooksRoute` returns a single end-to-end
+// routing decision (3-tier model + matched pattern + AgentDB context),
+// `hooksRouteSpecialist` is a *pure ranker*: given a task description, score
+// every known specialist agent type and return the top-N candidates so the
+// caller (typically a lead agent before `Agent({...})` dispatch) can pick a
+// language- or domain-specific worker instead of defaulting to generic
+// `coder`/`tester`/`reviewer`.
+//
+// All inputs are normalized to lower-case; matching is substring-based so
+// multi-word tokens like "memory leak" or "cold start" work without a real
+// tokenizer. No I/O — the registry and token tables are static and embedded
+// here on purpose (the Agent tool's catalog isn't queryable from inside CLI
+// code).
+// =============================================================================
+
+interface SpecialistAgentEntry {
+  /** Canonical agent type as accepted by the Agent tool's `subagent_type`. */
+  name: string;
+  /** Language families the agent specializes in (lower-case keys of LANGUAGE_TOKENS). */
+  langs?: string[];
+  /** Frameworks/runtimes the agent specializes in (lower-case keys of FRAMEWORK_TOKENS). */
+  frameworks?: string[];
+  /** Domain tags (lower-case keys of DOMAIN_TOKENS). */
+  domains?: string[];
+  /** Generics get a small score penalty so specialists win ties. */
+  isGeneric?: boolean;
+  /** Optional one-line summary surfaced in `reason`. */
+  description?: string;
+}
+
+const SPECIALIST_AGENT_REGISTRY: readonly SpecialistAgentEntry[] = [
+  // Language specialists
+  { name: 'typescript-expert', langs: ['typescript'], domains: ['refactor', 'performance'], description: 'TypeScript with strict typing, advanced types' },
+  { name: 'python-expert', langs: ['python'], domains: ['refactor', 'performance'], description: 'Python with async/await and type hints' },
+  { name: 'rust-expert', langs: ['rust'], domains: ['performance', 'refactor'], description: 'Rust with ownership and lifetimes' },
+  { name: 'golang-expert', langs: ['go'], domains: ['performance', 'refactor'], description: 'Go with goroutines and channels' },
+  { name: 'swift-developer', langs: ['swift'], frameworks: ['swiftui', 'uikit', 'appkit'], description: 'Swift on Apple platforms' },
+  { name: 'apple-ui-designer', langs: ['swift'], frameworks: ['swiftui', 'uikit', 'appkit'], domains: ['ui', 'design'], description: 'Apple HIG UI/UX' },
+  { name: 'java-expert', langs: ['java'], domains: ['refactor', 'performance'], description: 'Java with modern patterns' },
+  { name: 'csharp-expert', langs: ['csharp'], domains: ['refactor', 'performance'], description: 'C# / .NET expert' },
+  { name: 'ruby-expert', langs: ['ruby'], frameworks: ['rails'], description: 'Ruby with Rails idioms' },
+
+  // Framework / runtime specialists
+  { name: 'backend-dev', frameworks: ['express', 'fastapi', 'nestjs'], domains: ['backend', 'api'], description: 'Backend service development' },
+  { name: 'mobile-dev', frameworks: ['react-native', 'expo'], domains: ['mobile'], description: 'Cross-platform mobile development' },
+  { name: 'react-expert', frameworks: ['react', 'next'], langs: ['typescript'], domains: ['ui'], description: 'React + Next.js UI engineer' },
+
+  // Domain specialists
+  { name: 'security-auditor', domains: ['security', 'audit', 'vulnerability', 'cve'], description: 'Security audit + CVE / OWASP triage' },
+  { name: 'security-architect', domains: ['security', 'architecture', 'threat-modeling'], description: 'Security architecture + threat modeling' },
+  { name: 'performance-engineer', domains: ['performance', 'optimize', 'cache', 'profile'], description: 'Performance optimization + caching' },
+  { name: 'performance-profiler', domains: ['profile', 'bottleneck', 'monitoring', 'performance'], description: 'Profiling + bottleneck detection' },
+  { name: 'refactoring-specialist', domains: ['refactor', 'technical-debt', 'design-pattern', 'cleanup'], description: 'Refactor + design patterns' },
+  { name: 'system-architect', domains: ['architecture', 'system-design', 'adr', 'design-pattern'], description: 'System architecture + ADRs' },
+  { name: 'database-optimizer', domains: ['database', 'query', 'index', 'schema'], description: 'Database query + index tuning' },
+  { name: 'api-designer', domains: ['api', 'rest', 'graphql', 'openapi'], description: 'API contract design (REST / GraphQL / OpenAPI)' },
+  { name: 'infrastructure-architect', domains: ['cloud', 'kubernetes', 'aws', 'gcp', 'azure'], description: 'Cloud infrastructure architecture' },
+  { name: 'deployment-engineer', domains: ['ci-cd', 'docker', 'deploy'], description: 'CI/CD + container deployment' },
+  { name: 'debugger', domains: ['debug', 'stack-trace', 'error', 'root-cause'], description: 'Stack-trace + root-cause debugging' },
+  { name: 'test-engineer', domains: ['test', 'tdd', 'bdd', 'integration-test', 'e2e'], description: 'Test strategy (TDD / BDD / e2e)' },
+  { name: 'researcher', domains: ['research', 'investigate'], description: 'Deep research + investigation' },
+
+  // Generic fallbacks (penalized when specialists exist)
+  { name: 'general-purpose', isGeneric: true, description: 'Generic fallback for unstructured tasks' },
+  { name: 'coder', isGeneric: true, description: 'Generic implementation worker' },
+  { name: 'tester', isGeneric: true, description: 'Generic test author' },
+  { name: 'reviewer', isGeneric: true, description: 'Generic code reviewer' },
+];
+
+const LANGUAGE_TOKENS: Record<string, readonly string[]> = {
+  typescript: ['typescript', '.ts', '.tsx', 'tsconfig', 'tsc', 'noimplicitany', 'ts-node'],
+  python: ['python', '.py', 'pip', 'venv', 'asyncio', 'pytest', 'mypy', 'pyproject'],
+  swift: ['swift', 'swiftui', 'xcode', 'spm', '.swift'],
+  rust: ['rust', '.rs', 'cargo', 'clippy', 'rustc'],
+  go: ['golang', 'go mod', 'go build', 'goroutine'],
+  java: ['java', '.java', 'maven', 'gradle', 'jvm'],
+  csharp: ['c#', 'csharp', '.cs ', 'dotnet', '.net'],
+  ruby: ['ruby', '.rb', 'gemfile', 'bundler'],
+};
+
+const FRAMEWORK_TOKENS: Record<string, readonly string[]> = {
+  react: ['react', 'jsx', 'tsx', 'usestate', 'useeffect', 'usememo'],
+  next: ['next.js', 'nextjs', 'app router'],
+  fastapi: ['fastapi', 'pydantic'],
+  express: ['express', 'expressjs'],
+  nestjs: ['nestjs', 'nest.js'],
+  swiftui: ['swiftui'],
+  uikit: ['uikit'],
+  appkit: ['appkit'],
+  'react-native': ['react-native', 'react native'],
+  expo: ['expo'],
+  rails: ['rails', 'ruby on rails'],
+};
+
+const DOMAIN_TOKENS: Record<string, readonly string[]> = {
+  performance: ['perf ', 'performance', 'optimize', 'optimisation', 'optimization', 'lazy load', 'lazy-load', 'cold start', 'memory leak', 'prompt-cache'],
+  optimize: ['optimize', 'optimization', 'speed up', 'faster'],
+  cache: ['cache', 'caching', 'lru', 'memoize'],
+  profile: ['profile', 'profiling', 'flamegraph'],
+  bottleneck: ['bottleneck', 'hot path'],
+  monitoring: ['monitor', 'monitoring', 'observability', 'metrics'],
+
+  security: ['security', 'auth', 'cve', 'vuln', 'sast', 'owasp', 'penetration', 'hardening', 'threat'],
+  audit: ['audit', 'auditing', 'compliance'],
+  vulnerability: ['vulnerability', 'vulnerabilities', 'exploit'],
+  cve: ['cve', 'cve-'],
+  'threat-modeling': ['threat model', 'threat-modeling', 'attack surface'],
+
+  refactor: ['refactor', 'refactoring', 'cleanup', 'extract', 'hoist', 'rename'],
+  'technical-debt': ['technical debt', 'tech debt', 'legacy code'],
+  'design-pattern': ['design pattern', 'design-pattern', 'pattern'],
+
+  architecture: ['architecture', 'system design', 'bounded context', 'domain driven', 'domain-driven', 'architectural'],
+  'system-design': ['system design', 'system-design'],
+  adr: ['adr', 'architecture decision'],
+
+  database: ['database', 'sqlite', 'postgres', 'postgresql', 'mysql', 'mongodb', 'sql ', 'migration'],
+  query: ['query', 'queries'],
+  index: ['index', 'indexing', 'btree'],
+  schema: ['schema', 'ddl'],
+
+  api: ['api design', 'rest api', 'restful', 'graphql', 'openapi', 'swagger', 'endpoint'],
+  rest: ['rest ', 'restful', 'rest api'],
+  graphql: ['graphql'],
+  openapi: ['openapi', 'swagger'],
+
+  test: ['test', 'tdd', 'bdd', 'pytest', 'vitest', 'jest', 'integration test', 'integration-test', 'e2e', 'unit test'],
+  tdd: ['tdd', 'test-driven'],
+  bdd: ['bdd', 'behavior-driven'],
+  'integration-test': ['integration test', 'integration-test'],
+  e2e: ['e2e', 'end-to-end', 'playwright', 'cypress'],
+
+  cloud: ['cloud', 'iaas', 'paas'],
+  aws: ['aws', 'amazon web services', 's3', 'lambda', 'ec2'],
+  gcp: ['gcp', 'google cloud'],
+  azure: ['azure'],
+  kubernetes: ['kubernetes', 'k8s', 'helm'],
+  'ci-cd': ['ci/cd', 'ci-cd', 'github actions', 'gitlab ci', 'jenkins'],
+  docker: ['docker', 'dockerfile', 'container'],
+  deploy: ['deploy', 'deployment', 'release'],
+
+  debug: ['debug', 'debugging'],
+  'stack-trace': ['stack trace', 'stack-trace', 'traceback'],
+  error: ['error ', 'exception', 'crash'],
+  'root-cause': ['root cause', 'root-cause'],
+
+  research: ['research', 'investigate', 'investigation', 'survey'],
+  ui: ['ui ', 'ux', 'user interface', 'usability'],
+  design: ['design ', 'mockup', 'wireframe'],
+  mobile: ['mobile', 'ios', 'android'],
+  backend: ['backend', 'back-end', 'server-side'],
+};
+
+/** Detect which keys of a token table appear (case-insensitive substring) in `taskLower`. */
+function detectMatches(
+  taskLower: string,
+  table: Record<string, readonly string[]>,
+): { keys: string[]; tokensByKey: Map<string, string[]> } {
+  const keys: string[] = [];
+  const tokensByKey = new Map<string, string[]>();
+  for (const [key, patterns] of Object.entries(table)) {
+    const matched: string[] = [];
+    for (const pat of patterns) {
+      if (taskLower.includes(pat)) matched.push(pat);
+    }
+    if (matched.length > 0) {
+      keys.push(key);
+      tokensByKey.set(key, matched);
+    }
+  }
+  return { keys, tokensByKey };
+}
+
+interface ScoredAgent {
+  agentType: string;
+  score: number;
+  matchedTokens: string[];
+  reason: string;
+  isGeneric: boolean;
+}
+
+function scoreAgent(
+  agent: SpecialistAgentEntry,
+  taskLower: string,
+  langKeys: string[],
+  langTokens: Map<string, string[]>,
+  fwKeys: string[],
+  fwTokens: Map<string, string[]>,
+  domainKeys: string[],
+  domainTokens: Map<string, string[]>,
+): ScoredAgent | null {
+  let score = 0;
+  const reasons: string[] = [];
+  const matched: string[] = [];
+
+  // +3 per matched language token
+  if (agent.langs) {
+    for (const lang of agent.langs) {
+      if (langKeys.includes(lang)) {
+        score += 3;
+        const toks = langTokens.get(lang) ?? [];
+        matched.push(...toks);
+        reasons.push(`language match: ${lang}`);
+      }
+    }
+  }
+
+  // +2 per matched framework token
+  if (agent.frameworks) {
+    for (const fw of agent.frameworks) {
+      if (fwKeys.includes(fw)) {
+        score += 2;
+        const toks = fwTokens.get(fw) ?? [];
+        matched.push(...toks);
+        reasons.push(`framework match: ${fw}`);
+      }
+    }
+  }
+
+  // +1 per matched domain token
+  if (agent.domains) {
+    for (const dom of agent.domains) {
+      if (domainKeys.includes(dom)) {
+        score += 1;
+        const toks = domainTokens.get(dom) ?? [];
+        matched.push(...toks);
+        reasons.push(`domain match: ${dom}`);
+      }
+    }
+  }
+
+  // +5 boost if the agent's name appears literally in the task description
+  if (taskLower.includes(agent.name.toLowerCase())) {
+    score += 5;
+    matched.push(agent.name.toLowerCase());
+    reasons.push(`agent name appears in task`);
+  }
+
+  // -1 generic penalty (only if the agent already has a score — generics with
+  // no signal stay at 0 and are filtered out below)
+  if (agent.isGeneric && score > 0) {
+    score -= 1;
+  }
+
+  if (score <= 0) return null;
+
+  // De-duplicate matchedTokens while preserving order
+  const seen = new Set<string>();
+  const uniqueMatched = matched.filter(t => {
+    if (seen.has(t)) return false;
+    seen.add(t);
+    return true;
+  });
+
+  const reason = agent.description
+    ? `${agent.description} (${reasons.join('; ')})`
+    : reasons.join('; ');
+
+  return {
+    agentType: agent.name,
+    score,
+    matchedTokens: uniqueMatched,
+    reason,
+    isGeneric: agent.isGeneric === true,
+  };
+}
+
+interface RankSpecialistResult {
+  candidates: Array<{
+    agentType: string;
+    confidence: number;
+    matchedTokens: string[];
+    reason: string;
+  }>;
+  fallback: string | null;
+  detectedLanguages: string[];
+  detectedFrameworks: string[];
+  detectedDomains: string[];
+}
+
+/** Pure ranker — no I/O, no async, deterministic. Exported for tests. */
+export function rankSpecialistAgents(
+  task: string,
+  options: { limit?: number; includeGenerics?: boolean } = {},
+): RankSpecialistResult {
+  const limit = Math.max(1, Math.min(15, options.limit ?? 5));
+  const includeGenerics = options.includeGenerics === true;
+
+  const taskLower = (task ?? '').toLowerCase();
+
+  if (!taskLower.trim()) {
+    return {
+      candidates: [],
+      fallback: 'general-purpose',
+      detectedLanguages: [],
+      detectedFrameworks: [],
+      detectedDomains: [],
+    };
+  }
+
+  const { keys: langKeys, tokensByKey: langTokens } = detectMatches(taskLower, LANGUAGE_TOKENS);
+  const { keys: fwKeys, tokensByKey: fwTokens } = detectMatches(taskLower, FRAMEWORK_TOKENS);
+  const { keys: domainKeys, tokensByKey: domainTokens } = detectMatches(taskLower, DOMAIN_TOKENS);
+
+  const scored: ScoredAgent[] = [];
+  for (const agent of SPECIALIST_AGENT_REGISTRY) {
+    const result = scoreAgent(
+      agent,
+      taskLower,
+      langKeys,
+      langTokens,
+      fwKeys,
+      fwTokens,
+      domainKeys,
+      domainTokens,
+    );
+    if (result) scored.push(result);
+  }
+
+  // includeGenerics=false hides coder/tester/reviewer/general-purpose UNLESS
+  // they're the only candidates (otherwise the caller would get an empty list
+  // for tasks that genuinely don't fit any specialist).
+  let pool = scored;
+  if (!includeGenerics) {
+    const specialists = scored.filter(s => !s.isGeneric);
+    if (specialists.length > 0) pool = specialists;
+  }
+
+  // Highest score first; stable tiebreak on agent name for determinism.
+  pool.sort((a, b) => (b.score - a.score) || a.agentType.localeCompare(b.agentType));
+
+  const candidates = pool.slice(0, limit).map(s => ({
+    agentType: s.agentType,
+    confidence: Math.min(1.0, Math.max(0, s.score / 10)),
+    matchedTokens: s.matchedTokens,
+    reason: s.reason,
+  }));
+
+  return {
+    candidates,
+    fallback: candidates.length === 0 ? 'general-purpose' : null,
+    detectedLanguages: langKeys,
+    detectedFrameworks: fwKeys,
+    detectedDomains: domainKeys,
+  };
+}
+
+export const hooksRouteSpecialist: MCPTool = {
+  name: 'hooks_route_specialist',
+  description:
+    'Rank specialist agent types for a given task. Returns top-N agents with confidence scores so the caller can choose the best fit instead of defaulting to generic coder/tester/reviewer. Companion to hooks_route — this is the active query path (caller asks "which specialist fits this task?") rather than the passive 3-tier model picker.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      task: {
+        type: 'string',
+        description: 'Task description to route (the user-prompt or agent-spawn description)',
+      },
+      limit: {
+        type: 'number',
+        description: 'Number of candidates to return (default 5, max 15)',
+      },
+      includeGenerics: {
+        type: 'boolean',
+        description:
+          'Include generic agents (coder, tester, reviewer, general-purpose) in results. Default false: specialists only.',
+      },
+    },
+    required: ['task'],
+  },
+  handler: async (params: Record<string, unknown>) => {
+    const task = params.task as string;
+    const rawLimit = params.limit;
+    const includeGenerics = params.includeGenerics === true;
+
+    {
+      const v = validateText(task, 'task');
+      if (!v.valid) return { success: false, error: v.error };
+    }
+
+    const limit = typeof rawLimit === 'number' && Number.isFinite(rawLimit)
+      ? rawLimit
+      : undefined;
+
+    return rankSpecialistAgents(task, { limit, includeGenerics });
+  },
+};
+
+
 // ADR-094 / #bug5 — `pending-insights.jsonl` was written by
 // helpers/intelligence.cjs:recordEdit() (post-edit hook) but only consumed
 // at session-end (consolidate()). Between sessions the JSONL grew while
@@ -4322,6 +4714,7 @@ export const hooksTools: MCPTool[] = [
   hooksPreCommand,
   hooksPostCommand,
   hooksRoute,
+  hooksRouteSpecialist,
   hooksMetrics,
   hooksList,
   hooksPreTask,

@@ -249,13 +249,29 @@ module.exports = commands;
 }
 
 /**
- * Generate agent router script
+ * Generate agent router script (ROUTING-A 2026-05).
+ *
+ * Layered scorer that routes prompts to the most-specific specialist instead
+ * of the previous first-match-wins regex loop, which fired `coder` on every
+ * "implement" verb. Priority bands (highest wins):
+ *   100 — project / business domain (polymarket, solana, kali, ...)
+ *    80 — language specialist (typescript, python, swift)
+ *    70 — framework / API design
+ *    60 — domain-of-work (security, perf, refactor, db, infra, deploy, debug)
+ *    50 — anchored action verbs (review code, explore codebase)
+ *    20 — generic action verbs (implement, build) → coder
+ *
+ * Specialist boost: when ANY non-generic agent matches, generics (coder /
+ * tester / reviewer / general-purpose) are dropped from the candidate set.
+ *
+ * Word boundaries are used aggressively to avoid false positives (e.g.
+ * "swift response" must NOT route to swift-developer).
  */
 export function generateAgentRouter(): string {
   return `#!/usr/bin/env node
 /**
- * Ruflo Agent Router
- * Routes tasks to optimal agents based on learned patterns
+ * Ruflo Agent Router (ROUTING-A 2026-05)
+ * Routes tasks to optimal agents using a layered specialist-first scorer.
  */
 
 const AGENT_CAPABILITIES = {
@@ -264,65 +280,150 @@ const AGENT_CAPABILITIES = {
   reviewer: ['code-review', 'security-audit', 'quality-check', 'best-practices'],
   researcher: ['web-search', 'documentation', 'analysis', 'summarization'],
   architect: ['system-design', 'architecture', 'patterns', 'scalability'],
+  'general-purpose': ['exploration', 'open-ended-research'],
+  'typescript-expert': ['typescript', 'strict-types', 'generics', 'tsconfig'],
+  'python-expert': ['python', 'asyncio', 'fastapi', 'pydantic', 'mypy'],
+  'swift-developer': ['swift', 'swiftui', 'apple-platforms', 'concurrency'],
+  'system-architect': ['architecture', 'ddd', 'bounded-context', 'adr'],
+  'backend-architect': ['api-design', 'service-architecture', 'auth-flows'],
   'backend-dev': ['api', 'database', 'server', 'authentication'],
   'frontend-dev': ['ui', 'react', 'css', 'components'],
-  devops: ['ci-cd', 'docker', 'deployment', 'infrastructure'],
+  'mobile-dev': ['react-native', 'expo', 'mobile-cross-platform'],
+  'apple-ui-designer': ['hig', 'sf-symbols', 'apple-ux'],
+  'api-designer': ['rest', 'graphql', 'openapi', 'versioning'],
+  'security-architect': ['threat-modeling', 'zero-trust', 'attack-surface'],
+  'security-auditor': ['vuln-scan', 'cve', 'sast', 'dast', 'compliance'],
+  'performance-engineer': ['profiling', 'cold-start', 'wasm', 'memory-leak'],
+  'performance-profiler': ['flamegraph', 'cpu-profile', 'heap-snapshot'],
+  'refactoring-specialist': ['technical-debt', 'design-patterns', 'cleanup'],
+  'database-optimizer': ['schema-design', 'query-optimization', 'indexing'],
+  'infrastructure-architect': ['cloud', 'k8s', 'terraform', 'ha', 'dr'],
+  'deployment-engineer': ['ci-cd', 'docker', 'helm', 'pipelines'],
+  'test-engineer': ['tdd', 'bdd', 'test-pyramid', 'fixtures'],
+  debugger: ['root-cause', 'reproduction', 'permanent-fix'],
+  'polymarket-dev': ['polymarket', 'clob', 'gamma', 'live-draw'],
+  'solana-trading-specialist': ['solana', 'raydium', 'pumpfun', 'jupiter'],
+  'flashloan-arbitrage-specialist': ['flashloan', 'aave', 'atomic-arb'],
+  'crypto-research-scientist': ['backtest', 'funding-rate', 'volatility'],
+  'kali-operator': ['nmap', 'metasploit', 'pentest', 'ctf'],
+  'metasploit-operator': ['msf-modules', 'msfdb', 'msfvenom'],
+  'osint-investigator': ['osint', 'sherlock', 'maigret', 'phoneinfoga'],
+  'trading-ml-expert': ['order-book', 'vpin', 'isotonic-calibration'],
 };
 
-const TASK_PATTERNS = {
-  // Code patterns
-  'implement|create|build|add|write code': 'coder',
-  'test|spec|coverage|unit test|integration': 'tester',
-  'review|audit|check|validate|security': 'reviewer',
-  'research|find|search|documentation|explore': 'researcher',
-  'design|architect|structure|plan': 'architect',
+// [regex source, agent, priority]. Higher priority wins.
+const PATTERNS = [
+  // Tier 1: domain (100)
+  ['\\\\b(polymarket|polybot|live[_ -]?draw|oracle[_ -]?crash|gamma api|clob|negrisk|conditionid)\\\\b', 'polymarket-dev', 100],
+  ['\\\\b(solana|raydium|pump\\\\.?fun|jupiter aggregator|jito bundle|meteora|spl token|token-2022|helius|triton)\\\\b', 'solana-trading-specialist', 100],
+  ['\\\\b(flashloan|flash[_ -]?loan|atomic arb|aave flashloan|balancer flashloan|liquidation bot)\\\\b', 'flashloan-arbitrage-specialist', 100],
+  ['\\\\b(crypto strategy|trading strategy|backtest|funding[ -]?rate|market[ -]?making|volatility estimator)\\\\b', 'crypto-research-scientist', 100],
+  ['\\\\b(nmap|gobuster|ffuf|metasploit|msfvenom|msfconsole|hashcat|hydra|burp|kali|pentest|ctf|hack ?the ?box|htb|picoctf|tryhackme|reverse shell)\\\\b', 'kali-operator', 100],
+  ['\\\\b(metasploit framework|msf module|msfdb|workspace.*msf|exploit/(linux|windows|multi)|payload generation)\\\\b', 'metasploit-operator', 100],
+  ['\\\\b(osint|recon target|find email|find username|sherlock|maigret|holehe|phoneinfoga|ghunt|exiftool)\\\\b', 'osint-investigator', 100],
+  ['\\\\b(order book imbalance|vpin|ofi|vamp|yang-?zhang|garman[ -]?klass|isotonic calibration|triple-barrier label)\\\\b', 'trading-ml-expert', 100],
 
-  // Domain patterns
-  'api|endpoint|server|backend|database': 'backend-dev',
-  'ui|frontend|component|react|css|style': 'frontend-dev',
-  'deploy|docker|ci|cd|pipeline|infrastructure': 'devops',
-};
+  // Tier 2: language (80)
+  ['(\\\\btypescript\\\\b|\\\\.ts\\\\b|\\\\.tsx\\\\b|\\\\btsconfig\\\\b|\\\\bnoimplicitany\\\\b|\\\\btsc\\\\b|\\\\bts-node\\\\b|\\\\bts-prune\\\\b|\\\\bgeneric constraint\\\\b|\\\\bconditional type\\\\b|\\\\bmapped type\\\\b)', 'typescript-expert', 80],
+  ['(\\\\bpython\\\\b|\\\\.py\\\\b|\\\\bpyproject\\\\.toml\\\\b|\\\\bpip install\\\\b|\\\\bvenv\\\\b|\\\\bvirtualenv\\\\b|\\\\basyncio\\\\b|\\\\basync def\\\\b|\\\\bpydantic\\\\b|\\\\bmypy\\\\b|\\\\bruff\\\\b|\\\\bpoetry\\\\b)', 'python-expert', 80],
+  ['(\\\\bswiftui\\\\b|\\\\bswift code\\\\b|\\\\bxcode\\\\b|\\\\bswift package\\\\b|\\\\bswift concurrency\\\\b|\\\\bappkit\\\\b|\\\\buikit\\\\b|\\\\bswiftdata\\\\b|\\\\.xcodeproj\\\\b|\\\\.swift\\\\b|package\\\\.swift|@observable)', 'swift-developer', 80],
 
-// Pre-compiled regex pairs — built once at module load instead of on every
-// routeTask() call. Each entry is [pattern, compiledRegex, agent].
-const COMPILED_TASK_PATTERNS = Object.entries(TASK_PATTERNS).map(
-  ([pattern, agent]) => [pattern, new RegExp(pattern, 'i'), agent]
-);
+  // Tier 3: frameworks (70)
+  ['\\\\b(express\\\\b|fastify\\\\b|nestjs|hono\\\\b|rest endpoint|graphql server|grpc\\\\b|backend api)\\\\b', 'backend-dev', 70],
+  ['\\\\b(react component|tsx file|jsx\\\\b|tailwind|vite\\\\b|next\\\\.?js|vue\\\\b|svelte|tanstack|frontend ui)\\\\b', 'frontend-dev', 70],
+  ['\\\\b(react native|expo\\\\b|metro bundler|ios.*react native|android.*react native)\\\\b', 'mobile-dev', 70],
+  ['\\\\b(apple hig|human interface guidelines|sf symbols|sf pro|dynamic type|sidebar.*macos|tab bar.*ios|ornament.*visionos|macos design|ios design|ipados|watchos|visionos)\\\\b', 'apple-ui-designer', 70],
+  ['\\\\b(api design|rest design|graphql design|openapi|swagger|api versioning|api documentation|design (the |a |an )?(rest |graphql |grpc )?(api|endpoint|service)|design.*for.*(api|user management|users|account))\\\\b', 'api-designer', 70],
+  ['\\\\b(fastapi|django\\\\b|flask\\\\b|sqlalchemy)\\\\b', 'python-expert', 75],
+
+  // Tier 4: domain-of-work (60)
+  ['\\\\b(threat model|security architecture|zero[ -]?trust|attack surface|threat pattern|stride\\\\b|owasp.*design)\\\\b', 'security-architect', 60],
+  ['\\\\b(security audit|vuln scan|\\\\bcve\\\\b|owasp top 10|\\\\bsast\\\\b|\\\\bdast\\\\b|penetration test|compliance audit|hardening|audit (this |the |my )?(security|auth|login|session|token|jwt|oauth|password|crypto|tls|ssl)|audit (security|the auth flow|of (this|the|my) auth))\\\\b', 'security-auditor', 60],
+  ['\\\\b(performance profil|optimi[sz]e (cli|build|bundle|cold start|warm path|startup)|prompt cache|wasm simd|flash attention|memory leak|lazy[ -]?load|n\\\\+1|bottleneck|cold[ -]?start)\\\\b', 'performance-engineer', 60],
+  ['\\\\b(profile.*application|cpu profil|heap snapshot|flamegraph|trace.*perf|perf.*trace|node --prof|p95 (latency|regress))\\\\b', 'performance-profiler', 60],
+  ['\\\\b(refactor|technical debt|legacy code|design pattern|extract (a |the |an )?(helper |util(ity)? )?(method|function|class|module)|hoist\\\\b|interface segregation|cleanup my code|simplify (this|the) code)\\\\b', 'refactoring-specialist', 60],
+  ['\\\\b(system architect|microservic|monolith|c4 model|architectural decision|\\\\badr\\\\b|domain[ -]?driven|bounded context|architectural pattern)\\\\b', 'system-architect', 60],
+  ['\\\\b(database (schema|design|optim)|slow query|index strategy|postgres tuning|query plan|qdrant collection|neo4j cypher|sql tuning|n\\\\+1.*query|migration plan)\\\\b', 'database-optimizer', 60],
+  ['\\\\b(aws\\\\b|gcp\\\\b|azure\\\\b|kubernetes|\\\\bk8s\\\\b|terraform|disaster recovery|high availability|cloud architect|infra design)\\\\b', 'infrastructure-architect', 60],
+  ['\\\\b(ci/?cd|github actions|gitlab ci|docker compose|dockerfile|kubernetes deploy|helm chart|kustomize|deploy pipeline|ansible)\\\\b', 'deployment-engineer', 60],
+  ['\\\\b(why (is|does|doesn.?t|isn.?t)|broken|crash(ed|ing)?|traceback|stack ?trace|error.*line|test.*failing|exception (thrown|unhandled)|debug this|root cause|repro(duce|duction))\\\\b', 'debugger', 60],
+  ['\\\\b(test strategy|\\\\btdd\\\\b|\\\\bbdd\\\\b|test pyramid|integration test|e2e test|test coverage|fixture design|(write|add) (a |an |the )?(unit |integration |e2e )?tests? for|unit tests? for|tests? for the)\\\\b', 'test-engineer', 60],
+  ['\\\\b(design (the )?api|design (the )?backend|architecture decision)\\\\b', 'backend-architect', 60],
+
+  // Tier 5: anchored verbs (50)
+  ['\\\\b(review (this|my|the) (code|pr|patch|diff|change)|code review|pr review|review my work)\\\\b', 'reviewer', 50],
+  ['\\\\b(research|find documentation|search the codebase|where is .* (defined|implemented|used|called)|explore the codebase)\\\\b', 'researcher', 50],
+
+  // Tier 6: generic verbs (20)
+  ['\\\\b(implement|create|build|add|write code|fix the|fix this)\\\\b', 'coder', 20],
+];
+
+const COMPILED_PATTERNS = PATTERNS.map(([source, agent, priority]) => [
+  new RegExp(source, 'i'),
+  source,
+  agent,
+  priority,
+]);
+
+const GENERIC_AGENTS = new Set(['coder', 'tester', 'reviewer', 'general-purpose']);
 
 function routeTask(task) {
-  const taskLower = task.toLowerCase();
+  if (!task || typeof task !== 'string') {
+    return {
+      agent: 'general-purpose',
+      confidence: 0.3,
+      reason: 'Empty or invalid task — defaulting to general-purpose',
+    };
+  }
 
-  // Check patterns
-  for (const [pattern, regex, agent] of COMPILED_TASK_PATTERNS) {
+  const taskLower = task.toLowerCase();
+  const hits = [];
+
+  for (const [regex, source, agent, priority] of COMPILED_PATTERNS) {
     if (regex.test(taskLower)) {
-      return {
-        agent,
-        confidence: 0.8,
-        reason: \`Matched pattern: \${pattern}\`,
-      };
+      hits.push({ agent, priority, source });
     }
   }
 
-  // Default to coder for unknown tasks
+  if (hits.length === 0) {
+    return {
+      agent: 'general-purpose',
+      confidence: 0.4,
+      reason: 'No pattern matched — use general-purpose for exploration',
+    };
+  }
+
+  // Specialist boost: drop generics if any specialist matched.
+  const hasSpecialist = hits.some((h) => !GENERIC_AGENTS.has(h.agent));
+  const eligible = hasSpecialist
+    ? hits.filter((h) => !GENERIC_AGENTS.has(h.agent))
+    : hits;
+
+  eligible.sort((a, b) => b.priority - a.priority);
+  const winner = eligible[0];
+  const confidence = Math.min(0.95, 0.5 + (winner.priority / 100) * 0.45);
+
   return {
-    agent: 'coder',
-    confidence: 0.5,
-    reason: 'Default routing - no specific pattern matched',
+    agent: winner.agent,
+    confidence: Math.round(confidence * 100) / 100,
+    reason: \`Matched pattern: \${winner.source} (priority \${winner.priority})\`,
+    alternatives: eligible.slice(1, 4).map((h) => ({
+      agent: h.agent,
+      priority: h.priority,
+    })),
   };
 }
 
-// CLI
 const task = process.argv.slice(2).join(' ');
 
-if (task) {
+if (require.main === module) {
+  // Always emit JSON so callers (hook handler, tests) can parse uniformly,
+  // even for empty input — routeTask() handles the empty case.
   const result = routeTask(task);
   console.log(JSON.stringify(result, null, 2));
-} else {
-  console.log('Usage: router.js <task description>');
-  console.log('\\nAvailable agents:', Object.keys(AGENT_CAPABILITIES).join(', '));
 }
 
-module.exports = { routeTask, AGENT_CAPABILITIES, TASK_PATTERNS };
+module.exports = { routeTask, AGENT_CAPABILITIES, PATTERNS, GENERIC_AGENTS };
 `;
 }
 
