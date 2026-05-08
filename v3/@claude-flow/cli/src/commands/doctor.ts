@@ -152,6 +152,35 @@ async function checkDaemonStatus(): Promise<HealthCheck> {
   }
 }
 
+// Bug 47 — detect a daemon whose binary path differs from the current
+// SwarmOps install (e.g. an old npx-cached daemon hosting workers while
+// the user's CLI now resolves to a different package). Imported lazily so
+// doctor.ts doesn't pull in fork/spawn machinery just to render this row.
+async function checkStaleDaemonPath(): Promise<HealthCheck> {
+  try {
+    const { detectDaemonPathMismatch } = await import('./daemon.js');
+    const mismatch = await detectDaemonPathMismatch();
+    if (!mismatch) {
+      return { name: 'Daemon Path', status: 'pass', message: 'Matches current install (or no daemon running)' };
+    }
+    const ageLabel = mismatch.ageDays > 0
+      ? `${mismatch.ageDays}d old`
+      : 'recently started';
+    return {
+      name: 'Daemon Path',
+      status: 'warn',
+      message: `Stale daemon (PID ${mismatch.pid}, ${ageLabel}) running from ${mismatch.runningPath} — workers are not running SwarmOps code`,
+      fix: 'swarmops daemon restart --force-path',
+    };
+  } catch (err) {
+    return {
+      name: 'Daemon Path',
+      status: 'warn',
+      message: `Unable to verify daemon path: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
 // Check memory database
 async function checkMemoryDatabase(): Promise<HealthCheck> {
   const dbPaths = [
@@ -1019,6 +1048,7 @@ export const doctorCommand: Command = {
       checkGitRepo,
       checkConfigFile,
       checkDaemonStatus,
+      checkStaleDaemonPath, // Bug 47
       checkMemoryDatabase,
       checkApiKeys,
       checkMcpServers,
@@ -1039,6 +1069,7 @@ export const doctorCommand: Command = {
       'claude': checkClaudeCode,
       'config': checkConfigFile,
       'daemon': checkDaemonStatus,
+      'daemon-path': checkStaleDaemonPath, // Bug 47
       'memory': checkMemoryDatabase,
       'api': checkApiKeys,
       'git': checkGit,

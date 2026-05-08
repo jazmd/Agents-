@@ -6,10 +6,191 @@
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
 import { WorkerDaemon, getDaemon, startDaemon, stopDaemon, type WorkerType, type DaemonConfig } from '../services/worker-daemon.js';
-import { spawn, execFile, fork } from 'child_process';
+import { spawn, execFile, execFileSync, fork } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname, join, resolve, isAbsolute } from 'path';
 import * as fs from 'fs';
+import { swallowError } from '@claude-flow/shared';
+
+// ---------------------------------------------------------------------------
+// Bug 47 — stale-daemon-path detection.
+//
+// Background: when SwarmOps was forked from claude-flow, users frequently end
+// up with a long-lived background daemon that was started from a *different*
+// installed binary than the one their shell now resolves to (e.g. an old
+// `~/.npm/_npx/<hash>/.../bin/cli.js` from before the fork). The daemon keeps
+// running 4+ days, schedules workers, and silently uses pre-fork code — none
+// of the SwarmOps fixes ever reach the background workers.
+//
+// detectDaemonPathMismatch() compares the running daemon's binary path to the
+// one we'd fork *now* (the canonical SwarmOps install). It returns null when
+// there's no mismatch (or when no daemon is running) and a structured
+// DaemonPathInfo when the paths differ — the consumer (status / doctor /
+// restart) decides how loud to be about it.
+// ---------------------------------------------------------------------------
+
+/** Information about a detected daemon-path mismatch. */
+export interface DaemonPathInfo {
+  /** Binary path the running daemon was started from (from `ps` output). */
+  runningPath: string;
+  /** Binary path the current SwarmOps install would fork. */
+  expectedPath: string;
+  /** PID of the running daemon. */
+  pid: number;
+  /** When the daemon was started (ISO-8601 string), or 'unknown' if not in state. */
+  startedAt: string;
+  /** Floor((now - startedAt) / 1 day), or 0 when startedAt is unknown. */
+  ageDays: number;
+}
+
+/**
+ * Optional injection points for testing. Default behaviour reads the real
+ * `daemon.pid` / `daemon-state.json` and shells out to `ps`. Tests pass
+ * stubs that simulate the various states without touching real files or
+ * processes.
+ */
+export interface DaemonPathDetectorOptions {
+  /** Project root override (defaults to `process.cwd()`). */
+  projectRoot?: string;
+  /** Override the resolved expected bin path (defaults to derive from this file's URL). */
+  expectedPath?: string;
+  /** Stub the `ps -p <pid> -o command=` lookup. Returns the binary path token (no args), or null if PID is gone. */
+  readRunningCommand?: (pid: number) => string | null;
+  /** Stub `realpath` canonicalisation. Defaults to `fs.realpathSync` with a passthrough fallback. */
+  canonicalize?: (p: string) => string;
+}
+
+/**
+ * Compute the absolute path to `bin/cli.js` for the *currently-installed*
+ * SwarmOps. The daemon command file lives at `dist/src/commands/daemon.js`
+ * at runtime; from there, `../../../bin/cli.js` lands on the @claude-flow/cli
+ * package's bin entry — this is the same calculation `startBackgroundDaemon`
+ * already uses to fork the child, so the two will always agree.
+ */
+function deriveExpectedDaemonBin(): string {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+  return resolve(join(__dirname, '..', '..', '..', 'bin', 'cli.js'));
+}
+
+/**
+ * Best-effort `realpath` — falls back to the input when the path doesn't
+ * exist (e.g. a stale daemon whose binary has been deleted). We never throw
+ * here because the whole point is to *report* the mismatch, not crash.
+ */
+function safeRealpath(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch (err) {
+    swallowError('detect-daemon-path-mismatch.realpath', err, p);
+    return p;
+  }
+}
+
+/**
+ * Read the running daemon's command line via `ps -p <pid> -o command=`.
+ * Returns the first whitespace-delimited token (the binary path), stripping
+ * the `daemon start --foreground …` argv tail. Returns null if `ps` reports
+ * the PID is gone or if the call fails for any reason.
+ */
+function defaultReadRunningCommand(pid: number): string | null {
+  try {
+    const out = execFileSync('ps', ['-p', String(pid), '-o', 'command='], {
+      encoding: 'utf-8',
+      timeout: 5000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (!out) return null;
+    // ps may emit "node /path/to/cli.js daemon start --foreground …"
+    // Strip the leading interpreter token if present so we're comparing
+    // *script* paths, not "node" vs "/usr/local/bin/node".
+    const tokens = out.split(/\s+/);
+    if (tokens.length === 0) return null;
+    // If first token is something like 'node' / a node binary, take the next
+    // token as the script path. Otherwise the first token IS the script
+    // (rare on macOS but possible if ps was invoked with -o args= elsewhere).
+    const isNodeInterpreter = /(^|\/)node(\d+)?$/.test(tokens[0]);
+    const scriptToken = isNodeInterpreter && tokens.length > 1 ? tokens[1] : tokens[0];
+    return scriptToken;
+  } catch (err) {
+    // PID gone, ps unavailable, or permission denied — caller treats this
+    // as "no mismatch detectable" rather than an error condition.
+    swallowError('detect-daemon-path-mismatch.ps', err, String(pid));
+    return null;
+  }
+}
+
+/**
+ * Compare the running daemon's binary path to the currently-installed one.
+ * Returns null when:
+ *   - no `daemon.pid` file exists (no daemon),
+ *   - the PID is dead (stale state — handled elsewhere),
+ *   - the canonicalized paths match.
+ * Returns a populated DaemonPathInfo otherwise.
+ */
+export async function detectDaemonPathMismatch(
+  opts: DaemonPathDetectorOptions = {},
+): Promise<DaemonPathInfo | null> {
+  const projectRoot = opts.projectRoot ?? process.cwd();
+  const pidFile = join(projectRoot, '.claude-flow', 'daemon.pid');
+
+  if (!fs.existsSync(pidFile)) {
+    return null;
+  }
+
+  let pid: number;
+  try {
+    pid = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+  } catch (err) {
+    swallowError('detect-daemon-path-mismatch.read-pid', err, pidFile);
+    return null;
+  }
+  if (!pid || isNaN(pid) || pid <= 0) return null;
+
+  const readRunningCommand = opts.readRunningCommand ?? defaultReadRunningCommand;
+  const runningPathRaw = readRunningCommand(pid);
+  if (!runningPathRaw) {
+    // PID gone or not readable. The daemon-state cleanup happens in
+    // killBackgroundDaemon / killStaleDaemons; we just decline to report.
+    return null;
+  }
+
+  const expectedPathRaw = opts.expectedPath ?? deriveExpectedDaemonBin();
+  const canonicalize = opts.canonicalize ?? safeRealpath;
+  const runningPath = canonicalize(runningPathRaw);
+  const expectedPath = canonicalize(expectedPathRaw);
+
+  if (runningPath === expectedPath) {
+    return null;
+  }
+
+  // Pull startedAt + age from daemon-state.json if available.
+  let startedAt = 'unknown';
+  let ageDays = 0;
+  const stateFile = join(projectRoot, '.claude-flow', 'daemon-state.json');
+  if (fs.existsSync(stateFile)) {
+    try {
+      const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8')) as { startedAt?: string };
+      if (state.startedAt) {
+        startedAt = state.startedAt;
+        const startMs = Date.parse(state.startedAt);
+        if (!isNaN(startMs)) {
+          ageDays = Math.floor((Date.now() - startMs) / 86_400_000);
+        }
+      }
+    } catch (err) {
+      swallowError('detect-daemon-path-mismatch.read-state', err, stateFile);
+    }
+  }
+
+  return {
+    runningPath: runningPathRaw,
+    expectedPath: expectedPathRaw,
+    pid,
+    startedAt,
+    ageDays,
+  };
+}
 
 // Start daemon subcommand
 const startCommand: Command = {
@@ -385,6 +566,159 @@ const stopCommand: Command = {
 };
 
 /**
+ * Process killer abstraction — allows tests to assert SIGTERM/SIGKILL flow
+ * without actually shooting at real PIDs. Defaults to `process.kill`.
+ */
+export type ProcessKiller = (pid: number, signal: NodeJS.Signals | number) => boolean;
+const defaultKiller: ProcessKiller = (pid, signal) => {
+  process.kill(pid, signal);
+  return true;
+};
+
+/**
+ * Bug 47 — public restart helper. Sends SIGTERM, waits up to `graceMs`, then
+ * SIGKILL if still alive. Cleans up PID/state files when `clearState` is set.
+ * Returns true when something was killed (or a stale state file was wiped),
+ * false when there was no daemon to deal with.
+ *
+ * Exposed for testing — the daemon `restart` subcommand calls this with
+ * `killer = process.kill` and `sleep = setTimeout` defaults.
+ */
+export async function restartBackgroundDaemon(opts: {
+  projectRoot: string;
+  clearState: boolean;
+  graceMs?: number;
+  killer?: ProcessKiller;
+  sleep?: (ms: number) => Promise<void>;
+}): Promise<{ killed: boolean; pid: number | null }> {
+  const projectRoot = opts.projectRoot;
+  const graceMs = opts.graceMs ?? 5000;
+  const killer = opts.killer ?? defaultKiller;
+  const sleep = opts.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
+  const pidFile = join(projectRoot, '.claude-flow', 'daemon.pid');
+  const stateFile = join(projectRoot, '.claude-flow', 'daemon-state.json');
+
+  let pid: number | null = null;
+  if (fs.existsSync(pidFile)) {
+    try {
+      const raw = parseInt(fs.readFileSync(pidFile, 'utf-8').trim(), 10);
+      if (!isNaN(raw) && raw > 0) pid = raw;
+    } catch (err) {
+      swallowError('restart-background-daemon.read-pid', err, pidFile);
+    }
+  }
+
+  let killed = false;
+  if (pid !== null) {
+    // Check if alive — ENOENT/ESRCH means already dead.
+    let alive = true;
+    try {
+      killer(pid, 0);
+    } catch {
+      alive = false;
+    }
+
+    if (alive) {
+      try {
+        killer(pid, 'SIGTERM');
+        killed = true;
+      } catch (err) {
+        swallowError('restart-background-daemon.sigterm', err, String(pid));
+      }
+      // Poll up to graceMs for graceful shutdown.
+      const pollMs = Math.max(50, Math.min(500, Math.floor(graceMs / 10)));
+      const start = Date.now();
+      while (Date.now() - start < graceMs) {
+        try {
+          killer(pid, 0);
+        } catch {
+          alive = false;
+          break;
+        }
+        await sleep(pollMs);
+      }
+      if (alive) {
+        try {
+          killer(pid, 'SIGKILL');
+        } catch (err) {
+          swallowError('restart-background-daemon.sigkill', err, String(pid));
+        }
+      }
+    }
+  }
+
+  // Clean up PID file unconditionally (covers both real-kill and
+  // already-dead-but-stale cases).
+  if (fs.existsSync(pidFile)) {
+    try { fs.unlinkSync(pidFile); } catch (err) { swallowError('restart-background-daemon.unlink-pid', err, pidFile); }
+    if (pid === null) killed = true; // we did clear *something*
+  }
+
+  // --force-path also wipes daemon-state.json so the new daemon starts fresh
+  // rather than restoring stale worker-config from disk.
+  if (opts.clearState && fs.existsSync(stateFile)) {
+    try { fs.unlinkSync(stateFile); } catch (err) { swallowError('restart-background-daemon.unlink-state', err, stateFile); }
+  }
+
+  return { killed, pid };
+}
+
+// Restart daemon subcommand — Bug 47.
+const restartCommand: Command = {
+  name: 'restart',
+  description: 'Restart the worker daemon (graceful SIGTERM, then SIGKILL after 5s)',
+  options: [
+    { name: 'force-path', type: 'boolean', description: 'Override path-mismatch refusal and wipe daemon-state.json' },
+    { name: 'quiet', short: 'Q', type: 'boolean', description: 'Suppress non-error output' },
+  ],
+  examples: [
+    { command: 'claude-flow daemon restart', description: 'Restart daemon (refuses if running binary differs from install)' },
+    { command: 'claude-flow daemon restart --force-path', description: 'Kill stale-path daemon and start fresh' },
+  ],
+  action: async (ctx: CommandContext): Promise<CommandResult> => {
+    const quiet = ctx.flags.quiet as boolean;
+    const forcePath = ctx.flags['force-path'] as boolean;
+    const projectRoot = process.cwd();
+
+    // Refuse to restart silently across a path mismatch unless --force-path.
+    const mismatch = await detectDaemonPathMismatch({ projectRoot });
+    if (mismatch && !forcePath) {
+      output.printError(
+        `Existing daemon at ${mismatch.runningPath} doesn't match SwarmOps install (${mismatch.expectedPath}).`
+      );
+      const ageLabel = mismatch.ageDays > 0
+        ? `${mismatch.ageDays} day${mismatch.ageDays === 1 ? '' : 's'}`
+        : 'recently';
+      output.writeln(output.dim(`  Use --force-path to override. This will kill PID ${mismatch.pid} (started ${ageLabel} ago).`));
+      return { success: false, exitCode: 1 };
+    }
+
+    try {
+      const result = await restartBackgroundDaemon({
+        projectRoot,
+        clearState: !!forcePath,
+      });
+
+      if (!quiet) {
+        if (result.killed && result.pid !== null) {
+          output.printInfo(`Stopped existing daemon (PID ${result.pid})`);
+        } else if (result.killed) {
+          output.printInfo('Cleaned up stale daemon state');
+        } else {
+          output.printInfo('No running daemon to stop');
+        }
+      }
+
+      // Hand off to the existing background-start path.
+      return await startBackgroundDaemon(projectRoot, !!quiet);
+    } catch (error) {
+      output.printError(`Failed to restart daemon: ${error instanceof Error ? error.message : String(error)}`);
+      return { success: false, exitCode: 1 };
+    }
+  },
+};
+
+/**
  * Kill background daemon process using PID file
  */
 async function killBackgroundDaemon(projectRoot: string): Promise<boolean> {
@@ -623,6 +957,26 @@ const statusCommand: Command = {
         });
       }
 
+      // Bug 47 — surface stale-daemon-path mismatch.
+      // Only checked when a daemon is actually running; otherwise there's
+      // nothing to compare against.
+      if (isRunning) {
+        const mismatch = await detectDaemonPathMismatch({ projectRoot });
+        if (mismatch) {
+          output.writeln();
+          output.printWarning('STALE DAEMON DETECTED');
+          const ageLabel = mismatch.ageDays > 0
+            ? `${mismatch.ageDays} day${mismatch.ageDays === 1 ? '' : 's'} ago`
+            : 'recently';
+          output.writeln(output.dim(`  Running daemon (PID ${mismatch.pid}, started ${ageLabel}) is from:`));
+          output.writeln(output.dim(`    ${mismatch.runningPath}`));
+          output.writeln(output.dim(`  But your current SwarmOps install is at:`));
+          output.writeln(output.dim(`    ${mismatch.expectedPath}`));
+          output.writeln(output.dim(`  Background workers are NOT running SwarmOps code.`));
+          output.writeln(output.dim(`  Run \`swarmops daemon restart --force-path\` to fix.`));
+        }
+      }
+
       return { success: true, data: status };
     } catch (error) {
       // Daemon not initialized
@@ -754,6 +1108,7 @@ export const daemonCommand: Command = {
   subcommands: [
     startCommand,
     stopCommand,
+    restartCommand,
     statusCommand,
     triggerCommand,
     enableCommand,
@@ -764,6 +1119,7 @@ export const daemonCommand: Command = {
     { command: 'claude-flow daemon start --headless', description: 'Start with headless workers (E2B sandbox)' },
     { command: 'claude-flow daemon status', description: 'Check daemon status' },
     { command: 'claude-flow daemon stop', description: 'Stop the daemon' },
+    { command: 'claude-flow daemon restart --force-path', description: 'Restart daemon, overriding stale-path lock (Bug 47)' },
     { command: 'claude-flow daemon trigger -w audit', description: 'Run security audit' },
   ],
   action: async (): Promise<CommandResult> => {
@@ -799,6 +1155,7 @@ export const daemonCommand: Command = {
     output.printList([
       `${output.highlight('start')}   - Start the daemon`,
       `${output.highlight('stop')}    - Stop the daemon`,
+      `${output.highlight('restart')} - Restart the daemon (use --force-path for stale-path)`,
       `${output.highlight('status')}  - Show daemon status`,
       `${output.highlight('trigger')} - Manually run a worker`,
       `${output.highlight('enable')}  - Enable/disable a worker`,
