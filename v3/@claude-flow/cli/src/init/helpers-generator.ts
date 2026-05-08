@@ -966,7 +966,7 @@ async function doImport() {
     return;
   }
   // CLI not on PATH — non-critical, helpers gracefully no-op.
-  dim('claude-flow CLI not on PATH — auto memory import skipped (non-critical)');
+  dim('ruflo CLI not on PATH — auto memory import skipped (non-critical)');
 }
 
 async function doSync() {
@@ -979,7 +979,7 @@ async function doSync() {
     dim(\`Auto memory sync ready (\${sub.bin})\`);
     return;
   }
-  dim('claude-flow CLI not on PATH — sync skipped (non-critical)');
+  dim('ruflo CLI not on PATH — sync skipped (non-critical)');
 }
 
 function doStatus() {

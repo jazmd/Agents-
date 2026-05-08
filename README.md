@@ -27,7 +27,7 @@ Orchestrate 100+ specialized AI agents across machines, teams, and trust boundar
 
 ### What Ruflo Does
 
-One `npx ruvflo init` gives Claude Code a nervous system: agents self-organize into swarms, learn from every task, remember across sessions, and — with federation — securely talk to agents on other machines without leaking data. You keep writing code. Ruflo handles the coordination.
+One `npx ruflo init` gives Claude Code a nervous system: agents self-organize into swarms, learn from every task, remember across sessions, and — with federation — securely talk to agents on other machines without leaking data. You keep writing code. Ruflo handles the coordination.
 
 ```
 Self-Learning / Self-Optimizing Agent Architecture
@@ -281,17 +281,17 @@ You don't configure handshakes or manage certificates. You `federation init`, `f
 
 ```bash
 # Team A: initialize federation and generate keypair
-npx claude-flow@latest federation init
+npx ruflo@latest federation init
 
 # Team A: join Team B's federation endpoint
-npx claude-flow@latest federation join wss://team-b.example.com:8443
+npx ruflo@latest federation join wss://team-b.example.com:8443
 
 # Team A: send a task — PII is stripped automatically before it leaves
-npx claude-flow@latest federation send --to team-b --type task-request \
+npx ruflo@latest federation send --to team-b --type task-request \
   --message "Analyze transaction patterns for account anomalies"
 
 # Team A: check peer trust levels and session health
-npx claude-flow@latest federation status
+npx ruflo@latest federation status
 ```
 
 </details>
@@ -303,7 +303,7 @@ See [issue #1669](https://github.com/ruvnet/ruflo/issues/1669) for the complete 
 /plugin install ruflo-federation@ruflo
 
 # Or via CLI
-npx claude-flow@latest plugins install @claude-flow/plugin-agent-federation
+npx ruflo@latest plugins install @claude-flow/plugin-agent-federation
 ```
 
 <details>
