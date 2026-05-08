@@ -7,7 +7,7 @@
 
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
-import { existsSync, readFileSync, statSync } from 'fs';
+import { existsSync, readFileSync, statSync, chmodSync, readdirSync } from 'fs';
 import { homedir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
@@ -757,6 +757,124 @@ export function checkHookCoexistence(rows?: HookCoexistenceRow[]): HealthCheck {
   };
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// #bug42 — data-file permission audit.
+//
+// Files like ~/.claude/.claude-flow/data/auto-memory-store.json and
+// pending-insights.jsonl capture prompt and edit content. They must be
+// 0600 (owner-only) so other local processes cannot read them.
+// ──────────────────────────────────────────────────────────────────────────
+
+interface PermIssue {
+  path: string;
+  mode: string; // octal as 4-char string
+}
+
+/** Recursively yield every regular file under `dir` (depth-limited). */
+function walkFiles(dir: string, maxDepth = 4): string[] {
+  if (!existsSync(dir)) return [];
+  const out: string[] = [];
+  const stack: Array<{ p: string; d: number }> = [{ p: dir, d: 0 }];
+  while (stack.length > 0) {
+    const { p, d } = stack.pop()!;
+    let entries;
+    try {
+      entries = readdirSync(p, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      const full = join(p, e.name);
+      if (e.isDirectory()) {
+        if (d < maxDepth) stack.push({ p: full, d: d + 1 });
+      } else if (e.isFile()) {
+        out.push(full);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Inspect the well-known sensitive-data paths and return any file whose
+ * mode is not 0600. Pure (returns paths instead of mutating fs) so the
+ * --fix mode can iterate the same list.
+ */
+export function inspectDataFilePerms(home?: string): PermIssue[] {
+  const root = home ?? homedir();
+  const targets: string[] = [
+    join(root, '.claude', '.claude-flow', 'data'),
+    join(root, '.claude', '.claude-flow', 'sessions'),
+    join(root, '.claude-flow', 'data'),
+    join(root, '.claude-flow', 'sessions'),
+  ];
+  const candidates = new Set<string>();
+  for (const t of targets) {
+    for (const f of walkFiles(t)) {
+      if (/\.(jsonl?|db)$/.test(f)) candidates.add(f);
+    }
+  }
+  // Backups directory: pick up *.json.backup.* dotfiles that capture state.
+  const backupsDir = join(root, '.claude', 'backups');
+  if (existsSync(backupsDir)) {
+    try {
+      for (const f of readdirSync(backupsDir)) {
+        if (/\.(json|jsonl)\.backup\./.test(f) || /\.(json|jsonl)$/.test(f)) {
+          candidates.add(join(backupsDir, f));
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  const issues: PermIssue[] = [];
+  for (const path of candidates) {
+    try {
+      const st = statSync(path);
+      // Mask off the file-type bits — we only care about permission bits.
+      const mode = st.mode & 0o777;
+      if (mode !== 0o600) {
+        issues.push({ path, mode: mode.toString(8).padStart(4, '0') });
+      }
+    } catch {
+      // unreadable — skip
+    }
+  }
+  return issues;
+}
+
+/** chmod 0600 each issue. Returns the count successfully chmod'd. */
+export function fixDataFilePerms(issues: PermIssue[]): number {
+  let fixed = 0;
+  for (const issue of issues) {
+    try {
+      chmodSync(issue.path, 0o600);
+      fixed += 1;
+    } catch {
+      // best-effort
+    }
+  }
+  return fixed;
+}
+
+export function checkDataFilePerms(issues?: PermIssue[]): HealthCheck {
+  const data = issues ?? inspectDataFilePerms();
+  if (data.length === 0) {
+    return {
+      name: 'Data File Permissions',
+      status: 'pass',
+      message: 'All sensitive data files are 0600',
+    };
+  }
+  return {
+    name: 'Data File Permissions',
+    status: 'warn',
+    message: `${data.length} file(s) with mode != 0600 (e.g. ${data[0].mode} on ${data[0].path})`,
+    fix: 'ruflo doctor --fix-perms  # chmod 0600 all reported files',
+  };
+}
+
 // Format health check result
 function formatCheck(check: HealthCheck): string {
   const icon = check.status === 'pass' ? output.success('✓') :
@@ -800,6 +918,12 @@ export const doctorCommand: Command = {
       default: false
     },
     {
+      name: 'fix-perms',
+      description: 'chmod 0600 sensitive data files (auto-memory-store, pending-insights, sessions/, backups/) — fixes #bug42',
+      type: 'boolean',
+      default: false
+    },
+    {
       name: 'verbose',
       short: 'v',
       description: 'Verbose output',
@@ -811,6 +935,7 @@ export const doctorCommand: Command = {
     { command: 'claude-flow doctor', description: 'Run full health check' },
     { command: 'claude-flow doctor --fix', description: 'Print suggested fix commands (does not auto-apply)' },
     { command: 'claude-flow doctor --hooks', description: 'Inspect hook coexistence (#bug38)' },
+    { command: 'claude-flow doctor --fix-perms', description: 'chmod 0600 sensitive data files (#bug42)' },
     { command: 'claude-flow doctor --install', description: 'Auto-install missing dependencies' },
     { command: 'claude-flow doctor -c version', description: 'Check for stale npx cache' },
     { command: 'claude-flow doctor -c claude', description: 'Check Claude Code CLI only' }
@@ -821,6 +946,7 @@ export const doctorCommand: Command = {
     const component = ctx.flags.component as string;
     const verbose = ctx.flags.verbose as boolean;
     const hooksMode = ctx.flags.hooks as boolean; // #bug38
+    const fixPerms = ctx.flags['fix-perms'] as boolean; // #bug42
 
     // #bug38 — dedicated --hooks subview prints the coexistence table and exits.
     if (hooksMode) {
@@ -851,14 +977,38 @@ export const doctorCommand: Command = {
       return { success: true, data: { rows } };
     }
 
+    // #bug42 — dedicated --fix-perms subview chmods the sensitive data files.
+    if (fixPerms) {
+      output.writeln();
+      output.writeln(output.bold('Data File Permission Fix'));
+      output.writeln(output.dim('Target mode: 0600 (owner read/write only)'));
+      output.writeln(output.dim('─'.repeat(50)));
+      const issues = inspectDataFilePerms();
+      if (issues.length === 0) {
+        output.writeln(output.success('All sensitive data files are already 0600.'));
+        return { success: true, data: { fixed: 0, issues } };
+      }
+      output.writeln(`Found ${issues.length} file(s) with permissive modes:`);
+      for (const issue of issues.slice(0, 20)) {
+        output.writeln(output.dim(`  ${issue.mode}  ${issue.path}`));
+      }
+      if (issues.length > 20) output.writeln(output.dim(`  … and ${issues.length - 20} more`));
+      const fixed = fixDataFilePerms(issues);
+      output.writeln();
+      output.writeln(output.success(`chmod 0600 applied to ${fixed}/${issues.length} file(s).`));
+      return { success: true, data: { fixed, issues } };
+    }
+
     output.writeln();
     output.writeln(output.bold('RuFlo Doctor'));
     output.writeln(output.dim('System diagnostics and health check'));
     output.writeln(output.dim('─'.repeat(50)));
     output.writeln();
 
-    // #bug38 — adapt the synchronous helper to the async pipeline.
+    // #bug38 + #bug42 — adapt the synchronous helper checks to the async
+    // pipeline by wrapping them in async closures.
     const checkHookCoexistenceAsync = async () => checkHookCoexistence();
+    const checkDataFilePermsAsync = async () => checkDataFilePerms();
 
     const allChecks: (() => Promise<HealthCheck>)[] = [
       checkVersionFreshness,
@@ -878,6 +1028,7 @@ export const doctorCommand: Command = {
       checkAgenticFlow,
       checkEncryptionAtRest, // ADR-096 Phase 5
       checkHookCoexistenceAsync, // #bug38
+      checkDataFilePermsAsync, // #bug42
     ];
 
     const componentMap: Record<string, () => Promise<HealthCheck>> = {
@@ -898,6 +1049,7 @@ export const doctorCommand: Command = {
       'agentic-flow': checkAgenticFlow,
       'encryption': checkEncryptionAtRest, // ADR-096 Phase 5
       'hooks': checkHookCoexistenceAsync, // #bug38
+      'perms': checkDataFilePermsAsync, // #bug42
     };
 
     let checksToRun = allChecks;
