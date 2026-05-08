@@ -30,6 +30,52 @@ import {
 import { recordCost } from '../services/cost-recorder.js';
 import type { CacheTtl } from '../services/pricing.js';
 
+/**
+ * Gap 4 v1.5 — lazy getter for the active-step Map exported by hooks-tools.
+ * Lazy import to avoid a top-level circular reference (hooks-tools is large
+ * and may grow its own deps on agent-execute-core in the future). Memoized
+ * after first successful resolve. Returns null on import failure so cost
+ * recording continues to work in slim/test environments where hooks-tools
+ * isn't available.
+ */
+let _getCurrentStepIndex: ((sessionId: string) => number | null) | null = null;
+let _getCurrentStepIndexLoaded = false;
+async function loadGetCurrentStepIndex(): Promise<((sessionId: string) => number | null) | null> {
+  if (_getCurrentStepIndexLoaded) return _getCurrentStepIndex;
+  _getCurrentStepIndexLoaded = true;
+  try {
+    const mod = await import('./hooks-tools.js');
+    if (typeof mod.getCurrentStepIndex === 'function') {
+      _getCurrentStepIndex = mod.getCurrentStepIndex;
+    }
+  } catch {
+    // hooks-tools not available — leave _getCurrentStepIndex null.
+    _getCurrentStepIndex = null;
+  }
+  return _getCurrentStepIndex;
+}
+
+/**
+ * Resolve the effective stepIndex for a cost-recorder call. Order:
+ *   1. Explicit `inputStepIndex` (caller passed it) — wins.
+ *   2. activeSessionStepIndex lookup by sessionId — auto-attribution.
+ *   3. null — no step bound, per-dispatch attribution only.
+ */
+async function resolveEffectiveStepIndex(
+  inputStepIndex: number | null | undefined,
+  sessionId: string | null | undefined,
+): Promise<number | null> {
+  if (inputStepIndex !== null && inputStepIndex !== undefined) return inputStepIndex;
+  if (!sessionId) return null;
+  const getter = await loadGetCurrentStepIndex();
+  if (!getter) return null;
+  try {
+    return getter(sessionId);
+  } catch {
+    return null;
+  }
+}
+
 const STORAGE_DIR = '.claude-flow';
 const AGENT_DIR = 'agents';
 const AGENT_FILE = 'store.json';
@@ -448,9 +494,16 @@ export async function callAnthropicMessages(input: AnthropicCallInput): Promise<
     // a broken cost log MUST NOT break the dispatch. We always record (even
     // for legacy non-cached calls) so per-dispatch USD attribution works
     // independently of cache shaping.
+    // Gap 4 v1.5 — auto-resolve stepIndex from active-trajectory tracker
+    // when the caller didn't pass one explicitly. Backwards-compatible:
+    // explicit input.stepIndex still wins; sessionId-less calls still null.
+    const effectiveStepIndex = await resolveEffectiveStepIndex(
+      input.stepIndex,
+      input.sessionId,
+    );
     await recordCost({
       sessionId: input.sessionId ?? null,
-      stepIndex: input.stepIndex ?? null,
+      stepIndex: effectiveStepIndex,
       agent: input.agentName ?? 'unknown',
       model: data.model,
       cacheTtl: input.cacheTtl ?? '1h',
@@ -814,12 +867,15 @@ export async function executeAgentTask(input: AgentExecuteInput): Promise<AgentE
 
     // Gap 4 — cost telemetry for the agent-execute path. We use the agentId
     // as the recorded agent name so trace consumers can group by named agent.
-    // sessionId/stepIndex aren't threaded through agent_execute today (that's
-    // the per-step granularity follow-up); the per-dispatch fallback still
-    // gives `swarmops cost stats` correct totals.
+    // Gap 4 v1.5 — auto-resolve stepIndex from active-trajectory tracker.
+    // executeAgentTask doesn't currently take sessionId on its input; when
+    // the workflow runtime starts passing it (via input extension), step
+    // attribution lights up here without further wiring. For now this is
+    // a no-op fallback (sessionId stays null → effectiveStepIndex stays null).
+    const effectiveStepIndex = await resolveEffectiveStepIndex(null, null);
     await recordCost({
       sessionId: null,
-      stepIndex: null,
+      stepIndex: effectiveStepIndex,
       agent: input.agentId,
       model: data.model,
       cacheTtl: '1h',

@@ -459,6 +459,50 @@ interface TrajectoryData {
 // In-memory trajectory tracking (persisted on end)
 const activeTrajectories = new Map<string, TrajectoryData>();
 
+/**
+ * Gap 4 v1.5 — tracks the current stepIndex for each active trajectory.
+ * The trajectoryId IS the sessionId in cost-recorder terms (see trace-loader's
+ * `enrichWithCosts`, which JOINs cost entries by `t.id` against `entry.sessionId`).
+ *
+ * Used by agent-execute-core.ts so callers don't have to plumb `stepIndex`
+ * explicitly through every dispatch — `callAnthropicMessages` looks the
+ * value up by sessionId and falls back to it when input.stepIndex is omitted.
+ *
+ * Lifecycle (mirrors activeTrajectories):
+ *   - hooks_intelligence_trajectory-start → set(sid, -1)  (no steps yet,
+ *     next push lands at index 0). Pre-seeded with -1 so callers can detect
+ *     "trajectory active but no step yet" vs "no trajectory" (null).
+ *   - hooks_intelligence_trajectory-step  → set(sid, steps.length - 1) AFTER
+ *     the push (i.e. index of the just-pushed step).
+ *   - hooks_intelligence_trajectory-end   → delete(sid).
+ *
+ * In-process only — restart resets state. That's intentional: no persistence,
+ * no migration cost, no stale entries leaking between MCP daemon restarts.
+ */
+const activeSessionStepIndex = new Map<string, number>();
+
+/**
+ * Returns the current stepIndex for a trajectory (sessionId), or null when
+ * the trajectory is unknown / not active / hasn't logged a step yet (-1
+ * sentinel from trajectory-start is normalized to null here so callers see
+ * a clean "no step bound" signal). Exposed so agent-execute-core.ts can
+ * auto-attribute costs without an explicit `stepIndex` from the caller.
+ */
+export function getCurrentStepIndex(sessionId: string): number | null {
+  const v = activeSessionStepIndex.get(sessionId);
+  if (v === undefined) return null;
+  if (v < 0) return null;
+  return v;
+}
+
+/**
+ * Test-only helper to clear the active-step Map between test runs.
+ * Not part of the public MCP surface; gated by underscore-prefix convention.
+ */
+export function _resetActiveSessionStepIndex(): void {
+  activeSessionStepIndex.clear();
+}
+
 // Memory store types and helpers
 interface MemoryEntry {
   key: string;
@@ -2962,6 +3006,9 @@ export const hooksTrajectoryStart: MCPTool = {
     };
 
     activeTrajectories.set(trajectoryId, trajectory);
+    // Gap 4 v1.5 — pre-seed step-index Map. -1 means "trajectory active but
+    // no step pushed yet". getCurrentStepIndex() normalizes -1 → null.
+    activeSessionStepIndex.set(trajectoryId, -1);
 
     // Persist pending trajectory to disk so it survives MCP restarts
     const storeFn = await getRealStoreFunction();
@@ -3000,6 +3047,20 @@ export const hooksTrajectoryStep: MCPTool = {
       action: { type: 'string', description: 'Action taken' },
       result: { type: 'string', description: 'Action result' },
       quality: { type: 'number', description: 'Quality score (0-1)' },
+      // Gap 4 v1.5 — optional inline cost annotation. When present, wins over
+      // the trace-loader JOIN (see services/trace-loader.ts:442). Omit and the
+      // loader joins by sessionId+stepIndex from cost-stats.json at render time.
+      cost: {
+        type: 'object',
+        description: 'Optional per-step cost breakdown (USD, sub-cent precision). Omit to let the trace loader JOIN cost-stats.json by sessionId+stepIndex.',
+        properties: {
+          input: { type: 'number' },
+          output: { type: 'number' },
+          cacheRead: { type: 'number' },
+          cacheCreation: { type: 'number' },
+          total: { type: 'number' },
+        },
+      },
     },
     required: ['trajectoryId', 'action'],
   },
@@ -3014,15 +3075,43 @@ export const hooksTrajectoryStep: MCPTool = {
     { const v = validateIdentifier(trajectoryId, 'trajectoryId'); if (!v.valid) return { success: false, error: v.error }; }
     { const v = validateText(action, 'action'); if (!v.valid) return { success: false, error: v.error }; }
 
+    // Optional inline cost annotation (Gap 4 v1.5). Coerce shape defensively
+    // so a malformed object never makes it into the trajectory record.
+    let cost: TrajectoryStep['cost'] | undefined;
+    const rawCost = params.cost;
+    if (rawCost && typeof rawCost === 'object') {
+      const c = rawCost as Record<string, unknown>;
+      if (
+        typeof c.input === 'number' &&
+        typeof c.output === 'number' &&
+        typeof c.cacheRead === 'number' &&
+        typeof c.cacheCreation === 'number' &&
+        typeof c.total === 'number'
+      ) {
+        cost = {
+          input: c.input,
+          output: c.output,
+          cacheRead: c.cacheRead,
+          cacheCreation: c.cacheCreation,
+          total: c.total,
+        };
+      }
+    }
+
     // Add step to real trajectory if it exists
     const trajectory = activeTrajectories.get(trajectoryId);
     if (trajectory) {
-      trajectory.steps.push({
+      const step: TrajectoryStep = {
         action,
         result,
         quality,
         timestamp,
-      });
+      };
+      if (cost !== undefined) step.cost = cost;
+      trajectory.steps.push(step);
+      // Gap 4 v1.5 — record the just-pushed index so agent-execute-core can
+      // attribute Anthropic-call costs to this step without explicit plumbing.
+      activeSessionStepIndex.set(trajectoryId, trajectory.steps.length - 1);
     }
 
     return {
@@ -3093,6 +3182,8 @@ export const hooksTrajectoryEnd: MCPTool = {
 
       // Remove from active trajectories
       activeTrajectories.delete(trajectoryId);
+      // Gap 4 v1.5 — release step-index slot too.
+      activeSessionStepIndex.delete(trajectoryId);
     }
 
     // SONA Learning - process trajectory outcome for routing optimization
