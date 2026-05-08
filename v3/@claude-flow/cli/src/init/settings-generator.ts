@@ -70,15 +70,45 @@ export function generateSettings(options: InitOptions): object {
   // `Read(./.env)` only blocks when cwd is the same dir as the file; switching
   // to `Read(**/.env*)` catches `.env`, `.env.local`, `.env.production`, … in
   // any subdirectory.
+  // #bug34 — replace bare `Bash(npx claude-flow*)` prefix-wildcards with exact-
+  // subcommand grants. The old patterns were wide enough that
+  // `npx claude-flow-anything --eval` slipped through the allow list and ran
+  // without prompting. Audit also flagged the deny list as too thin — added
+  // the universally dangerous patterns (eval bypass, pipe-to-shell,
+  // download-and-exec, total wipe, fork bomb) and broader credential globs.
   settings.permissions = {
     allow: [
-      'Bash(npx @claude-flow*)',
-      'Bash(npx claude-flow*)',
-      'Bash(node .claude/*)',
+      'Bash(npx @claude-flow/cli * mcp start)',
+      'Bash(npx claude-flow doctor)',
+      'Bash(npx claude-flow doctor --fix)',
+      'Bash(npx claude-flow init)',
+      'Bash(npx claude-flow init --*)',
+      'Bash(npx claude-flow memory *)',
+      'Bash(npx claude-flow swarm *)',
+      'Bash(npx claude-flow daemon *)',
+      'Bash(npx claude-flow hooks *)',
+      'Bash(npx ruflo doctor)',
+      'Bash(npx ruflo doctor --fix)',
+      'Bash(npx ruflo init)',
+      'Bash(npx ruflo init --*)',
+      'Bash(npx ruflo memory *)',
+      'Bash(npx ruflo swarm *)',
+      'Bash(npx ruflo daemon *)',
+      'Bash(npx ruflo hooks *)',
+      'Bash(node $HOME/.claude/helpers/*)',
       'mcp__claude-flow__*',
     ],
     deny: [
       'Read(**/.env*)',
+      'Read(**/credentials.json)',
+      'Read(**/.ssh/id_*)',
+      'Bash(*--eval*)',
+      'Bash(*| sh*)',
+      'Bash(*| bash*)',
+      'Bash(curl *| sh*)',
+      'Bash(wget *| sh*)',
+      'Bash(rm -rf /*)',
+      'Bash(:(){ :|:& };:*)',
     ],
   };
 
@@ -347,6 +377,20 @@ function generateHooksConfig(
           },
         ],
       },
+      // #bug33 — scan content fetched from the web for prompt injection or
+      // PII before the model sees it. WebFetch is the highest-risk surface
+      // for indirect prompt injection (a poisoned URL can carry hidden
+      // instructions back into context).
+      {
+        matcher: 'WebFetch',
+        hooks: [
+          {
+            type: 'command',
+            command: hh('aidefence-scan'),
+            timeout: 5000,
+          },
+        ],
+      },
     ];
   }
 
@@ -376,11 +420,18 @@ function generateHooksConfig(
     ];
   }
 
-  // UserPromptSubmit — intelligent task routing
+  // UserPromptSubmit — intelligent task routing + AIDefence pre-scan (#bug33)
   if (config.userPromptSubmit) {
     hooks.UserPromptSubmit = [
       {
         hooks: [
+          // #bug33 — runs FIRST so a flagged prompt blocks before routing
+          // wastes tokens on an injection attempt. Exits non-zero on threat.
+          {
+            type: 'command',
+            command: hh('aidefence-scan'),
+            timeout: 5000,
+          },
           {
             type: 'command',
             command: hh('route'),
