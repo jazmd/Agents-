@@ -27,6 +27,8 @@ import {
   resolveClaudeCredential,
   type CredentialSource,
 } from '../auth/claude-code-token.js';
+import { recordCost } from '../services/cost-recorder.js';
+import type { CacheTtl } from '../services/pricing.js';
 
 const STORAGE_DIR = '.claude-flow';
 const AGENT_DIR = 'agents';
@@ -106,6 +108,18 @@ export interface AnthropicCallInput {
   toolsBlock?: string;
   projectContext?: string;
   ragBlock?: string;
+  /**
+   * Gap 4 — cost telemetry attribution. All optional & backwards-compatible:
+   * existing callers that don't pass these still record entries (with null
+   * sessionId/stepIndex and 'unknown' agent) so the per-dispatch fallback
+   * works. Pass these from the agent execution loop to unlock per-step cost
+   * granularity in the trace viewer.
+   */
+  sessionId?: string | null;
+  stepIndex?: number | null;
+  agentName?: string;
+  /** Cache TTL the request was shaped with. Defaults to '1h' on the wire. */
+  cacheTtl?: CacheTtl;
 }
 
 /** #perf-cache — shape we send when the structured form is in use. */
@@ -430,6 +444,23 @@ export async function callAnthropicMessages(input: AnthropicCallInput): Promise<
       // Avoids polluting the file with non-cacheable legacy calls.
       logCacheUsage(data.model, breakdown);
     }
+    // Gap 4 — record cost telemetry. Cost-recorder swallows its own failures;
+    // a broken cost log MUST NOT break the dispatch. We always record (even
+    // for legacy non-cached calls) so per-dispatch USD attribution works
+    // independently of cache shaping.
+    await recordCost({
+      sessionId: input.sessionId ?? null,
+      stepIndex: input.stepIndex ?? null,
+      agent: input.agentName ?? 'unknown',
+      model: data.model,
+      cacheTtl: input.cacheTtl ?? '1h',
+      usage: {
+        input: data.usage.input_tokens,
+        output: data.usage.output_tokens,
+        cacheRead,
+        cacheCreation: cacheWrite,
+      },
+    });
     return {
       success: true,
       model: data.model,
@@ -780,6 +811,25 @@ export async function executeAgentTask(input: AgentExecuteInput): Promise<AgentE
       hitRatio: denom > 0 ? cacheRead / denom : 0,
     };
     if (usingStructured) logCacheUsage(data.model, cacheBreakdown);
+
+    // Gap 4 — cost telemetry for the agent-execute path. We use the agentId
+    // as the recorded agent name so trace consumers can group by named agent.
+    // sessionId/stepIndex aren't threaded through agent_execute today (that's
+    // the per-step granularity follow-up); the per-dispatch fallback still
+    // gives `swarmops cost stats` correct totals.
+    await recordCost({
+      sessionId: null,
+      stepIndex: null,
+      agent: input.agentId,
+      model: data.model,
+      cacheTtl: '1h',
+      usage: {
+        input: data.usage.input_tokens,
+        output: data.usage.output_tokens,
+        cacheRead,
+        cacheCreation: cacheWrite,
+      },
+    });
 
     const result: AgentExecuteResult = {
       success: true,

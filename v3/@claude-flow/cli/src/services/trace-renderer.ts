@@ -120,6 +120,36 @@ function truncate(s: string, max: number): string {
 }
 
 // ============================================================================
+// Cost formatting helpers (Gap 4)
+// ============================================================================
+
+/**
+ * Format a USD value for the trace UI.
+ *
+ * Spec (from GAP-4-DESIGN.md / lead handoff):
+ *   - <= $1.00  -> 4 decimal places ("$0.0042")
+ *   - >  $1.00  -> 2 decimal places ("$1.23")
+ *
+ * Negative or NaN values fall through to the empty string so the renderer
+ * can omit the field entirely without conditional plumbing at every site.
+ */
+export function formatCostUsd(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '';
+  if (value <= 1) return '$' + value.toFixed(4);
+  return '$' + value.toFixed(2);
+}
+
+/**
+ * Format a cache-hit ratio (0..1) as an integer percentage with the `%`
+ * suffix, e.g. `0.84` -> `'84%'`. Returns the empty string for non-finite
+ * or out-of-range inputs so the caller can omit the field cleanly.
+ */
+function formatCachePct(ratio: number | null | undefined): string {
+  if (typeof ratio !== 'number' || !Number.isFinite(ratio) || ratio < 0 || ratio > 1) return '';
+  return Math.round(ratio * 100) + '%';
+}
+
+// ============================================================================
 // Gantt body
 // ============================================================================
 
@@ -182,10 +212,27 @@ function renderGantt(t: LoadedTrajectory): string {
   for (let i = 0; i < t.steps.length; i++) {
     const step = t.steps[i]!;
     const label = `${i + 1}. ${truncate(step.action, 24)}`;
+
+    // Gap 4 — per-step cost overlay. Server-side we render the cost text
+    // in a `<span class="cost-label">` inside the lane. INLINE_JS later
+    // moves this span ONTO the bar (positioned at the bar's right edge)
+    // once it has computed the bar geometry. Rendering server-side has
+    // two wins: (1) `$` appears in the static HTML so screenshot/test
+    // tooling sees it, (2) graceful degradation for `file://` opens with
+    // JS disabled — the cost text is still visible in the row.
+    let costFragment = '';
+    if (step.cost) {
+      const costText = formatCostUsd(step.cost.total);
+      if (costText) {
+        costFragment =
+          `<span class="cost-label" data-step-cost="${i}">${escapeHtml(costText)}</span>`;
+      }
+    }
+
     rows.push(
       `      <div class="row" data-step="${i}">` +
         `<div class="label" title="${escapeHtml(step.action)}">${escapeHtml(label)}</div>` +
-        `<div class="lane"></div>` +
+        `<div class="lane">${costFragment}</div>` +
         `</div>`,
     );
   }
@@ -208,7 +255,7 @@ function renderGantt(t: LoadedTrajectory): string {
 // ============================================================================
 
 function renderHeader(t: LoadedTrajectory): string {
-  return [
+  const lines: string[] = [
     '<header>',
     `  <h1>SwarmOps trace: ${escapeHtml(t.task || '(no task)')}</h1>`,
     '  <div class="meta">',
@@ -218,9 +265,21 @@ function renderHeader(t: LoadedTrajectory): string {
     `    <span>Agent: <b>${escapeHtml(t.agent || '(unknown)')}</b></span>`,
     `    <span>Steps: <b>${t.steps.length}</b></span>`,
     `    <span>Status: ${renderStatusBadge(t)}</span>`,
-    '  </div>',
-    '</header>',
-  ].join('\n');
+  ];
+
+  // Gap 4 — cost telemetry. Both fields are gated on data presence so
+  // pre-Gap-4 trajectories render exactly as before.
+  const costStr = formatCostUsd(t.totalCostUsd);
+  if (costStr) {
+    lines.push(`    <span>Total cost: <b class="cost-total">${escapeHtml(costStr)}</b></span>`);
+  }
+  const cachePct = formatCachePct(t.cacheHitRatio);
+  if (cachePct) {
+    lines.push(`    <span>Cache hit: <b>${escapeHtml(cachePct)}</b></span>`);
+  }
+
+  lines.push('  </div>', '</header>');
+  return lines.join('\n');
 }
 
 // ============================================================================

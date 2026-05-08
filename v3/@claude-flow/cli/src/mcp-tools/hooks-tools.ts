@@ -435,6 +435,15 @@ interface TrajectoryStep {
   result: string;
   quality: number;
   timestamp: string;
+  /**
+   * Gap 4 — optional per-step cost annotation. Populated by the cost-recorder
+   * join (see services/cost-recorder.ts) when a session+stepIndex match is
+   * available. Optional preserves backwards compatibility — older trajectories
+   * recorded before Gap 4 simply lack the field, which trace-loader handles
+   * gracefully. Tokens are raw counts; `total` is USD summed from the
+   * pricing-table entry (null when the model is unpriced).
+   */
+  cost?: { input: number; output: number; cacheRead: number; cacheCreation: number; total: number } | null;
 }
 
 interface TrajectoryData {

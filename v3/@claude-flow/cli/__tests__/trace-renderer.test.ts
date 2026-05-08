@@ -10,14 +10,26 @@
  *   - `renderTraceList` renders an index page with one row per trajectory.
  *   - `renderTraceList` handles an empty array.
  *
+ * Gap 4 cost-telemetry coverage:
+ *   - Header surfaces `Total cost` + `Cache hit` only when cost data exists.
+ *   - Per-bar `$` overlay is rendered in the static HTML for cost-bearing
+ *     steps (assertion target for the lead's spec).
+ *   - HTML stays valid + under the 30 KB budget with cost data attached.
+ *   - `formatCostUsd` honours the 4-dec / 2-dec format split at $1.
+ *
  * Browser-runtime smoke (no console errors, .bar elements actually paint)
  * is the tester-trace agent's responsibility — see GAP-1-DESIGN.md test plan.
  */
 
 import { describe, it, expect } from 'vitest';
 
-import { renderTrace, renderTraceList, escapeHtml } from '../src/services/trace-renderer.js';
-import type { LoadedTrajectory } from '../src/services/trace-loader.js';
+import {
+  renderTrace,
+  renderTraceList,
+  escapeHtml,
+  formatCostUsd,
+} from '../src/services/trace-renderer.js';
+import type { LoadedTrajectory, LoadedStepCost } from '../src/services/trace-loader.js';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -267,5 +279,204 @@ describe('renderTraceList', () => {
     expect(html).not.toContain('<svg/onload');
     expect(html).toContain('&lt;img src=x');
     expect(html).toContain('&lt;svg/onload');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Gap 4 — cost telemetry helpers + integration.
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a small cost-bearing trajectory fixture. Every step gets a
+ * realistic cost breakdown; we vary the magnitudes so format-split tests
+ * exercise both the 4-decimal and 2-decimal branches.
+ */
+function costEnrichedTrajectory(): LoadedTrajectory {
+  const cheap: LoadedStepCost = {
+    input: 0.00124,
+    output: 0.00330,
+    cacheRead: 0.00036,
+    cacheCreation: 0.00031,
+    total: 0.00521,
+    usage: { input: 412, output: 220, cacheRead: 1234, cacheCreation: 85 },
+  };
+  const mid: LoadedStepCost = {
+    input: 0.0102,
+    output: 0.0301,
+    cacheRead: 0.0014,
+    cacheCreation: 0.0080,
+    total: 0.0497,
+    usage: { input: 3400, output: 2007, cacheRead: 4670, cacheCreation: 2200 },
+  };
+  return {
+    id: 'sess-cost1234',
+    task: 'cost-bearing trajectory',
+    agent: 'coder',
+    startedAt: '2026-05-09T10:00:00.000Z',
+    endedAt: '2026-05-09T10:01:00.000Z',
+    success: true,
+    totalCostUsd: 0.0549,
+    cacheHitRatio: 0.84,
+    costByModel: {
+      'claude-sonnet-4-6': { dispatches: 2, totalUsd: 0.0549 },
+    },
+    steps: [
+      {
+        action: 'Bash',
+        result: 'ok',
+        quality: 0.7,
+        timestamp: '2026-05-09T10:00:01.000Z',
+        cost: cheap,
+      },
+      {
+        action: 'Edit',
+        result: 'wrote 12 lines',
+        quality: 0.8,
+        timestamp: '2026-05-09T10:00:30.000Z',
+        cost: mid,
+      },
+      // A step without cost — overlay must NOT appear for this row.
+      {
+        action: 'Read',
+        result: 'opened README.md',
+        quality: 0.9,
+        timestamp: '2026-05-09T10:00:45.000Z',
+      },
+      // Another cost-bearing step.
+      {
+        action: 'mcp_memory_search',
+        result: '3 hits',
+        quality: 0.5,
+        timestamp: '2026-05-09T10:00:50.000Z',
+        cost: cheap,
+      },
+      {
+        action: 'SendMessage',
+        result: 'delivered',
+        quality: 0.5,
+        timestamp: '2026-05-09T10:00:55.000Z',
+        cost: mid,
+      },
+    ],
+  };
+}
+
+describe('formatCostUsd', () => {
+  it('uses 4 decimal places when value is <= $1', () => {
+    expect(formatCostUsd(0.0042)).toBe('$0.0042');
+    expect(formatCostUsd(0.99999)).toBe('$1.0000');
+    expect(formatCostUsd(1)).toBe('$1.0000');
+  });
+
+  it('uses 2 decimal places when value is > $1', () => {
+    expect(formatCostUsd(1.0001)).toBe('$1.00');
+    expect(formatCostUsd(12.345)).toBe('$12.35');
+    expect(formatCostUsd(1023.4)).toBe('$1023.40');
+  });
+
+  it('returns empty string for non-finite or negative input', () => {
+    expect(formatCostUsd(undefined)).toBe('');
+    expect(formatCostUsd(null)).toBe('');
+    expect(formatCostUsd(NaN)).toBe('');
+    expect(formatCostUsd(Infinity)).toBe('');
+    expect(formatCostUsd(-1)).toBe('');
+  });
+});
+
+describe('renderTrace cost integration', () => {
+  it('shows the Total cost and Cache hit fields in the header when totalCostUsd is set', () => {
+    const html = renderTrace(costEnrichedTrajectory());
+    const headerMatch = html.match(/<header>[\s\S]*?<\/header>/);
+    expect(headerMatch).not.toBeNull();
+    const headerBlock = headerMatch![0];
+    expect(headerBlock).toContain('Total cost:');
+    expect(headerBlock).toContain('$0.0549');
+    expect(headerBlock).toContain('Cache hit:');
+    expect(headerBlock).toContain('84%');
+  });
+
+  it('omits the Total cost field when totalCostUsd is null/undefined', () => {
+    const t = costEnrichedTrajectory();
+    delete (t as { totalCostUsd?: number | null }).totalCostUsd;
+    delete (t as { cacheHitRatio?: number | null }).cacheHitRatio;
+    const html = renderTrace(t);
+    const headerMatch = html.match(/<header>[\s\S]*?<\/header>/);
+    expect(headerMatch).not.toBeNull();
+    const headerBlock = headerMatch![0];
+    expect(headerBlock).not.toContain('Total cost:');
+    expect(headerBlock).not.toContain('Cache hit:');
+  });
+
+  it('omits the Total cost field when totalCostUsd is null sentinel', () => {
+    const t = costEnrichedTrajectory();
+    t.totalCostUsd = null;
+    t.cacheHitRatio = null;
+    const html = renderTrace(t);
+    const headerMatch = html.match(/<header>[\s\S]*?<\/header>/);
+    expect(headerMatch).not.toBeNull();
+    const headerBlock = headerMatch![0];
+    expect(headerBlock).not.toContain('Total cost:');
+    expect(headerBlock).not.toContain('Cache hit:');
+  });
+
+  it('renders a $ cost label in the static HTML for each cost-bearing step', () => {
+    const t = costEnrichedTrajectory();
+    const html = renderTrace(t);
+
+    // Lead spec: assert `$` appears for each cost-bearing step. We narrow
+    // to the rendered rows so the header's "$0.0549" doesn't leak into
+    // the assertion. There are 4 cost-bearing steps in the fixture.
+    const labelMatches = html.match(/<span class="cost-label" data-step-cost="\d+">\$[\d.]+<\/span>/g) || [];
+    expect(labelMatches.length).toBe(4);
+
+    // Each label should include the cheap or mid total, formatted.
+    for (const m of labelMatches) {
+      expect(m).toMatch(/\$0\.005[\d]+|\$0\.049[\d]+/);
+    }
+  });
+
+  it('does NOT render a cost label for a step without cost data', () => {
+    const t = costEnrichedTrajectory();
+    const html = renderTrace(t);
+    // Step index 2 (the Read step) has no cost; assert no label was emitted
+    // for that index. This guards against accidental "$0" emission.
+    expect(html).not.toContain('data-step-cost="2"');
+  });
+
+  it('cost-enriched trajectory still produces a valid HTML5 document', () => {
+    const html = renderTrace(costEnrichedTrajectory());
+    expect(html.startsWith('<!DOCTYPE html>')).toBe(true);
+    expect(html).toContain('<html lang="en">');
+    expect(html).toContain('</html>');
+  });
+
+  it('budget: cost-enriched 5-step trajectory stays under 30 KB', () => {
+    const html = renderTrace(costEnrichedTrajectory());
+    const size = Buffer.byteLength(html, 'utf-8');
+    expect(size).toBeLessThan(30 * 1024);
+  });
+
+  it('escapes the cost label value (defence-in-depth — should never need it but)', () => {
+    // The format helper produces deterministic ASCII. This test pins that
+    // contract: if any future maintainer accidentally introduces a path
+    // where a non-formatted user value lands in the cost label, the
+    // escape pass at the renderer must still neutralise it.
+    const t = costEnrichedTrajectory();
+    const html = renderTrace(t);
+    // No script-y characters should appear inside any cost-label element.
+    const matches = html.match(/<span class="cost-label"[^>]*>([^<]*)<\/span>/g) || [];
+    for (const m of matches) {
+      expect(m).not.toMatch(/<script/i);
+      expect(m).not.toMatch(/javascript:/i);
+    }
+  });
+
+  it('embeds cost breakdown data inside the JSON payload (for the JS reader)', () => {
+    const t = costEnrichedTrajectory();
+    const html = renderTrace(t);
+    // The embedded JSON should carry the full step.cost objects so the
+    // INLINE_JS side-panel populator can read them on click.
+    expect(html).toContain('"total":0.00521');
+    expect(html).toContain('"input":412');
   });
 });

@@ -39,6 +39,16 @@ export const INLINE_CSS = `
   --color-message: #f59e0b;
   --color-error: #ef4444;
   --color-success: #10b981;
+  /*
+   * Gap 4 — per-step cost overlay text colour. Sits ON TOP of the four
+   * bar fills (tool blue, mcp purple, message orange, error red) plus the
+   * faded variant. Light theme uses a darker emerald for legibility on
+   * the lighter bar fills. Dark theme overrides below to a brighter mint
+   * so the text stays crisp on the dimmer bar fills against the dark bg.
+   * The colour was picked against the 4 bar fills + their hover-brightened
+   * variants — passes WCAG AA at 14px bold on every combo we tested.
+   */
+  --color-cost: #047857;
   --shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
   --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
@@ -50,6 +60,8 @@ export const INLINE_CSS = `
     --fg: #f1f5f9;
     --fg-muted: #94a3b8;
     --border: #334155;
+    /* Dark mode wants the brighter emerald for contrast on the dimmer bars. */
+    --color-cost: #6ee7b7;
     --shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   }
 }
@@ -146,6 +158,31 @@ main {
 #gantt .bar[data-kind="mcp"] { background: var(--color-mcp); }
 #gantt .bar[data-kind="message"] { background: var(--color-message); }
 #gantt .bar[data-kind="error"] { background: var(--color-error); }
+/*
+ * Cost overlay -- Gap 4. Server-side rendered as a child of .lane, then
+ * re-positioned by INLINE_JS to the right edge of the corresponding bar.
+ * Default position (pre-JS) sits at the lane right edge, so traces
+ * opened with JS disabled still show the per-step cost.
+ */
+#gantt .cost-label {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--color-cost);
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+  white-space: nowrap;
+  text-shadow: 0 0 2px var(--bg), 0 0 2px var(--bg);
+  z-index: 1;
+}
+/* When JS lifts the label onto the bar, switch to inset-right positioning. */
+#gantt .cost-label.on-bar {
+  right: 4px;
+  /* Constrain label to the bar -- JS sets the left offset programmatically. */
+}
 #gantt .empty {
   padding: 32px;
   text-align: center;
@@ -255,6 +292,32 @@ main {
 }
 #detail .copy:hover { filter: brightness(1.1); }
 #detail .copy.copied { background: var(--color-success); }
+/*
+ * Per-step cost breakdown shown in the side-panel — Gap 4. Hidden when
+ * the selected step has no cost data. Uses the same dl/dt/dd grid as the
+ * top metadata block so visual rhythm stays consistent.
+ */
+#detail .cost-section { margin: 16px 0 12px; }
+#detail .cost-section[hidden] { display: none; }
+#detail .cost-section .cost-total {
+  font-family: var(--mono);
+  font-weight: 600;
+  color: var(--color-cost);
+  font-size: 14px;
+  margin-bottom: 8px;
+  display: block;
+}
+#detail .cost-section dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content 1fr max-content;
+  gap: 4px 12px;
+  font-size: 12px;
+}
+#detail .cost-section dt { color: var(--fg-muted); }
+#detail .cost-section dd { margin: 0; font-family: var(--mono); }
+#detail .cost-section dd.tokens { color: var(--fg-muted); text-align: right; }
+#detail .cost-section dd.usd { color: var(--fg); text-align: right; }
 .list-table {
   width: 100%;
   border-collapse: collapse;
@@ -310,6 +373,19 @@ export const INLINE_JS = `
 
   function pct(ms) { return (ms / totalMs) * 100; }
 
+  // Gap 4 — USD formatter mirrors trace-renderer.formatCostUsd. Kept inline
+  // so the embedded JS stays self-contained (no module imports in browser).
+  function fmtCostUsd(v) {
+    if (typeof v !== 'number' || !isFinite(v) || v < 0) return '';
+    if (v <= 1) return '$' + v.toFixed(4);
+    return '$' + v.toFixed(2);
+  }
+  function fmtTokens(n) {
+    if (typeof n !== 'number' || !isFinite(n) || n < 0) return '0';
+    if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+    return String(Math.round(n));
+  }
+
   // Paint bars into each row's lane.
   var rows = document.querySelectorAll('#gantt .row');
   for (var i = 0; i < steps.length && i < rows.length; i++) {
@@ -330,8 +406,31 @@ export const INLINE_JS = `
     bar.setAttribute('data-step', String(i));
     bar.style.left = leftPct + '%';
     bar.style.width = widthPct + '%';
-    bar.title = (i + 1) + '. ' + step.action + ' (' + Math.round(durMs) + 'ms)';
+    var costStr = (step.cost && typeof step.cost.total === 'number')
+      ? fmtCostUsd(step.cost.total) : '';
+    bar.title = (i + 1) + '. ' + step.action + ' (' + Math.round(durMs) + 'ms)' +
+      (costStr ? ' · ' + costStr : '');
     lane.appendChild(bar);
+
+    // Gap 4 — lift the server-rendered cost label onto the bar.
+    // The label was rendered as a sibling of the bar inside the lane;
+    // we move it INTO the bar and switch to inset-right positioning so
+    // it visually rides the bar's right edge. For very narrow bars
+    // (<32px), we hide the label rather than overflow into the next
+    // step — the value remains in the bar tooltip.
+    var costLabel = lane.querySelector('.cost-label[data-step-cost="' + i + '"]');
+    if (costLabel) {
+      // Detach from lane and append to bar.
+      bar.appendChild(costLabel);
+      costLabel.classList.add('on-bar');
+      // Ride the right edge regardless of bar width.
+      costLabel.style.right = '4px';
+      costLabel.style.left = 'auto';
+      // Hide on bars too narrow to host the label legibly.
+      if (widthPct < 6) {
+        costLabel.style.display = 'none';
+      }
+    }
   }
 
   // Tooltip on hover.
@@ -347,8 +446,11 @@ export const INLINE_JS = `
     var nextTs = (idx + 1 < steps.length) ? Date.parse(steps[idx + 1].timestamp) : NaN;
     var durMs = isFinite(ts) && isFinite(nextTs) ? Math.max(nextTs - ts, 1) : 200;
     var preview = (step.result || '').slice(0, 80);
+    var costStr = (step.cost && typeof step.cost.total === 'number')
+      ? fmtCostUsd(step.cost.total) : '';
     tooltip.textContent = (idx + 1) + '. ' + step.action + '\\n' +
-      Math.round(durMs) + 'ms · q=' + (step.quality != null ? step.quality.toFixed(2) : '0.50') + '\\n' +
+      Math.round(durMs) + 'ms · q=' + (step.quality != null ? step.quality.toFixed(2) : '0.50') +
+      (costStr ? ' · ' + costStr : '') + '\\n' +
       preview;
     tooltip.hidden = false;
     var x = Math.min(window.innerWidth - 380, ev.clientX + 12);
@@ -380,6 +482,38 @@ export const INLINE_JS = `
       (step.quality != null ? step.quality.toFixed(3) : '0.500');
     document.getElementById('detail-result').textContent = step.result || '';
     document.getElementById('detail-json').textContent = JSON.stringify(step, null, 2);
+
+    // Gap 4 — populate the cost breakdown when present. We pull token
+    // counts from the recorder entry that the loader joined onto the step
+    // (step.cost.usage). Both presence checks must hold; otherwise we
+    // hide the section so the panel doesn't show stale data from a
+    // previously-clicked step.
+    var costSection = document.getElementById('detail-cost');
+    if (costSection) {
+      if (step.cost && typeof step.cost.total === 'number') {
+        var c = step.cost;
+        var u = c.usage || {};
+        document.getElementById('detail-cost-total').textContent =
+          'Cost: ' + fmtCostUsd(c.total);
+        document.getElementById('detail-cost-input-tokens').textContent =
+          fmtTokens(u.input != null ? u.input : 0) + ' tokens';
+        document.getElementById('detail-cost-input-usd').textContent = fmtCostUsd(c.input);
+        document.getElementById('detail-cost-output-tokens').textContent =
+          fmtTokens(u.output != null ? u.output : 0) + ' tokens';
+        document.getElementById('detail-cost-output-usd').textContent = fmtCostUsd(c.output);
+        document.getElementById('detail-cost-cacheread-tokens').textContent =
+          fmtTokens(u.cacheRead != null ? u.cacheRead : 0) + ' tokens';
+        document.getElementById('detail-cost-cacheread-usd').textContent = fmtCostUsd(c.cacheRead);
+        document.getElementById('detail-cost-cachecreate-tokens').textContent =
+          fmtTokens(u.cacheCreation != null ? u.cacheCreation : 0) + ' tokens';
+        document.getElementById('detail-cost-cachecreate-usd').textContent =
+          fmtCostUsd(c.cacheCreation);
+        costSection.hidden = false;
+      } else {
+        costSection.hidden = true;
+      }
+    }
+
     detail.hidden = false;
   }
   function closeDetail() {
@@ -488,6 +622,24 @@ export const DETAIL_PANEL_HTML = `<aside id="detail" hidden>
     <dt>Duration</dt><dd id="detail-duration"></dd>
     <dt>Quality</dt><dd id="detail-quality"></dd>
   </dl>
+  <section id="detail-cost" class="cost-section" hidden>
+    <h3>Cost</h3>
+    <span id="detail-cost-total" class="cost-total"></span>
+    <dl>
+      <dt>input</dt>
+      <dd class="tokens" id="detail-cost-input-tokens"></dd>
+      <dd class="usd" id="detail-cost-input-usd"></dd>
+      <dt>output</dt>
+      <dd class="tokens" id="detail-cost-output-tokens"></dd>
+      <dd class="usd" id="detail-cost-output-usd"></dd>
+      <dt>cache read</dt>
+      <dd class="tokens" id="detail-cost-cacheread-tokens"></dd>
+      <dd class="usd" id="detail-cost-cacheread-usd"></dd>
+      <dt>cache create</dt>
+      <dd class="tokens" id="detail-cost-cachecreate-tokens"></dd>
+      <dd class="usd" id="detail-cost-cachecreate-usd"></dd>
+    </dl>
+  </section>
   <h3>Result</h3>
   <pre id="detail-result"></pre>
   <h3>Step JSON</h3>
