@@ -2,7 +2,7 @@
 
 # SwarmOps
 
-**Production-hardened multi-agent orchestration for Claude Code.** Memory that actually remembers across sessions (mxbai-embed-large 1024-dim semantic search, 80% recall on paraphrased queries). Prompt caching that cuts input-token cost 50-90% on warm agent loops. Real architectural typing instead of `typeof === 'function'` probes. Forked from [ruvnet/ruflo](https://github.com/ruvnet/ruflo) — gracious credit, our own product.
+**Production-hardened multi-agent orchestration for Claude Code.** Two killer features no competitor in the Claude Code space ships: 🎬 **replayable agent traces** (`swarmops trace replay <id>` — Gantt swimlane HTML viewer, self-contained, archivable) and 🧠 **smart swarm routing into YOUR `~/.claude/agents/`** (`swarm_init({task, strategy: "specialized"})` semantically dispatches to your hand-built agents, not generic fallbacks). Plus: persistent semantic memory across sessions (mxbai-embed-large 1024-dim, 80% recall), prompt caching that cuts input-token cost 50-90%, real architectural typing instead of `typeof === 'function'` probes. Forked from [ruvnet/ruflo](https://github.com/ruvnet/ruflo) — gracious credit, our own product.
 
 [![Stars](https://img.shields.io/github/stars/h4ckm1n-dev/SwarmOps?style=flat-square&logo=github&color=gold)](https://github.com/h4ckm1n-dev/SwarmOps)
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](https://opensource.org/licenses/MIT)
@@ -40,6 +40,35 @@ ruflo --version  # confirms global symlink
 | **`memory-bridge` controller dispatch** | 22 untyped `typeof === 'function'` probes | typed `ControllerCapabilities` interface | architectural |
 | **Silent catch blocks** | 1207 across cli/src, no logging | `swallowError(label, err)` adoption in 8 hot paths (debug-gated) | observability |
 
+## Killer features
+
+Two capabilities you can't get anywhere else in the Claude Code ecosystem today:
+
+### 🎬 Replayable agent traces — `swarmops trace replay <session-id>`
+
+Every agent dispatch in SwarmOps writes trajectory data to `~/.claude/.claude-flow/memory/store.json`. SwarmOps reads it back as an interactive **Gantt swimlane HTML viewer** — one row per step, time on the X axis, color-coded by action class (tool / MCP / SendMessage / error), opacity-faded for low-quality steps. Click any bar → full step JSON in a side panel. Self-contained HTML (no CDN, no dependencies) — opens in any browser, archivable, attachable to bug reports.
+
+```bash
+swarmops trace list                   # browse recent sessions
+swarmops trace replay latest --open   # render + open in browser
+swarmops trace prune --older-than 30d # cleanup
+```
+
+**Nobody else in the Claude Code orchestration space ships this.** LangSmith does it for LangGraph ($39/seat); Braintrust is model-only; Anthropic Agent Teams ships nothing comparable. SwarmOps gives it to you free, local, no telemetry. See [`research-roadmap/GAP-1-DESIGN.md`](./research-roadmap/GAP-1-DESIGN.md) for the design rationale.
+
+### 🧠 Smart swarm routing using YOUR installed agents — `swarm_init({task, strategy: "specialized"})`
+
+SwarmOps reads your `~/.claude/{agents,skills,commands,plugins}/` registry and **semantically routes tasks to the right user-installed agent**. Upstream's MCP layer is blind to user agents — it spawns generic `coder` / `tester` regardless of what you have. SwarmOps:
+
+- Indexes your agents at MCP boot via `agent_list`, `guidance_capabilities`, `hooks_route`
+- Uses **mxbai-embed-large** (1024-dim semantic embeddings via local Ollama) + hybrid scoring (`0.7·cosine + 0.3·keyword`) to match task descriptions to agents
+- Examples it correctly routes: `"trading bot"` → `polymarket-analyzer` (yours), `"JWT auth"` → `auth-engineer` (yours), NOT the upstream-bundled `kali-metasploit` (which a bag-of-words matcher would surface)
+- Indexes foreign MCP servers (plugin + claude.ai integrations) so the swarm can route to those too
+
+This is the difference between "a swarm of generic agents" and "your hand-built agent ecosystem actually being used." Combined with the trace viewer above, you can SEE which of your agents got picked and how they collaborated.
+
+---
+
 ## About SwarmOps
 
 SwarmOps is a **production-hardened multi-agent orchestration product** for Claude Code. Forked from [`ruvnet/ruflo`](https://github.com/ruvnet/ruflo) — full credit to [`rUv`](https://ruv.io) and contributors for the original architecture, agent ecosystem, and MCP tooling — but SwarmOps is its own project now, with its own roadmap and release cadence.
@@ -48,18 +77,29 @@ We started as a 31-bug audit of ruflo's global-install behavior. We're now a sep
 
 We track upstream's `main` for shared bug fixes and security patches (last sync: 2026-05-08, clean 4-commit merge). Beyond that, the products diverge.
 
-## What's new in 3.7.1-swarmops.1 (2026-05-08)
+## Recent changelog (2026-05-08)
 
-The most recent release ships the architectural deleveraging work the v3.6 audit asked for, plus the highest-ROI performance lever in the entire stack:
+A single day of intensive development shipped both the architectural deleveraging the v3.6 audit asked for AND the first Tier 2 product features. Each commit landed on `main` after passing the full 2,500+ test suite with zero net regression.
 
+**Tier 0/1 architectural batch** (commit `cd44c55f8`):
 - **3 `cache_control` breakpoints** in agent dispatch (tools / system / CLAUDE.md+project context), all with 1h TTL via the `extended-cache-ttl-2025-04-11` beta header. Healthy agent loops now run **>80% cache-read ratio** after first call. Estimated **50-90% input-token cost cut** on warm dispatches. New `swarmops cache-stats` command tracks rolling-100 hit ratio.
 - **`resolveInstallContext()`** hoisted to `@claude-flow/shared` — single source of truth for `{ packageRoot, claudeRoot, dataDir, isGlobalInstall, projectRoot }`. Eliminates the install-context-derivation pattern that was patched in three separate places (Bugs 1/7/8/9/12 root cause).
 - **`ControllerCapabilities`** typed interface — replaces 19 of 22 untyped `typeof x.foo === 'function'` probes in `memory-bridge.ts`. Real types instead of duck typing.
-- **`searchEntriesMulti(namespaces, opts)`** in memory-bridge — `memory_search_unified` now does one HNSW pass with namespace-filter at scoring time, instead of N separate searches per namespace (the most-called search op now does **1× the work instead of N×**).
-- **`swallowError(label, err, hint?)`** helper — adopted in the 8 hottest catch blocks (memory-bridge, db-pool ×5, embedder-resolver, rabitq-index). Silent-failure log line gated by `RUFLO_LOG_LEVEL=debug`. Stops the silent-degradation class that caused 3 of the 8 PR-1828 bugs.
-- **3 hot-path regexes hoisted** to module scope: `production/error-handler.ts` (per-log-line redaction), `ruvector/graph-analyzer.ts` (graph traversal), `init/helpers-generator.ts` (router template).
-- **SEC-1 critical fix**: `skipDangerousModePermissionPrompt` flipped `false` — closed a one-shot prompt-injection-to-RCE chain that was silently active in dev configs.
-- **28 zero-byte `tmp.json` scaffolding files** removed from across `v3/@claude-flow/*`.
+- **`searchEntriesMulti(namespaces, opts)`** in memory-bridge — `memory_search_unified` now does one HNSW pass with namespace-filter at scoring time (the most-called search op now does **1× the work instead of N×**).
+- **`swallowError(label, err, hint?)`** helper — adopted in the 8 hottest catch blocks. Silent-failure log line gated by `RUFLO_LOG_LEVEL=debug`. Stops the silent-degradation class that caused 3 of the 8 PR-1828 bugs.
+- **3 hot-path regexes hoisted** to module scope (`production/error-handler.ts`, `ruvector/graph-analyzer.ts`, `init/helpers-generator.ts`).
+- **SEC-1 critical fix**: `skipDangerousModePermissionPrompt` flipped `false` — closed a one-shot prompt-injection-to-RCE chain.
+- **28 zero-byte `tmp.json` scaffolding files** removed.
+
+**Connected-component bug fixes** (commits `09e6023ba`, `a4b8aca86`, `c7b3eec21`):
+- **Bug 44**: `commands/security.ts` now persists scan results to `audit-status.json` so the statusline reflects actual scan state (was: stuck on `PENDING` forever even after a clean scan).
+- **Bug 45**: `Tests` field renders `─` (dim em-dash, "not applicable") when CWD has no project markers (`package.json`, `.git`, `tests/`, …) instead of misleading `●0`.
+- **Bug 46**: `resolveInstallContext()` handles the degenerate case where CWD is itself a `.claude` directory — was returning the very double-`.claude` path the helper was designed to eliminate.
+
+**Tier 2 features**:
+- **Gap 1 — Replayable agent traces** (commit `064b2e365`): the `swarmops trace list / replay / prune` CLI + a self-contained Gantt-swimlane HTML viewer. See the killer-features section above.
+- **Bug 47 — Daemon path-mismatch detection** (commit prior to `0051aa437`): `detectDaemonPathMismatch()` + `daemon restart --force-path` + `swarmops doctor` warning catch the case where a stale daemon (e.g. from `~/.npm/_npx/...` cache) keeps running after the install moves.
+- **Lazy-load `bin/cli.js`** (commit `0051aa437`): bare-TTY help renders in 60ms (was 180ms). 11 bootstrap tests assert no heavy module families load on early-exit paths.
 
 Full execution dossier in [`research-roadmap/execution/`](./research-roadmap/execution/).
 
@@ -125,6 +165,23 @@ Full execution dossier in [`research-roadmap/execution/`](./research-roadmap/exe
 - `resolveInstallContext()` in `@claude-flow/shared` — typed `InstallContext` instead of inline `os.homedir()` + `path.join` patterns scattered across 12+ call sites
 - `ControllerCapabilities` interface — `caps.reasoningBank?.recordTrajectory(t)` instead of `if (typeof bridge.reasoningBank?.recordTrajectory === 'function') { ... }` × 22
 - `swallowError(label, err, hint?)` — single recipient for intentional silent catches, debug-level gated. Replaces `} catch { /* defensive */ }` in the 8 hottest sites (memory-bridge, db-pool, embedder-resolver, rabitq-index)
+
+**11. Replayable agent traces with Gantt swimlane viewer** (Tier 2 feature, no competitor coverage)
+- `swarmops trace list / replay / prune` — full CLI surface for browsing past agent sessions
+- Renders to a self-contained HTML5 file (~15 KB for a 5-step trajectory): inline CSS + inline vanilla JS, no CDN, no build step, no dependencies
+- One swimlane row per step on a shared time axis; bars color-coded by action class (tool / MCP / SendMessage / error); opacity-faded for low-quality steps
+- Click any bar → side panel with full step JSON, "Copy" button for clipboard
+- Light-mode default with `prefers-color-scheme: dark` for dark mode
+- Reads from existing `TrajectoryData` in `~/.claude/.claude-flow/memory/store.json` — no new instrumentation needed
+- XSS-safe via `safeJson` (escapes `</script>`, U+2028, U+2029) — even hostile trajectory `result` fields can't pop a console
+- Static, archivable, emailable — perfect for bug reports
+
+**12. Smart routing to user-installed agents at swarm boot** (the wedge nobody else hits)
+- `swarm_init({ task, strategy: "specialized" })` reads `~/.claude/{agents,skills,commands,plugins}/` and routes tasks semantically — not by upstream's bundled-agent fallback
+- Hybrid scoring: `0.7·cosine + 0.3·keyword` over `mxbai-embed-large` (1024-dim) embeddings via local Ollama
+- Real-world routing wins documented in [`ANALYSIS.md`](./ANALYSIS.md): `"trading bot"` → your `polymarket-analyzer`; `"JWT auth"` → your `auth-engineer`; `"deploy to k8s"` → your `kubernetes-coordinator`
+- Foreign MCP servers (plugin + claude.ai integrations) indexed in `guidance_capabilities` so they're swarm-routable too
+- The swarm now USES your hand-built agent ecosystem instead of replacing it
 - 19 of 22 probes converted; the 3 deferred are generic `bridgeGetController(name)` accessors that legitimately need string-keyed dispatch
 
 ### What SwarmOps does NOT add
