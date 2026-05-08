@@ -1597,11 +1597,145 @@ const initMemoryCommand: Command = {
   }
 };
 
+/**
+ * #bug43.2 — `claude-flow memory migrate-embeddings`
+ *
+ * Re-embeds the entire memory store with whichever embedder the resolver
+ * has picked (Ollama `mxbai-embed-large` when available, MiniLM otherwise).
+ * Idempotent: rows already on the active dim+model are skipped. Supports
+ * `--dry-run` so users can see what would change before committing.
+ *
+ * Why dynamic-import? `memory-bridge.ts` pulls in `@claude-flow/memory`
+ * which is a heavy dependency that we want to keep out of the cold-start
+ * path for `--version` / `--help` (Bug 36 lazy-load convention).
+ */
+const migrateEmbeddingsCommand: Command = {
+  name: 'migrate-embeddings',
+  description: 'Re-embed all memory entries with the active embedder (e.g. mxbai-embed-large)',
+  options: [
+    {
+      name: 'dry-run',
+      short: 'n',
+      description: 'Report what would change without writing',
+      type: 'boolean',
+      default: false,
+    },
+    {
+      name: 'batch-size',
+      short: 'b',
+      description: 'Embed N entries per Ollama request',
+      type: 'number',
+      default: 16,
+    },
+    {
+      name: 'db-path',
+      description: 'Override database path (default: ./.swarm/memory.db)',
+      type: 'string',
+    },
+    {
+      name: 'yes',
+      short: 'y',
+      description: 'Skip confirmation prompt',
+      type: 'boolean',
+      default: false,
+    },
+  ],
+  examples: [
+    { command: 'claude-flow memory migrate-embeddings --dry-run', description: 'Preview changes' },
+    { command: 'claude-flow memory migrate-embeddings -y', description: 'Run migration without prompt' },
+    { command: 'claude-flow memory migrate-embeddings -b 32', description: 'Larger batch size' },
+  ],
+  action: async (ctx: CommandContext): Promise<CommandResult> => {
+    const dryRun = ctx.flags['dry-run'] === true || ctx.flags.dryRun === true;
+    const batchSize = (ctx.flags['batch-size'] as number) || (ctx.flags.batchSize as number) || 16;
+    const dbPath = ctx.flags['db-path'] as string | undefined;
+    const yes = ctx.flags.yes === true || ctx.flags.y === true;
+
+    output.writeln();
+    output.writeln(output.bold('Memory Embedding Migration'));
+    output.writeln();
+
+    let bridge: typeof import('../memory/memory-bridge.js');
+    let resolver: typeof import('../memory/embedder-resolver.js');
+    try {
+      bridge = await import('../memory/memory-bridge.js');
+      resolver = await import('../memory/embedder-resolver.js');
+    } catch (err) {
+      output.printError(`Memory bridge unavailable: ${err instanceof Error ? err.message : String(err)}`);
+      return { success: false, exitCode: 1 };
+    }
+
+    const active = await resolver.getActiveEmbedder();
+    output.writeln(`  Active embedder: ${output.highlight(active.model)} (${active.dim}-dim, source=${active.source})`);
+    if (active.isFallback) {
+      output.writeln(output.dim('  (resolver picked the fallback — start Ollama with `mxbai-embed-large` pulled to upgrade)'));
+    }
+    output.writeln();
+
+    const distribution = await bridge.bridgeGetEmbeddingDistribution(dbPath);
+    if (distribution) {
+      output.writeln('  Current distribution:');
+      for (const row of distribution) {
+        output.writeln(`    ${String(row.dim).padStart(4)}d  ${row.model.padEnd(40)}  ${row.count}`);
+      }
+      output.writeln();
+    }
+
+    // Dry-run first so we can show counts before asking for confirmation.
+    const preview = await bridge.bridgeMigrateEmbeddings({ dryRun: true, dbPath });
+    if (!preview) {
+      output.printError('Bridge unavailable — cannot run migration.');
+      return { success: false, exitCode: 1 };
+    }
+
+    const candidates = preview.total - preview.skipped;
+    output.writeln(`  Total entries:    ${preview.total}`);
+    output.writeln(`  Already on target: ${preview.skipped}`);
+    output.writeln(`  To re-embed:      ${candidates}`);
+    output.writeln(`  Target:           ${preview.targetModel} (${preview.targetDim}-dim)`);
+    output.writeln();
+
+    if (dryRun || candidates === 0) {
+      output.writeln(output.dim(candidates === 0 ? 'Nothing to migrate.' : 'Dry-run complete — re-run without --dry-run to apply.'));
+      return { success: true, data: preview };
+    }
+
+    if (!yes) {
+      const proceed = await confirm({
+        message: `Re-embed ${candidates} entries with ${preview.targetModel}?`,
+        default: false,
+      });
+      if (!proceed) {
+        output.writeln(output.dim('Aborted.'));
+        return { success: true, exitCode: 0 };
+      }
+    }
+
+    const spinner = output.createSpinner({ text: 'Re-embedding…', spinner: 'dots' });
+    spinner.start();
+    const start = Date.now();
+    const result = await bridge.bridgeMigrateEmbeddings({
+      dbPath,
+      batchSize,
+      onProgress: (done, total) => {
+        spinner.setText(`Re-embedding… ${done}/${total}`);
+      },
+    });
+    if (!result) {
+      spinner.fail('Migration failed');
+      return { success: false, exitCode: 1 };
+    }
+    spinner.succeed(`Migrated ${result.migrated}/${result.total} entries (${result.errors} errors) in ${Date.now() - start}ms`);
+
+    return { success: true, data: result };
+  },
+};
+
 // Main memory command
 export const memoryCommand: Command = {
   name: 'memory',
   description: 'Memory management commands',
-  subcommands: [initMemoryCommand, storeCommand, retrieveCommand, searchCommand, listCommand, deleteCommand, statsCommand, configureCommand, cleanupCommand, compressCommand, exportCommand, importCommand],
+  subcommands: [initMemoryCommand, storeCommand, retrieveCommand, searchCommand, listCommand, deleteCommand, statsCommand, configureCommand, cleanupCommand, compressCommand, exportCommand, importCommand, migrateEmbeddingsCommand],
   options: [],
   examples: [
     { command: 'claude-flow memory store -k "key" -v "value"', description: 'Store data' },
@@ -1627,7 +1761,8 @@ export const memoryCommand: Command = {
       `${output.highlight('cleanup')}    - Clean expired entries`,
       `${output.highlight('compress')}   - Compress database`,
       `${output.highlight('export')}     - Export memory to file`,
-      `${output.highlight('import')}     - Import from file`
+      `${output.highlight('import')}     - Import from file`,
+      `${output.highlight('migrate-embeddings')} - Re-embed entries with active embedder (#bug43)`
     ]);
 
     return { success: true };
