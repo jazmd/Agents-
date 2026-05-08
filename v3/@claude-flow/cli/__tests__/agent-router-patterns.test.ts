@@ -45,6 +45,7 @@ interface RouteResult {
   confidence: number;
   reason: string;
   alternatives?: Array<{ agent: string; priority: number }>;
+  hints?: string[];
 }
 
 function routeJS(prompt: string): RouteResult {
@@ -270,6 +271,178 @@ describe('agent-router (generated JS) — confidence calibration', () => {
   it('assigns low confidence to generic-only fallback', () => {
     const result = routeJS('implement create build add');
     expect(result.confidence).toBeLessThanOrEqual(0.7);
+  });
+});
+
+describe('agent-router (generated JS) — ROUTING-broad: payments / commerce', () => {
+  it('routes Stripe checkout webhook to agentic-payments', () => {
+    expect(routeJS('implement Stripe checkout webhook').agent).toBe(
+      'agentic-payments',
+    );
+  });
+
+  it('routes generic payment-API work to agentic-payments', () => {
+    expect(routeJS('add a payment API integration with paypal and refund flow').agent).toBe(
+      'agentic-payments',
+    );
+  });
+
+  it('routes ecommerce cart abandonment to agentic-payments', () => {
+    expect(routeJS('design ecommerce cart abandon recovery flow').agent).toBe(
+      'agentic-payments',
+    );
+  });
+});
+
+describe('agent-router (generated JS) — ROUTING-broad: OSINT / pentest', () => {
+  it('routes "investigate the email phish" to osint-investigator', () => {
+    expect(routeJS('investigate the email phish targeting our exec').agent).toBe(
+      'osint-investigator',
+    );
+  });
+
+  it('routes domain investigation to osint-investigator', () => {
+    expect(routeJS('do a domain investigation and reverse image search on this target').agent).toBe(
+      'osint-investigator',
+    );
+  });
+
+  it('routes htb / kerberoast to kali-operator', () => {
+    expect(routeJS('scan the htb box for SUID and try kerberoast').agent).toBe(
+      'kali-operator',
+    );
+  });
+
+  it('routes hash cracking to kali-operator', () => {
+    expect(routeJS('hash cracking workflow with hashcat for this CTF').agent).toBe(
+      'kali-operator',
+    );
+  });
+});
+
+describe('agent-router (generated JS) — ROUTING-broad: GEO / AI visibility', () => {
+  it('routes llms.txt audit to geo-ai-visibility', () => {
+    expect(routeJS('audit our llms.txt for AI crawlers').agent).toBe(
+      'geo-ai-visibility',
+    );
+  });
+
+  it('routes ChatGPT search visibility to geo-ai-visibility', () => {
+    expect(routeJS('improve our brand in ai overview and chatgpt search citation').agent).toBe(
+      'geo-ai-visibility',
+    );
+  });
+
+  it('routes schema markup to geo-schema', () => {
+    expect(routeJS('add JSON-LD schema markup with sameas and structured data').agent).toBe(
+      'geo-schema',
+    );
+  });
+});
+
+describe('agent-router (generated JS) — ROUTING-broad: Apple UI design', () => {
+  it('routes "redesign the macOS sidebar UI" to apple-ui-designer', () => {
+    expect(routeJS('redesign the macOS sidebar UI').agent).toBe(
+      'apple-ui-designer',
+    );
+  });
+
+  it('routes Apple HIG / SF Symbols to apple-ui-designer', () => {
+    expect(routeJS('apply apple hig and sf symbols for the new ios design').agent).toBe(
+      'apple-ui-designer',
+    );
+  });
+
+  it('routes visionos design to apple-ui-designer', () => {
+    expect(routeJS('design visionos design ornament for the new app').agent).toBe(
+      'apple-ui-designer',
+    );
+  });
+});
+
+describe('agent-router (generated JS) — ROUTING-broad: GitHub OSS research', () => {
+  it('routes "find oss tool" to github-researcher', () => {
+    expect(routeJS('find oss tool for distributed tracing on github').agent).toBe(
+      'github-researcher',
+    );
+  });
+
+  it('routes "oss alternative to" to github-researcher', () => {
+    expect(routeJS('look for oss alternative to datadog with github stars analysis').agent).toBe(
+      'github-researcher',
+    );
+  });
+});
+
+describe('agent-router (generated JS) — ROUTING-broad: crypto trading research', () => {
+  it('routes generic crypto market microstructure to crypto-research-scientist', () => {
+    expect(routeJS('study orderbook depth on bybit for perpetual future market making').agent).toBe(
+      'crypto-research-scientist',
+    );
+  });
+});
+
+describe('agent-router (generated JS) — ROUTING-broad: domain hints (no specialist)', () => {
+  it('emits a hint for GDPR / cookie banner work', () => {
+    const result = routeJS('write GDPR-compliant cookie banner for our terms of service');
+    expect(result.agent).toBe('general-purpose');
+    expect(result.hints).toBeDefined();
+    expect(result.hints!.some((h) => h.includes('legal/compliance'))).toBe(true);
+  });
+
+  it('emits a hint for email marketing campaigns', () => {
+    const result = routeJS('draft an email marketing campaign and copywriting headline');
+    expect(result.hints).toBeDefined();
+    expect(result.hints!.some((h) => h.includes('marketing'))).toBe(true);
+  });
+
+  it('emits a hint for AR ledger reconciliation', () => {
+    const result = routeJS('reconcile the AR ledger and accounts receivable for q4');
+    expect(result.hints).toBeDefined();
+    expect(result.hints!.some((h) => h.includes('finance/accounting'))).toBe(true);
+  });
+
+  it('emits a hint for HR job description', () => {
+    const result = routeJS('write a job description for senior recruiter with onboarding plan');
+    expect(result.hints).toBeDefined();
+    expect(result.hints!.some((h) => h.includes('hr/recruitment'))).toBe(true);
+  });
+
+  it('emits a hint for sales pipeline analysis', () => {
+    const result = routeJS('do a pipeline analysis for the sales playbook with lead scoring');
+    expect(result.hints).toBeDefined();
+    expect(result.hints!.some((h) => h.includes('sales/crm'))).toBe(true);
+  });
+
+  it('emits a hint for healthcare EHR/EMR work', () => {
+    const result = routeJS('design medical record system with patient record workflow');
+    expect(result.hints).toBeDefined();
+    expect(result.hints!.some((h) => h.includes('healthcare'))).toBe(true);
+  });
+
+  it('emits a hint for education curriculum', () => {
+    const result = routeJS('curriculum design with learning objective and lesson plan');
+    expect(result.hints).toBeDefined();
+    expect(result.hints!.some((h) => h.includes('education'))).toBe(true);
+  });
+
+  it('emits a hint for technical writing white papers', () => {
+    const result = routeJS('write a white paper on the new architecture with editorial style');
+    expect(result.hints).toBeDefined();
+    expect(result.hints!.some((h) => h.includes('writing'))).toBe(true);
+  });
+
+  it('emits NO hint when only coding domains are mentioned', () => {
+    const result = routeJS('implement the parser in TypeScript');
+    expect(result.hints).toEqual([]);
+  });
+
+  it('emits a hint AND routes to specialist when both signals present', () => {
+    // Stripe checkout (specialist) + email marketing (hint domain)
+    const result = routeJS('implement Stripe checkout webhook AND draft an email marketing campaign');
+    expect(result.agent).toBe('agentic-payments');
+    expect(result.hints).toBeDefined();
+    expect(result.hints!.some((h) => h.includes('marketing'))).toBe(true);
   });
 });
 

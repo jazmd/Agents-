@@ -28,6 +28,8 @@ interface SpecialistResponse {
   detectedLanguages: string[];
   detectedFrameworks: string[];
   detectedDomains: string[];
+  unmatchedDomains: string[];
+  hints: string[];
 }
 
 async function callTool(params: Record<string, unknown>): Promise<SpecialistResponse> {
@@ -236,6 +238,161 @@ describe('rankSpecialistAgents — pure ranker', () => {
     const a = rankSpecialistAgents('refactor', { includeGenerics: true });
     const b = rankSpecialistAgents('refactor', { includeGenerics: true });
     expect(a.candidates.map(c => c.agentType)).toEqual(b.candidates.map(c => c.agentType));
+  });
+});
+
+describe('rankSpecialistAgents — ROUTING-broad: non-coding specialists', () => {
+  it('detects payments domain and routes to agentic-payments', () => {
+    const res = rankSpecialistAgents('implement Stripe checkout webhook with subscription billing');
+    expect(res.detectedDomains).toEqual(expect.arrayContaining(['payments']));
+    const types = res.candidates.map(c => c.agentType);
+    expect(types).toContain('agentic-payments');
+  });
+
+  it('detects osint domain and routes to osint-investigator', () => {
+    const res = rankSpecialistAgents('do email enumeration and reverse image search on this target');
+    expect(res.detectedDomains).toEqual(expect.arrayContaining(['osint']));
+    const types = res.candidates.map(c => c.agentType);
+    expect(types).toContain('osint-investigator');
+  });
+
+  it('detects pentest / kali domain and routes to kali-operator', () => {
+    const res = rankSpecialistAgents('run nmap and hashcat on this CTF box for hash crack workflow');
+    expect(res.detectedDomains).toEqual(expect.arrayContaining(['pentest']));
+    const types = res.candidates.map(c => c.agentType);
+    expect(types).toContain('kali-operator');
+  });
+
+  it('detects ai-visibility domain and routes to geo-ai-visibility', () => {
+    const res = rankSpecialistAgents('audit our llms.txt for ai citation in chatgpt search');
+    expect(res.detectedDomains).toEqual(expect.arrayContaining(['ai-visibility']));
+    const types = res.candidates.map(c => c.agentType);
+    expect(types).toContain('geo-ai-visibility');
+  });
+
+  it('detects schema-markup domain and routes to geo-schema', () => {
+    const res = rankSpecialistAgents('add jsonld structured data with sameas markup');
+    expect(res.detectedDomains).toEqual(expect.arrayContaining(['schema-markup']));
+    const types = res.candidates.map(c => c.agentType);
+    expect(types).toContain('geo-schema');
+  });
+
+  it('detects apple-design domain and routes to apple-ui-designer', () => {
+    const res = rankSpecialistAgents('redesign the macos sidebar with sf symbols and apple hig');
+    expect(res.detectedDomains).toEqual(expect.arrayContaining(['apple-design']));
+    const types = res.candidates.map(c => c.agentType);
+    expect(types).toContain('apple-ui-designer');
+  });
+
+  it('detects oss-tool-search domain and routes to github-researcher', () => {
+    const res = rankSpecialistAgents('find oss alternative to datadog with github stars analysis');
+    expect(res.detectedDomains).toEqual(expect.arrayContaining(['oss-tool-search']));
+    const types = res.candidates.map(c => c.agentType);
+    expect(types).toContain('github-researcher');
+  });
+
+  it('detects solana domain and routes to solana-trading-specialist', () => {
+    const res = rankSpecialistAgents('build a raydium swap with jito bundle on solana via jupiter aggregator');
+    expect(res.detectedDomains).toEqual(expect.arrayContaining(['solana']));
+    const types = res.candidates.map(c => c.agentType);
+    expect(types).toContain('solana-trading-specialist');
+  });
+
+  it('detects polymarket domain and routes to polymarket-dev', () => {
+    const res = rankSpecialistAgents('build a polymarket polybot using gamma api and clob');
+    expect(res.detectedDomains).toEqual(expect.arrayContaining(['polymarket']));
+    const types = res.candidates.map(c => c.agentType);
+    expect(types).toContain('polymarket-dev');
+  });
+
+  it('detects flashloan domain and routes to flashloan-arbitrage-specialist', () => {
+    const res = rankSpecialistAgents('design an aave flashloan atomic arb strategy');
+    expect(res.detectedDomains).toEqual(expect.arrayContaining(['flashloan']));
+    const types = res.candidates.map(c => c.agentType);
+    expect(types).toContain('flashloan-arbitrage-specialist');
+  });
+
+  it('detects crypto-research domain and routes to crypto-research-scientist', () => {
+    const res = rankSpecialistAgents('analyse funding rate and market making on bybit perpetual future orderbook depth');
+    const types = res.candidates.map(c => c.agentType);
+    expect(types).toContain('crypto-research-scientist');
+  });
+});
+
+describe('rankSpecialistAgents — ROUTING-broad: unmatchedDomains + hints', () => {
+  it('reports legal hint for GDPR / cookie banner work', () => {
+    const res = rankSpecialistAgents('write GDPR-compliant cookie banner for our terms of service');
+    expect(res.unmatchedDomains).toContain('legal');
+    expect(res.hints.some(h => h.includes('legal'))).toBe(true);
+  });
+
+  it('reports marketing hint for email marketing campaign', () => {
+    const res = rankSpecialistAgents('draft an email marketing campaign with copywriting and ad copy');
+    expect(res.unmatchedDomains).toContain('marketing');
+    expect(res.hints.some(h => h.includes('marketing'))).toBe(true);
+  });
+
+  it('reports finance hint for accounts receivable reconciliation', () => {
+    const res = rankSpecialistAgents('reconcile the accounts receivable ledger and prepare financial reporting');
+    expect(res.unmatchedDomains).toContain('finance');
+    expect(res.hints.some(h => h.includes('finance'))).toBe(true);
+  });
+
+  it('reports hr hint for job description / onboarding plan', () => {
+    const res = rankSpecialistAgents('write a job description with salary band and onboarding plan');
+    expect(res.unmatchedDomains).toContain('hr');
+    expect(res.hints.some(h => h.includes('hr'))).toBe(true);
+  });
+
+  it('reports sales hint for hubspot setup / lead scoring', () => {
+    const res = rankSpecialistAgents('hubspot setup with lead scoring and sales playbook');
+    expect(res.unmatchedDomains).toContain('sales');
+    expect(res.hints.some(h => h.includes('sales'))).toBe(true);
+  });
+
+  it('reports healthcare hint for clinical workflow', () => {
+    const res = rankSpecialistAgents('design medical record system with patient record clinical workflow');
+    expect(res.unmatchedDomains).toContain('healthcare');
+    expect(res.hints.some(h => h.includes('healthcare'))).toBe(true);
+  });
+
+  it('reports education hint for curriculum / lesson plan', () => {
+    const res = rankSpecialistAgents('curriculum design with learning objective and lesson plan for edtech');
+    expect(res.unmatchedDomains).toContain('education');
+    expect(res.hints.some(h => h.includes('education'))).toBe(true);
+  });
+
+  it('reports writing hint for white paper / press release', () => {
+    const res = rankSpecialistAgents('write a white paper with editorial style and press release distribution');
+    expect(res.unmatchedDomains).toContain('writing');
+    expect(res.hints.some(h => h.includes('writing'))).toBe(true);
+  });
+
+  it('reports project-mgmt hint for sprint planning', () => {
+    const res = rankSpecialistAgents('jira setup with sprint planning and product roadmap critical path');
+    expect(res.unmatchedDomains).toContain('project-mgmt');
+    expect(res.hints.some(h => h.includes('project-mgmt'))).toBe(true);
+  });
+
+  it('emits NO unmatched-domain hint when only coding signals are present', () => {
+    const res = rankSpecialistAgents('refactor the TypeScript module with strict types');
+    expect(res.unmatchedDomains).toEqual([]);
+    expect(res.hints).toEqual([]);
+  });
+
+  it('reports BOTH a specialist match AND an unmatched-domain hint when both signal classes appear', () => {
+    // Stripe (specialist: agentic-payments) + email marketing (hint: marketing)
+    const res = rankSpecialistAgents('implement Stripe checkout webhook AND draft an email marketing campaign');
+    const types = res.candidates.map(c => c.agentType);
+    expect(types).toContain('agentic-payments');
+    expect(res.unmatchedDomains).toContain('marketing');
+    expect(res.hints.some(h => h.includes('marketing'))).toBe(true);
+  });
+
+  it('whitespace-only task returns empty unmatchedDomains and hints', () => {
+    const res = rankSpecialistAgents('   ');
+    expect(res.unmatchedDomains).toEqual([]);
+    expect(res.hints).toEqual([]);
   });
 });
 

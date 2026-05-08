@@ -1269,6 +1269,24 @@ const SPECIALIST_AGENT_REGISTRY: readonly SpecialistAgentEntry[] = [
   { name: 'test-engineer', domains: ['test', 'tdd', 'bdd', 'integration-test', 'e2e'], description: 'Test strategy (TDD / BDD / e2e)' },
   { name: 'researcher', domains: ['research', 'investigate'], description: 'Deep research + investigation' },
 
+  // ROUTING-broad — non-coding domain specialists
+  { name: 'agentic-payments', domains: ['payments', 'commerce', 'billing', 'subscription', 'ecommerce'], description: 'Payment / billing / e-commerce specialist' },
+  { name: 'crypto-research-scientist', domains: ['crypto-research', 'market-microstructure', 'trading-strategy'], description: 'Primary-source crypto trading research' },
+  { name: 'solana-trading-specialist', domains: ['solana', 'pump-fun', 'raydium', 'jupiter', 'jito', 'meteora'], description: 'Solana DEX / pump.fun / atomic arb' },
+  { name: 'polymarket-dev', domains: ['polymarket', 'polybot', 'live-draw', 'gamma-api', 'clob'], description: 'Polymarket trading bot + CLOB/Gamma APIs' },
+  { name: 'flashloan-arbitrage-specialist', domains: ['flashloan', 'atomic-arb', 'aave', 'balancer', 'liquidation'], description: 'Flashloan + atomic arbitrage' },
+  { name: 'kali-operator', domains: ['pentest', 'ctf', 'kali', 'metasploit', 'nmap', 'gobuster', 'hashcat'], description: 'Authorized pentest + CTF (Kali)' },
+  { name: 'metasploit-operator', domains: ['metasploit', 'msfvenom', 'msfconsole', 'msfdb', 'post-exploitation'], description: 'Metasploit Framework operator' },
+  { name: 'osint-investigator', domains: ['osint', 'recon', 'footprint', 'reverse-image', 'geolocate'], description: 'Single-target OSINT investigator' },
+  { name: 'github-researcher', domains: ['oss-tool-search', 'github-stars', 'oss-alternative'], description: 'GitHub OSS tool research' },
+  { name: 'geo-ai-visibility', domains: ['ai-visibility', 'llms-txt', 'ai-citation', 'geo'], description: 'AI search visibility + crawler access' },
+  { name: 'geo-content', domains: ['geo-content', 'eeat', 'topical-authority', 'ai-content-detection'], description: 'GEO content authority + E-E-A-T' },
+  { name: 'geo-platform-analysis', domains: ['geo-platform', 'ai-overview', 'perplexity', 'chatgpt-search', 'gemini-search'], description: 'AI search platform analysis' },
+  { name: 'geo-schema', domains: ['schema-markup', 'jsonld', 'structured-data', 'sameas', 'speakable'], description: 'Schema.org / JSON-LD structured data' },
+  { name: 'geo-technical', domains: ['geo-technical', 'crawlability', 'core-web-vitals', 'inp'], description: 'GEO technical SEO + crawlability' },
+  { name: 'geo-brand-mentions', domains: ['brand-mentions', 'sameas', 'co-citation'], description: 'Brand mentions + co-citation graph' },
+  { name: 'trading-ml-expert', domains: ['order-book', 'vpin', 'isotonic-calibration', 'trading-ml'], description: 'Order-book microstructure + ML calibration' },
+
   // Generic fallbacks (penalized when specialists exist)
   { name: 'general-purpose', isGeneric: true, description: 'Generic fallback for unstructured tasks' },
   { name: 'coder', isGeneric: true, description: 'Generic implementation worker' },
@@ -1358,7 +1376,115 @@ const DOMAIN_TOKENS: Record<string, readonly string[]> = {
   design: ['design ', 'mockup', 'wireframe'],
   mobile: ['mobile', 'ios', 'android'],
   backend: ['backend', 'back-end', 'server-side'],
+
+  // ROUTING-broad — non-coding domain tokens
+  payments: ['payment', 'stripe', 'paypal', 'braintree', 'adyen', 'mollie', 'klarna', 'checkout', 'subscription billing', 'invoice', 'refund', 'chargeback', 'cart abandon', 'apple pay', 'google pay'],
+  commerce: ['ecommerce', 'e-commerce', 'cart', 'storefront'],
+  billing: ['billing', 'invoice', 'subscription billing'],
+  subscription: ['subscription', 'recurring billing'],
+  ecommerce: ['ecommerce', 'e-commerce', 'storefront'],
+
+  pentest: ['pentest', 'penetration test', 'ctf', 'hackthebox', 'htb ', 'picoctf', 'tryhackme', 'kali', 'nmap', 'gobuster', 'hashcat', 'hash crack', 'privesc', 'reverse shell', 'post-exploitation', 'lateral movement', 'kerberoast', 'asreproast'],
+  ctf: ['ctf', 'hackthebox', 'htb ', 'picoctf', 'tryhackme'],
+  kali: ['kali'],
+  metasploit: ['metasploit', 'msfvenom', 'msfconsole', 'msfdb', 'msf module'],
+  msfvenom: ['msfvenom'],
+  msfconsole: ['msfconsole'],
+  msfdb: ['msfdb'],
+  nmap: ['nmap'],
+  gobuster: ['gobuster', 'ffuf'],
+  hashcat: ['hashcat', 'hash crack'],
+  'post-exploitation': ['post-exploitation', 'post exploitation', 'lateral movement', 'kerberoast', 'asreproast'],
+
+  osint: ['osint', 'open source intelligence', 'open-source intelligence', 'recon', 'footprint', 'doxxing', 'doxx', 'sherlock', 'maigret', 'holehe', 'phoneinfoga', 'ghunt', 'reverse image search', 'email enumeration', 'domain investigation', 'geolocate', 'email phish'],
+  recon: ['recon', 'footprint'],
+  footprint: ['footprint', 'footprinting'],
+  'reverse-image': ['reverse image', 'reverse image search'],
+  geolocate: ['geolocate', 'geolocation'],
+
+  'crypto-research': ['crypto research', 'crypto strategy', 'trading strategy', 'backtest', 'funding rate', 'funding-rate', 'market making', 'market-making', 'on-chain signal', 'on chain signal', 'mev research', 'defi research', 'orderbook depth'],
+  'market-microstructure': ['market microstructure', 'orderbook', 'order book imbalance', 'vpin', 'ofi', 'vamp', 'yang-zhang', 'garman-klass'],
+  'trading-strategy': ['trading strategy', 'crypto strategy', 'backtest', 'kelly', 'sharpe'],
+  solana: ['solana', 'raydium', 'pump.fun', 'pumpfun', 'jupiter aggregator', 'jito', 'meteora', 'spl token', 'token-2022', 'helius', 'triton', 'shyft', 'kamino', 'marginfi', 'drift protocol'],
+  'pump-fun': ['pump.fun', 'pumpfun'],
+  raydium: ['raydium'],
+  jupiter: ['jupiter aggregator', 'jupiter swap'],
+  jito: ['jito', 'jito bundle'],
+  meteora: ['meteora'],
+  polymarket: ['polymarket', 'polybot', 'gamma api', 'clob', 'negrisk', 'conditionid'],
+  polybot: ['polybot'],
+  'live-draw': ['live_draw', 'live-draw', 'oracle_crash', 'oracle crash'],
+  'gamma-api': ['gamma api'],
+  clob: ['clob'],
+  flashloan: ['flashloan', 'flash loan', 'flash-loan', 'aave flashloan', 'balancer flashloan'],
+  'atomic-arb': ['atomic arb', 'atomic-arb'],
+  aave: ['aave'],
+  balancer: ['balancer'],
+  liquidation: ['liquidation bot', 'liquidation'],
+  'order-book': ['order book imbalance', 'orderbook', 'order book'],
+  vpin: ['vpin'],
+  'isotonic-calibration': ['isotonic calibration', 'triple-barrier label'],
+  'trading-ml': ['order book imbalance', 'vpin', 'yang-zhang', 'garman-klass', 'isotonic calibration'],
+
+  'oss-tool-search': ['github tool search', 'find oss tool', 'oss alternative', 'oss-alternative', 'open source replacement', 'github stars analysis', 'github repo evaluation'],
+  'github-stars': ['github stars analysis', 'github repo evaluation'],
+  'oss-alternative': ['oss alternative', 'open source replacement'],
+
+  'apple-design': ['apple hig', 'human interface guidelines', 'sf symbols', 'sf pro', 'macos design', 'ios design', 'ipados design', 'watchos design', 'visionos design', 'apple native ui', 'swiftui mockup', 'macos sidebar', 'ios sidebar'],
+  'macos-ui': ['macos design', 'macos sidebar', 'macos ui'],
+  'ios-ui': ['ios design', 'ios sidebar', 'ios ui'],
+  'ipados-ui': ['ipados design', 'ipados ui'],
+  'watchos-ui': ['watchos design', 'watchos ui'],
+  'visionos-ui': ['visionos design', 'visionos ui'],
+  'sf-symbols': ['sf symbols'],
+  hig: ['apple hig', 'human interface guidelines'],
+
+  'ai-visibility': ['ai visibility', 'llms.txt', 'ai citation', 'ai overview', 'perplexity', 'chatgpt search', 'gemini search', 'brand in ai', 'ai crawler', 'ai search optimi'],
+  'llms-txt': ['llms.txt'],
+  'ai-citation': ['ai citation', 'ai overview', 'perplexity citation'],
+  geo: ['geo audit', 'ai search optimi', 'llms.txt', 'ai citation'],
+  'geo-content': ['e-e-a-t', 'eeat', 'topical authority', 'helpful content', 'ai content detection'],
+  eeat: ['e-e-a-t', 'eeat'],
+  'topical-authority': ['topical authority'],
+  'helpful-content': ['helpful content'],
+  'ai-content-detection': ['ai content detection'],
+  'geo-platform': ['ai overview', 'perplexity', 'chatgpt search', 'gemini search', 'google sge'],
+  'ai-overview': ['ai overview', 'google sge'],
+  perplexity: ['perplexity'],
+  'chatgpt-search': ['chatgpt search'],
+  'gemini-search': ['gemini search'],
+  'schema-markup': ['schema markup', 'jsonld', 'json-ld', 'structured data', 'sameas', 'speakable schema'],
+  jsonld: ['jsonld', 'json-ld'],
+  'structured-data': ['structured data'],
+  sameas: ['sameas'],
+  speakable: ['speakable schema'],
+  'geo-technical': ['crawlability', 'core web vitals', 'inp ', 'robots.txt for ai'],
+  crawlability: ['crawlability'],
+  'core-web-vitals': ['core web vitals'],
+  inp: ['inp '],
+  'brand-mentions': ['brand mention', 'brand mentions', 'co-citation', 'brand co-occurrence'],
+  'co-citation': ['co-citation', 'co citation'],
 };
+
+/**
+ * UNMATCHED_DOMAIN_HINTS — non-coding domains where SwarmOps has no specialist
+ * agent today. Detected via substring scan; surfaced via `hints` so the lead
+ * picks 'general-purpose' consciously rather than the router defaulting to
+ * coder. Each entry is [domain-label, list-of-substring-tokens].
+ */
+const UNMATCHED_DOMAIN_HINTS: Array<readonly [string, readonly string[]]> = [
+  ['legal', ['contract review', 'gdpr', 'ccpa', 'privacy policy', 'terms of service', 'ts&cs', 'compliance audit', 'data processing agreement', ' dpa ', 'sub-processor', 'sub processor', 'cookie banner', 'eu ai act', ' dsa ', ' dma ', 'hipaa workflow', 'soc2 compliance', 'soc 2 compliance']],
+  ['marketing', ['content marketing', 'seo audit', 'email campaign', 'drip campaign', 'brand strategy', 'social media campaign', 'advertising', 'conversion rate', 'copywriting', 'ad copy', 'marketing funnel', 'growth hacking', 'email marketing']],
+  ['finance', ['accounting', 'double-entry', 'double entry', 'ledger reconcil', 'reconcile the ar', 'reconcile the ap', 'reconcile the ledger', 'financial audit', 'tax filing', 'payroll', 'accounts receivable', 'accounts payable', 'financial reporting', 'p&l', 'balance sheet']],
+  ['hr', ['recruit', 'sourcing candidate', 'candidate screening', 'job description', 'salary band', 'performance review', 'onboarding plan', 'hr policy', 'hr policies']],
+  ['sales', ['crm setup', 'salesforce config', 'hubspot setup', 'pipeline analysis', 'sales playbook', 'lead scoring', 'outbound campaign', 'account-based marketing', ' abm ']],
+  ['healthcare', ['hipaa workflow', 'clinical workflow', 'ehr', 'emr', 'medical records', 'patient record', 'medical record system']],
+  ['education', ['curriculum', 'lesson plan', 'pedagogy', 'edtech', 'course design', 'learning objective']],
+  ['writing', ['white paper', 'ghostwrit', 'editorial style', 'blog post outline', 'press release', 'technical writing']],
+  ['design-non-apple', ['wireframe ', 'ux research', 'user testing', 'persona development', 'figma ']],
+  ['project-mgmt', ['jira setup', 'asana setup', 'sprint planning', 'product roadmap', 'project roadmap', 'gantt chart', 'critical path']],
+  ['operations', [' sop ', 'business continuity', ' bcp ']],
+];
 
 /** Detect which keys of a token table appear (case-insensitive substring) in `taskLower`. */
 function detectMatches(
@@ -1485,6 +1611,10 @@ interface RankSpecialistResult {
   detectedLanguages: string[];
   detectedFrameworks: string[];
   detectedDomains: string[];
+  /** ROUTING-broad — non-coding domains detected with no SwarmOps specialist. */
+  unmatchedDomains: string[];
+  /** ROUTING-broad — human-readable hints, one per unmatched domain. */
+  hints: string[];
 }
 
 /** Pure ranker — no I/O, no async, deterministic. Exported for tests. */
@@ -1504,6 +1634,8 @@ export function rankSpecialistAgents(
       detectedLanguages: [],
       detectedFrameworks: [],
       detectedDomains: [],
+      unmatchedDomains: [],
+      hints: [],
     };
   }
 
@@ -1545,12 +1677,30 @@ export function rankSpecialistAgents(
     reason: s.reason,
   }));
 
+  // ROUTING-broad — detect non-coding domains with no SwarmOps specialist
+  const unmatchedDomains: string[] = [];
+  const hints: string[] = [];
+  for (const [label, tokens] of UNMATCHED_DOMAIN_HINTS) {
+    let hit = false;
+    for (const tok of tokens) {
+      if (taskLower.includes(tok)) { hit = true; break; }
+    }
+    if (hit) {
+      unmatchedDomains.push(label);
+      hints.push(
+        `Domain detected: ${label} — no SwarmOps specialist; 'general-purpose' is the safe choice`,
+      );
+    }
+  }
+
   return {
     candidates,
     fallback: candidates.length === 0 ? 'general-purpose' : null,
     detectedLanguages: langKeys,
     detectedFrameworks: fwKeys,
     detectedDomains: domainKeys,
+    unmatchedDomains,
+    hints,
   };
 }
 

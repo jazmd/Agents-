@@ -270,8 +270,15 @@ module.exports = commands;
 export function generateAgentRouter(): string {
   return `#!/usr/bin/env node
 /**
- * Ruflo Agent Router (ROUTING-A 2026-05)
+ * Ruflo Agent Router (ROUTING-A 2026-05, ROUTING-broad 2026-05-09)
  * Routes tasks to optimal agents using a layered specialist-first scorer.
+ *
+ * ROUTING-broad extends coverage beyond pure coding to include payments,
+ * crypto-research, OSINT, AI visibility/GEO, Apple UI design, GitHub OSS
+ * research and more — plus a domain-hint mechanism that surfaces detected
+ * non-code domains (legal, marketing, finance, hr, sales, healthcare,
+ * education, writing, design-non-apple, project-mgmt) without fake-routing
+ * to a non-existent specialist.
  */
 
 const AGENT_CAPABILITIES = {
@@ -309,19 +316,41 @@ const AGENT_CAPABILITIES = {
   'metasploit-operator': ['msf-modules', 'msfdb', 'msfvenom'],
   'osint-investigator': ['osint', 'sherlock', 'maigret', 'phoneinfoga'],
   'trading-ml-expert': ['order-book', 'vpin', 'isotonic-calibration'],
+  // ROUTING-broad additions (non-coding specialists)
+  'agentic-payments': ['payment', 'stripe', 'subscription', 'billing', 'checkout'],
+  'github-researcher': ['oss-tool', 'github-stars', 'oss-alternative'],
+  'geo-ai-visibility': ['ai-visibility', 'llms-txt', 'ai-citation'],
+  'geo-content': ['eeat', 'topical-authority', 'helpful-content'],
+  'geo-platform-analysis': ['ai-overview', 'perplexity', 'chatgpt-search'],
+  'geo-schema': ['schema-markup', 'jsonld', 'structured-data'],
+  'geo-technical': ['crawlability', 'core-web-vitals', 'inp'],
+  'geo-brand-mentions': ['brand-mentions', 'sameas', 'co-citation'],
 };
 
 // [regex source, agent, priority]. Higher priority wins.
 const PATTERNS = [
   // Tier 1: domain (100)
   ['\\\\b(polymarket|polybot|live[_ -]?draw|oracle[_ -]?crash|gamma api|clob|negrisk|conditionid)\\\\b', 'polymarket-dev', 100],
-  ['\\\\b(solana|raydium|pump\\\\.?fun|jupiter aggregator|jito bundle|meteora|spl token|token-2022|helius|triton)\\\\b', 'solana-trading-specialist', 100],
+  ['\\\\b(solana|raydium|pump\\\\.?fun|jupiter aggregator|jito bundle|meteora|spl token|token-2022|helius|triton|shyft|jito|kamino|marginfi|drift protocol)\\\\b', 'solana-trading-specialist', 100],
   ['\\\\b(flashloan|flash[_ -]?loan|atomic arb|aave flashloan|balancer flashloan|liquidation bot)\\\\b', 'flashloan-arbitrage-specialist', 100],
-  ['\\\\b(crypto strategy|trading strategy|backtest|funding[ -]?rate|market[ -]?making|volatility estimator)\\\\b', 'crypto-research-scientist', 100],
-  ['\\\\b(nmap|gobuster|ffuf|metasploit|msfvenom|msfconsole|hashcat|hydra|burp|kali|pentest|ctf|hack ?the ?box|htb|picoctf|tryhackme|reverse shell)\\\\b', 'kali-operator', 100],
+  ['\\\\b(crypto strategy|trading strategy|backtest|funding[ -]?rate|market[ -]?making|volatility estimator|on[ -]?chain signal|defi research|mev research|exchange api|kraken|bybit|bitfinex|orderbook depth|perpetual future)\\\\b', 'crypto-research-scientist', 100],
+  ['\\\\b(nmap|gobuster|ffuf|metasploit|msfvenom|msfconsole|hashcat|hydra|burp|kali|pentest|ctf|hack ?the ?box|htb|picoctf|tryhackme|reverse shell|hash cracking|privesc|exploit dev|payload gen|post[ -]?exploitation|lateral movement|kerberoast|asreproast)\\\\b', 'kali-operator', 100],
   ['\\\\b(metasploit framework|msf module|msfdb|workspace.*msf|exploit/(linux|windows|multi)|payload generation)\\\\b', 'metasploit-operator', 100],
-  ['\\\\b(osint|recon target|find email|find username|sherlock|maigret|holehe|phoneinfoga|ghunt|exiftool)\\\\b', 'osint-investigator', 100],
+  ['\\\\b(osint|open[ -]?source intel(ligence)?|recon target|footprint(ing)?|find email|find username|sherlock|maigret|holehe|phoneinfoga|ghunt|exiftool|reverse image search|email enum(eration)?|domain investigation|geolocate|doxx|email phish)\\\\b', 'osint-investigator', 100],
   ['\\\\b(order book imbalance|vpin|ofi|vamp|yang-?zhang|garman[ -]?klass|isotonic calibration|triple-barrier label)\\\\b', 'trading-ml-expert', 100],
+
+  // Tier 1: payments / commerce (100)
+  ['\\\\b(stripe|paypal|braintree|adyen|mollie|klarna|square payments|checkout flow|checkout webhook|subscription billing|invoice gen|chargeback|refund flow|payment api|payments? webhook|cart abandon|apple pay|google pay|ecommerce|e-commerce)\\\\b', 'agentic-payments', 100],
+
+  // Tier 1: AI visibility / GEO (100)
+  ['\\\\b(ai visibility|llms\\\\.txt|ai citation|ai overview|perplexity citation|chatgpt search|gemini search|brand in ai|ai crawler|geo audit|ai search optimi)\\\\b', 'geo-ai-visibility', 100],
+  ['\\\\b(schema markup|jsonld|json-ld|structured data|sameas|speakable schema)\\\\b', 'geo-schema', 100],
+  ['\\\\b(e-?e-?a-?t\\\\b|topical authority|helpful content|ai content detection)\\\\b', 'geo-content', 100],
+  ['\\\\b(crawlability|core web vitals|\\\\binp\\\\b|robots\\\\.txt for ai)\\\\b', 'geo-technical', 100],
+  ['\\\\b(brand mention|co-citation|brand co-?occurrence)\\\\b', 'geo-brand-mentions', 100],
+
+  // Tier 1: github OSS research (100)
+  ['\\\\b(github tool search|find oss tool|oss alternative to|open source replacement|github stars analysis|github repo evaluation)\\\\b', 'github-researcher', 100],
 
   // Tier 2: language (80)
   ['(\\\\btypescript\\\\b|\\\\.ts\\\\b|\\\\.tsx\\\\b|\\\\btsconfig\\\\b|\\\\bnoimplicitany\\\\b|\\\\btsc\\\\b|\\\\bts-node\\\\b|\\\\bts-prune\\\\b|\\\\bgeneric constraint\\\\b|\\\\bconditional type\\\\b|\\\\bmapped type\\\\b)', 'typescript-expert', 80],
@@ -332,7 +361,8 @@ const PATTERNS = [
   ['\\\\b(express\\\\b|fastify\\\\b|nestjs|hono\\\\b|rest endpoint|graphql server|grpc\\\\b|backend api)\\\\b', 'backend-dev', 70],
   ['\\\\b(react component|tsx file|jsx\\\\b|tailwind|vite\\\\b|next\\\\.?js|vue\\\\b|svelte|tanstack|frontend ui)\\\\b', 'frontend-dev', 70],
   ['\\\\b(react native|expo\\\\b|metro bundler|ios.*react native|android.*react native)\\\\b', 'mobile-dev', 70],
-  ['\\\\b(apple hig|human interface guidelines|sf symbols|sf pro|dynamic type|sidebar.*macos|tab bar.*ios|ornament.*visionos|macos design|ios design|ipados|watchos|visionos)\\\\b', 'apple-ui-designer', 70],
+  // Apple UI design — extended with explicit redesign forms and platform variants
+  ['\\\\b(apple hig|human interface guidelines|sf symbols|sf pro|dynamic type|sidebar.*macos|tab bar.*ios|ornament.*visionos|macos design|ios design|ipados design|watchos design|visionos design|apple native ui|swiftui mockup|redesign (the )?(macos|ios|ipados|watchos|visionos) (sidebar|tab bar|toolbar|ui|navigation)|(macos|ios|ipados|watchos|visionos) sidebar)\\\\b', 'apple-ui-designer', 70],
   ['\\\\b(api design|rest design|graphql design|openapi|swagger|api versioning|api documentation|design (the |a |an )?(rest |graphql |grpc )?(api|endpoint|service)|design.*for.*(api|user management|users|account))\\\\b', 'api-designer', 70],
   ['\\\\b(fastapi|django\\\\b|flask\\\\b|sqlalchemy)\\\\b', 'python-expert', 75],
 
@@ -358,6 +388,24 @@ const PATTERNS = [
   ['\\\\b(implement|create|build|add|write code|fix the|fix this)\\\\b', 'coder', 20],
 ];
 
+// Domain hints — emit a hint when a non-coding domain is detected but no
+// SwarmOps specialist exists. Lead picks 'general-purpose' consciously
+// rather than the router fake-routing to a missing agent.
+// [regex source, domain label]
+const DOMAIN_HINTS = [
+  ['\\\\b(contract review|gdpr|ccpa|privacy policy|terms of service|ts&cs|\\\\bdpa\\\\b|sub[ -]?processor|cookie banner|eu ai act|\\\\bdsa\\\\b|\\\\bdma\\\\b|hipaa workflow|soc ?2 compliance|data processing agreement)\\\\b', 'legal/compliance'],
+  ['\\\\b(content marketing|seo audit|email campaign|drip campaign|brand strategy|ad copy|conversion rate|copywriting|growth hacking|marketing funnel|email marketing|advertising campaign|social media campaign)\\\\b', 'marketing'],
+  ['\\\\b(double[ -]?entry|ledger reconcil|reconcile (the )?(ar|ap|accounts? (receivable|payable))|financial audit|tax filing|payroll|accounts (receivable|payable)|p&l\\\\b|profit and loss|balance sheet|financial reporting|reconcile the ar)\\\\b', 'finance/accounting'],
+  ['\\\\b(candidate sourc|job description|salary band|performance review|onboarding plan|hr polic|recruit(ing|ment)|candidate screening)\\\\b', 'hr/recruitment'],
+  ['\\\\b(salesforce config|hubspot setup|pipeline analysis|sales playbook|lead scoring|outbound campaign|account[ -]?based marketing|\\\\babm\\\\b|crm setup)\\\\b', 'sales/crm'],
+  ['\\\\b(\\\\behr\\\\b|\\\\bemr\\\\b|clinical workflow|patient record|medical record system|patient data system)\\\\b', 'healthcare'],
+  ['\\\\b(curriculum design|lesson plan|edtech|course design|learning objective|pedagogy)\\\\b', 'education'],
+  ['\\\\b(white paper|ghostwrit|editorial style|blog (post )?outline|press release|technical writing)\\\\b', 'writing'],
+  ['\\\\b(wireframe|ux research|user testing|persona development)\\\\b', 'design (non-Apple)'],
+  ['\\\\b(jira setup|asana setup|sprint planning|critical path|gantt chart|product roadmap|project roadmap)\\\\b', 'project mgmt'],
+  ['\\\\b(\\\\bsop\\\\b|business continuity|\\\\bbcp\\\\b)\\\\b', 'operations'],
+];
+
 const COMPILED_PATTERNS = PATTERNS.map(([source, agent, priority]) => [
   new RegExp(source, 'i'),
   source,
@@ -365,7 +413,25 @@ const COMPILED_PATTERNS = PATTERNS.map(([source, agent, priority]) => [
   priority,
 ]);
 
+const COMPILED_HINTS = DOMAIN_HINTS.map(([source, label]) => [
+  new RegExp(source, 'i'),
+  label,
+]);
+
 const GENERIC_AGENTS = new Set(['coder', 'tester', 'reviewer', 'general-purpose']);
+
+function detectHints(taskLower) {
+  const out = [];
+  for (const [regex, label] of COMPILED_HINTS) {
+    if (regex.test(taskLower)) {
+      out.push(
+        'Domain detected: ' + label +
+        " — no SwarmOps specialist; 'general-purpose' is the safe choice"
+      );
+    }
+  }
+  return out;
+}
 
 function routeTask(task) {
   if (!task || typeof task !== 'string') {
@@ -373,6 +439,7 @@ function routeTask(task) {
       agent: 'general-purpose',
       confidence: 0.3,
       reason: 'Empty or invalid task — defaulting to general-purpose',
+      hints: [],
     };
   }
 
@@ -385,11 +452,14 @@ function routeTask(task) {
     }
   }
 
+  const hints = detectHints(taskLower);
+
   if (hits.length === 0) {
     return {
       agent: 'general-purpose',
       confidence: 0.4,
       reason: 'No pattern matched — use general-purpose for exploration',
+      hints,
     };
   }
 
@@ -411,6 +481,7 @@ function routeTask(task) {
       agent: h.agent,
       priority: h.priority,
     })),
+    hints,
   };
 }
 
@@ -423,10 +494,9 @@ if (require.main === module) {
   console.log(JSON.stringify(result, null, 2));
 }
 
-module.exports = { routeTask, AGENT_CAPABILITIES, PATTERNS, GENERIC_AGENTS };
+module.exports = { routeTask, AGENT_CAPABILITIES, PATTERNS, DOMAIN_HINTS, GENERIC_AGENTS };
 `;
 }
-
 /**
  * Generate memory helper script
  */
@@ -612,6 +682,13 @@ export function generateHookHandler(): string {
     "      output.push('| Confidence: ' + (result.confidence * 100).toFixed(1) + '%' + ' '.repeat(44) + '|');",
     "      output.push('| Reason: ' + result.reason.substring(0, 53).padEnd(53) + '|');",
     "      output.push('+--------------------------------------------------------------+');",
+    "      if (Array.isArray(result.hints) && result.hints.length > 0) {",
+    "        output.push('');",
+    "        output.push('Domain hints (no specialist exists):');",
+    "        for (var hi = 0; hi < result.hints.length; hi++) {",
+    "          output.push('  - ' + result.hints[hi]);",
+    "        }",
+    "      }",
     "      console.log(output.join('\\n'));",
     '    } else {',
     "      console.log('[INFO] Router not available, using default routing');",
