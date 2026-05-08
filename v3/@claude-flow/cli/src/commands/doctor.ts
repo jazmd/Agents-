@@ -8,6 +8,7 @@
 import type { Command, CommandContext, CommandResult } from '../types.js';
 import { output } from '../output.js';
 import { existsSync, readFileSync, statSync } from 'fs';
+import { homedir } from 'os';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
@@ -605,6 +606,157 @@ async function checkEncryptionAtRest(): Promise<HealthCheck> {
   };
 }
 
+// ──────────────────────────────────────────────────────────────────────────
+// #bug38 — hook-coexistence inspection.
+//
+// Other Claude Code addons (notably OpenIsland) install hooks with
+// matcher:"*" so they fire on EVERY tool invocation, alongside ruflo's
+// scoped (Bash|Write|Edit|MultiEdit|...) matchers. This causes
+// double-handling, duplicate side-effects, and breaks user trust in the
+// hook system. Surface the conflict so the user can scope or disable.
+// ──────────────────────────────────────────────────────────────────────────
+
+interface HookEntry {
+  matcher?: string;
+  hooks?: Array<{ command?: string; type?: string }>;
+}
+
+interface HookCoexistenceRow {
+  event: string;
+  rufloCount: number;
+  wildcardCount: number;
+  wildcardSources: string[];
+}
+
+/**
+ * Heuristic: a hook entry "looks like ruflo" if any of its commands
+ * mention claude-flow, ruflo, or the v3 helpers path. The matcher list
+ * is the standard scoped ruflo set.
+ */
+const RUFLO_MATCHER_RX = /^(Bash|Write|Edit|MultiEdit|Read|Glob|Grep|Task|manual|auto|null)/;
+function looksLikeRufloHook(entry: HookEntry): boolean {
+  if (entry.matcher && RUFLO_MATCHER_RX.test(entry.matcher)) return true;
+  for (const h of entry.hooks ?? []) {
+    const cmd = h.command ?? '';
+    if (/claude-flow|ruflo|\.claude\/helpers/.test(cmd)) return true;
+  }
+  return false;
+}
+
+/**
+ * Pull a friendly source label out of a wildcard hook command. We look
+ * for known third-party signatures (OpenIsland) and fall back to "third-party".
+ */
+function inferWildcardSource(entry: HookEntry): string {
+  for (const h of entry.hooks ?? []) {
+    const cmd = h.command ?? '';
+    if (/OpenIsland/i.test(cmd)) return 'OpenIsland';
+    if (/RaycastClaudeHooks/i.test(cmd)) return 'Raycast';
+  }
+  return 'third-party';
+}
+
+export function inspectHookCoexistence(settingsPath?: string): HookCoexistenceRow[] {
+  const path = settingsPath ?? join(homedir(), '.claude', 'settings.json');
+  if (!existsSync(path)) return [];
+
+  let parsed: { hooks?: Record<string, HookEntry[]> };
+  try {
+    parsed = JSON.parse(readFileSync(path, 'utf8')) as { hooks?: Record<string, HookEntry[]> };
+  } catch {
+    return [];
+  }
+  if (!parsed.hooks || typeof parsed.hooks !== 'object') return [];
+
+  const rows: HookCoexistenceRow[] = [];
+  for (const [event, entries] of Object.entries(parsed.hooks)) {
+    if (!Array.isArray(entries)) continue;
+    let ruflo = 0;
+    let wildcard = 0;
+    const sources = new Set<string>();
+    for (const entry of entries) {
+      if (entry.matcher === '*') {
+        wildcard += 1;
+        sources.add(inferWildcardSource(entry));
+      } else if (looksLikeRufloHook(entry)) {
+        ruflo += 1;
+      }
+    }
+    rows.push({
+      event,
+      rufloCount: ruflo,
+      wildcardCount: wildcard,
+      wildcardSources: [...sources],
+    });
+  }
+  return rows;
+}
+
+/**
+ * Format the coexistence map as a fixed-width table. Returns a list of
+ * lines so the caller can pipe through output.writeln. Pure for testability.
+ */
+export function formatHookCoexistence(rows: HookCoexistenceRow[]): string[] {
+  const headers = ['Hook Event', 'Ruflo', 'Wildcard (*)', 'Notes'];
+  const widths = [
+    Math.max(headers[0].length, ...rows.map(r => r.event.length)),
+    headers[1].length,
+    headers[2].length,
+    Math.max(
+      headers[3].length,
+      ...rows.map(r => r.wildcardSources.length > 0
+        ? `Wildcard from: ${r.wildcardSources.join(', ')}`.length
+        : 0)
+    ),
+  ];
+  const fmt = (cells: string[]) => cells
+    .map((c, i) => c.padEnd(widths[i]))
+    .join('  ');
+  const lines = [
+    fmt(headers),
+    fmt(widths.map(w => '─'.repeat(w))),
+  ];
+  for (const r of rows) {
+    const note = r.wildcardSources.length > 0
+      ? `Wildcard from: ${r.wildcardSources.join(', ')}`
+      : '';
+    lines.push(fmt([
+      r.event,
+      String(r.rufloCount),
+      String(r.wildcardCount),
+      note,
+    ]));
+  }
+  return lines;
+}
+
+/**
+ * Returns the consolidated check for the encryption summary block:
+ * pass if no wildcard matchers anywhere, warn otherwise.
+ */
+export function checkHookCoexistence(rows?: HookCoexistenceRow[]): HealthCheck {
+  const data = rows ?? inspectHookCoexistence();
+  if (data.length === 0) {
+    return { name: 'Hook Coexistence', status: 'pass', message: 'No hooks configured' };
+  }
+  const wildcardEvents = data.filter(r => r.wildcardCount > 0);
+  if (wildcardEvents.length === 0) {
+    return {
+      name: 'Hook Coexistence',
+      status: 'pass',
+      message: `${data.length} event(s) inspected, no wildcard (*) matchers detected`,
+    };
+  }
+  const sources = new Set<string>();
+  for (const r of wildcardEvents) for (const s of r.wildcardSources) sources.add(s);
+  return {
+    name: 'Hook Coexistence',
+    status: 'warn',
+    message: `Wildcard (*) matchers detected on ${wildcardEvents.length} event(s) from: ${[...sources].join(', ')}`,
+    fix: 'ruflo doctor --hooks  # inspect; consider scoping the wildcard hook to specific tools',
+  };
+}
+
 // Format health check result
 function formatCheck(check: HealthCheck): string {
   const icon = check.status === 'pass' ? output.success('✓') :
@@ -642,6 +794,12 @@ export const doctorCommand: Command = {
       type: 'string'
     },
     {
+      name: 'hooks',
+      description: 'Inspect ~/.claude/settings.json hook coexistence (ruflo vs wildcard *) — detects conflicts with OpenIsland and similar addons (#bug38)',
+      type: 'boolean',
+      default: false
+    },
+    {
       name: 'verbose',
       short: 'v',
       description: 'Verbose output',
@@ -652,6 +810,7 @@ export const doctorCommand: Command = {
   examples: [
     { command: 'claude-flow doctor', description: 'Run full health check' },
     { command: 'claude-flow doctor --fix', description: 'Print suggested fix commands (does not auto-apply)' },
+    { command: 'claude-flow doctor --hooks', description: 'Inspect hook coexistence (#bug38)' },
     { command: 'claude-flow doctor --install', description: 'Auto-install missing dependencies' },
     { command: 'claude-flow doctor -c version', description: 'Check for stale npx cache' },
     { command: 'claude-flow doctor -c claude', description: 'Check Claude Code CLI only' }
@@ -661,12 +820,45 @@ export const doctorCommand: Command = {
     const autoInstall = ctx.flags.install as boolean;
     const component = ctx.flags.component as string;
     const verbose = ctx.flags.verbose as boolean;
+    const hooksMode = ctx.flags.hooks as boolean; // #bug38
+
+    // #bug38 — dedicated --hooks subview prints the coexistence table and exits.
+    if (hooksMode) {
+      output.writeln();
+      output.writeln(output.bold('Hook Coexistence Inspection'));
+      output.writeln(output.dim('Source: ~/.claude/settings.json'));
+      output.writeln(output.dim('─'.repeat(70)));
+      const rows = inspectHookCoexistence();
+      if (rows.length === 0) {
+        output.writeln(output.warning('No hooks configured (or settings.json unreadable).'));
+        return { success: true, data: { rows } };
+      }
+      for (const line of formatHookCoexistence(rows)) {
+        output.writeln(line);
+      }
+      output.writeln();
+      const wildcardRows = rows.filter(r => r.wildcardCount > 0);
+      if (wildcardRows.length > 0) {
+        output.writeln(output.warning(
+          `${wildcardRows.length} event(s) have a wildcard (*) matcher — every tool invocation triggers it,`
+        ));
+        output.writeln(output.warning(
+          'which double-handles ruflo\'s scoped hooks. Consider scoping or disabling.'
+        ));
+      } else {
+        output.writeln(output.success('No wildcard matchers detected — clean.'));
+      }
+      return { success: true, data: { rows } };
+    }
 
     output.writeln();
     output.writeln(output.bold('RuFlo Doctor'));
     output.writeln(output.dim('System diagnostics and health check'));
     output.writeln(output.dim('─'.repeat(50)));
     output.writeln();
+
+    // #bug38 — adapt the synchronous helper to the async pipeline.
+    const checkHookCoexistenceAsync = async () => checkHookCoexistence();
 
     const allChecks: (() => Promise<HealthCheck>)[] = [
       checkVersionFreshness,
@@ -685,6 +877,7 @@ export const doctorCommand: Command = {
       checkBuildTools,
       checkAgenticFlow,
       checkEncryptionAtRest, // ADR-096 Phase 5
+      checkHookCoexistenceAsync, // #bug38
     ];
 
     const componentMap: Record<string, () => Promise<HealthCheck>> = {
@@ -704,6 +897,7 @@ export const doctorCommand: Command = {
       'typescript': checkBuildTools,
       'agentic-flow': checkAgenticFlow,
       'encryption': checkEncryptionAtRest, // ADR-096 Phase 5
+      'hooks': checkHookCoexistenceAsync, // #bug38
     };
 
     let checksToRun = allChecks;
