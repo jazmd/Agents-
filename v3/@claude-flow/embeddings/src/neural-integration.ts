@@ -297,6 +297,9 @@ export async function downloadEmbeddingModel(
   targetDir?: string,
   onProgress?: (progress: { percent: number; bytesDownloaded: number; totalBytes: number }) => void
 ): Promise<string> {
+  const modelDir = targetDir ?? '.models';
+  const modelName = modelId.includes('/') ? modelId : `Xenova/${modelId}`;
+
   try {
     const mod = await import('agentic-flow/embeddings').catch((err) => {
       throw err;
@@ -309,11 +312,11 @@ export async function downloadEmbeddingModel(
       // Treat as lazy-fetch path — @xenova/transformers will download on
       // first generate(). #1700 item 2 follow-up.
       console.warn('[embeddings] agentic-flow installed but does not expose downloadModel — ' +
-        'falling back to lazy fetch via @xenova/transformers on first generate.');
-      return targetDir ?? '.models';
+        'falling back to Transformers.js download.');
+      return await downloadWithTransformers(modelName, modelDir, onProgress);
     }
     return await (downloadFn as (id: string, dir: string, cb?: typeof onProgress) => Promise<string>)(
-      modelId, targetDir ?? '.models', onProgress
+      modelId, modelDir, onProgress
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -331,10 +334,36 @@ export async function downloadEmbeddingModel(
       || /ERR_PACKAGE_PATH_NOT_EXPORTED/.test(msg)
     ) {
       console.warn('[embeddings] agentic-flow neural extras unavailable — skipping eager model download. ' +
-        'Models will be fetched lazily by @xenova/transformers on first generate. ' +
+        'Using Transformers.js to populate the configured model cache. ' +
         `Reason: ${msg}`);
-      return targetDir ?? '.models';
+      return await downloadWithTransformers(modelName, modelDir, onProgress);
     }
     throw err;
   }
+}
+
+async function downloadWithTransformers(
+  modelName: string,
+  targetDir: string,
+  onProgress?: (progress: { percent: number; bytesDownloaded: number; totalBytes: number }) => void
+): Promise<string> {
+  const { loadTransformersPipeline } = await import('./transformers-loader.js');
+  const handle = await loadTransformersPipeline();
+  if (!handle) {
+    throw new Error(
+      'No transformers package available. Install @huggingface/transformers or @xenova/transformers to download ONNX embeddings.'
+    );
+  }
+
+  await handle.pipeline('feature-extraction', modelName, {
+    cache_dir: targetDir,
+    progress_callback: (progress: Record<string, unknown>) => {
+      const loaded = typeof progress.loaded === 'number' ? progress.loaded : 0;
+      const total = typeof progress.total === 'number' ? progress.total : 0;
+      const percent = total > 0 ? (loaded / total) * 100 : 0;
+      onProgress?.({ percent, bytesDownloaded: loaded, totalBytes: total });
+    },
+  });
+
+  return targetDir;
 }
