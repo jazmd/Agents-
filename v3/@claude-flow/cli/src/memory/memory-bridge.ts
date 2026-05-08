@@ -20,6 +20,15 @@
 import * as path from 'path';
 import * as crypto from 'crypto';
 
+// #bug43.1 — embedder-resolver: probes Ollama once for `mxbai-embed-large`
+// and falls back to AgentDB's bundled MiniLM if the daemon is down or the
+// model isn't pulled. See `embedder-resolver.ts` for the full design.
+import {
+  getActiveEmbedder,
+  peekActiveEmbedder,
+  type ActiveEmbedder,
+} from './embedder-resolver.js';
+
 // ===== Lazy singleton =====
 
 let registryPromise: Promise<any> | null = null;
@@ -551,20 +560,39 @@ export async function bridgeStoreEntry(options: {
       return { success: false, id, error: `MutationGuard rejected: ${guardResult.reason}` };
     }
 
-    // Generate embedding via AgentDB's embedder
+    // Generate embedding — #bug43.1: route through the embedder-resolver
+    // so we pick `mxbai-embed-large` (1024-dim) when Ollama is up, falling
+    // back to AgentDB's bundled MiniLM (384-dim) when it isn't. The
+    // `embedding_model` and `embedding_dimensions` columns record which
+    // embedder produced each row so subsequent searches can dim-match.
     let embeddingJson: string | null = null;
     let dimensions = 0;
     let model = 'local';
 
     if (options.generateEmbeddingFlag !== false && value.length > 0) {
       try {
-        const embedder = ctx.agentdb.embedder;
-        if (embedder) {
-          const emb = await embedder.embed(value);
-          if (emb) {
-            embeddingJson = JSON.stringify(Array.from(emb));
-            dimensions = emb.length;
-            model = 'Xenova/all-MiniLM-L6-v2';
+        const active = await getActiveEmbedder();
+        if (active.source === 'ollama') {
+          const vectors = await active.embed([value]);
+          if (vectors[0] && vectors[0].length === active.dim) {
+            embeddingJson = JSON.stringify(vectors[0]);
+            dimensions = active.dim;
+            model = active.model;
+          }
+        }
+        // Either resolver picked MiniLM (Ollama down / model missing), or
+        // the Ollama call returned nothing (transient daemon failure
+        // mid-session). Fall back to AgentDB's bundled embedder so the
+        // store still gets *some* embedding.
+        if (!embeddingJson) {
+          const embedder = ctx.agentdb.embedder;
+          if (embedder) {
+            const emb = await embedder.embed(value);
+            if (emb) {
+              embeddingJson = JSON.stringify(Array.from(emb));
+              dimensions = emb.length;
+              model = 'Xenova/all-MiniLM-L6-v2';
+            }
           }
         }
       } catch {
@@ -654,13 +682,29 @@ export async function bridgeSearchEntries(options: {
     const effectiveNamespace = namespace || 'all';
     const startTime = Date.now();
 
-    // Generate query embedding
+    // Generate query embedding — #bug43.1: use the same embedder the store
+    // path uses so dims line up. If Ollama is up, query will be 1024-dim
+    // (mxbai); if down, 384-dim (MiniLM). When scoring rows below we skip
+    // those whose `embedding_dimensions` doesn't match — heterogeneous
+    // dims would otherwise NaN out cosine.
     let queryEmbedding: number[] | null = null;
+    let queryDim = 0;
     try {
-      const embedder = ctx.agentdb.embedder;
-      if (embedder) {
-        const emb = await embedder.embed(queryStr);
-        queryEmbedding = Array.from(emb);
+      const active = await getActiveEmbedder();
+      if (active.source === 'ollama') {
+        const vectors = await active.embed([queryStr]);
+        if (vectors[0] && vectors[0].length === active.dim) {
+          queryEmbedding = vectors[0];
+          queryDim = active.dim;
+        }
+      }
+      if (!queryEmbedding) {
+        const embedder = ctx.agentdb.embedder;
+        if (embedder) {
+          const emb = await embedder.embed(queryStr);
+          queryEmbedding = Array.from(emb);
+          queryDim = queryEmbedding.length;
+        }
       }
     } catch {
       // Fall back to keyword search
@@ -674,7 +718,7 @@ export async function bridgeSearchEntries(options: {
     let rows: any[];
     try {
       const stmt = ctx.db.prepare(`
-        SELECT id, key, namespace, content, embedding
+        SELECT id, key, namespace, content, embedding, embedding_dimensions
         FROM memory_entries
         WHERE status = 'active' ${nsFilter}
         LIMIT 1000
@@ -695,13 +739,26 @@ export async function bridgeSearchEntries(options: {
       let semanticScore = 0;
       let bm25ScoreVal = 0;
 
-      // Semantic scoring via cosine similarity
+      // Semantic scoring via cosine similarity. #bug43.1: skip rows
+      // whose embedding dim doesn't match the query embedder. A 384-dim
+      // MiniLM row + a 1024-dim mxbai query is meaningless to score —
+      // we let BM25 handle those rows instead. After the migration tool
+      // (Bug 43.2) runs, the whole index is uniform and this branch is
+      // a no-op.
       if (queryEmbedding && row.embedding) {
-        try {
-          const embedding = JSON.parse(row.embedding) as number[];
-          semanticScore = cosineSim(queryEmbedding, embedding);
-        } catch {
-          // Invalid embedding
+        const rowDim = typeof row.embedding_dimensions === 'number'
+          ? row.embedding_dimensions
+          : 0;
+        const dimMatches = rowDim === 0 || queryDim === 0 || rowDim === queryDim;
+        if (dimMatches) {
+          try {
+            const embedding = JSON.parse(row.embedding) as number[];
+            if (embedding.length === queryEmbedding.length) {
+              semanticScore = cosineSim(queryEmbedding, embedding);
+            }
+          } catch {
+            // Invalid embedding
+          }
         }
       }
 
@@ -1029,6 +1086,21 @@ export async function bridgeGenerateEmbedding(
   if (!registry) return null;
 
   try {
+    // #bug43.1: prefer Ollama mxbai-embed-large when available so callers
+    // (skill matcher, hooks, etc.) get the better embedder transparently.
+    const active = await getActiveEmbedder();
+    if (active.source === 'ollama') {
+      const vectors = await active.embed([text]);
+      if (vectors[0] && vectors[0].length === active.dim) {
+        return {
+          embedding: vectors[0],
+          dimensions: active.dim,
+          model: active.model,
+        };
+      }
+    }
+
+    // Fall back to AgentDB's bundled MiniLM.
     const agentdb = registry.getAgentDB();
     const embedder = agentdb?.embedder;
     if (!embedder) return null;
@@ -1057,12 +1129,29 @@ export async function bridgeLoadEmbeddingModel(
   dimensions: number;
   modelName: string;
   loadTime?: number;
+  source?: 'ollama' | 'onnx-miniLM' | 'fallback-hash';
 } | null> {
   const startTime = Date.now();
   const registry = await getRegistry(dbPath);
   if (!registry) return null;
 
   try {
+    // #bug43.1: probe the active embedder. If Ollama is up, this also
+    // primes the resolver cache so subsequent embeds short-circuit.
+    const active = await getActiveEmbedder();
+    if (active.source === 'ollama') {
+      const probe = await active.embed(['test']);
+      if (probe[0] && probe[0].length === active.dim) {
+        return {
+          success: true,
+          dimensions: active.dim,
+          modelName: active.model,
+          loadTime: Date.now() - startTime,
+          source: active.source,
+        };
+      }
+    }
+
     const agentdb = registry.getAgentDB();
     const embedder = agentdb?.embedder;
     if (!embedder) return null;
@@ -1076,6 +1165,7 @@ export async function bridgeLoadEmbeddingModel(
       dimensions: test.length,
       modelName: 'Xenova/all-MiniLM-L6-v2',
       loadTime: Date.now() - startTime,
+      source: 'onnx-miniLM',
     };
   } catch {
     return null;
@@ -1114,11 +1204,16 @@ export async function bridgeGetHNSWStatus(
       // Table might not exist
     }
 
+    // #bug43.1: report the dim of the *active* embedder. This may not
+    // match what's persisted in `embedding_dimensions` for legacy rows
+    // (those stay 384 until the migration runs), but it's the right
+    // value for callers building a query embedding.
+    const active = peekActiveEmbedder();
     return {
       available: true,
       initialized: true,
       entryCount,
-      dimensions: 384,
+      dimensions: active?.dim ?? 384,
     };
   } catch {
     return null;
@@ -1288,6 +1383,175 @@ export async function bridgeListControllers(
   } catch {
     return null;
   }
+}
+
+/**
+ * #bug43.3 — Aggregate counts grouped by `embedding_dimensions` so
+ * `memory_bridge_status` can report what fraction of the index is on
+ * the new mxbai (1024-dim) vs. the legacy MiniLM (384-dim) vs. embeds-
+ * less rows. Returns `null` if the bridge isn't loaded; an empty array
+ * if the table exists but is empty.
+ */
+export async function bridgeGetEmbeddingDistribution(
+  dbPath?: string,
+): Promise<Array<{ dim: number; count: number; model: string }> | null> {
+  const registry = await getRegistry(dbPath);
+  if (!registry) return null;
+
+  const ctx = getDb(registry);
+  if (!ctx) return null;
+
+  try {
+    const stmt = ctx.db.prepare(`
+      SELECT
+        COALESCE(embedding_dimensions, 0) AS dim,
+        COALESCE(embedding_model, 'none') AS model,
+        COUNT(*) AS count
+      FROM memory_entries
+      WHERE status = 'active'
+      GROUP BY embedding_dimensions, embedding_model
+      ORDER BY count DESC
+    `);
+    const rows = stmt.all() as Array<{ dim: number; model: string; count: number }>;
+    return rows.map(r => ({
+      dim: Number(r.dim) || 0,
+      model: String(r.model || 'none'),
+      count: Number(r.count) || 0,
+    }));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * #bug43.2 — Re-embed all rows with the active embedder. Idempotent:
+ * rows already at the active dim+model are skipped. Caller is expected
+ * to have already verified the active embedder is the desired target.
+ *
+ * Returns counts so callers can report progress; throws nothing — DB
+ * failures surface as `errors`.
+ */
+export async function bridgeMigrateEmbeddings(options: {
+  dryRun?: boolean;
+  batchSize?: number;
+  dbPath?: string;
+  onProgress?: (done: number, total: number) => void;
+}): Promise<{
+  total: number;
+  migrated: number;
+  skipped: number;
+  errors: number;
+  targetDim: number;
+  targetModel: string;
+} | null> {
+  const registry = await getRegistry(options.dbPath);
+  if (!registry) return null;
+
+  const ctx = getDb(registry);
+  if (!ctx) return null;
+
+  const active = await getActiveEmbedder();
+  if (active.source !== 'ollama') {
+    // No point migrating to MiniLM — that's the fallback we're already on.
+    return {
+      total: 0,
+      migrated: 0,
+      skipped: 0,
+      errors: 0,
+      targetDim: active.dim,
+      targetModel: active.model,
+    };
+  }
+
+  let candidates: Array<{ id: string; content: string; dim: number; model: string }>;
+  try {
+    const stmt = ctx.db.prepare(`
+      SELECT id, content,
+             COALESCE(embedding_dimensions, 0) AS dim,
+             COALESCE(embedding_model, '') AS model
+      FROM memory_entries
+      WHERE status = 'active' AND content IS NOT NULL AND content != ''
+    `);
+    candidates = stmt.all() as typeof candidates;
+  } catch {
+    return null;
+  }
+
+  const total = candidates.length;
+  let migrated = 0;
+  let skipped = 0;
+  let errors = 0;
+  const batchSize = Math.max(1, options.batchSize ?? 16);
+
+  // Skip rows already on target.
+  const todo = candidates.filter(
+    c => !(c.dim === active.dim && c.model === active.model),
+  );
+  skipped = total - todo.length;
+
+  if (options.dryRun) {
+    return {
+      total,
+      migrated: 0,
+      skipped,
+      errors: 0,
+      targetDim: active.dim,
+      targetModel: active.model,
+    };
+  }
+
+  const updateStmt = ctx.db.prepare(`
+    UPDATE memory_entries
+    SET embedding = ?, embedding_dimensions = ?, embedding_model = ?, updated_at = ?
+    WHERE id = ?
+  `);
+
+  for (let i = 0; i < todo.length; i += batchSize) {
+    const batch = todo.slice(i, i + batchSize);
+    let vectors: number[][] = [];
+    try {
+      vectors = await active.embed(batch.map(b => b.content));
+    } catch {
+      errors += batch.length;
+      continue;
+    }
+    if (vectors.length !== batch.length) {
+      errors += batch.length;
+      continue;
+    }
+    const now = Date.now();
+    for (let j = 0; j < batch.length; j++) {
+      const vec = vectors[j];
+      if (!vec || vec.length !== active.dim) {
+        errors++;
+        continue;
+      }
+      try {
+        updateStmt.run(
+          JSON.stringify(vec),
+          active.dim,
+          active.model,
+          now,
+          batch[j].id,
+        );
+        migrated++;
+      } catch {
+        errors++;
+      }
+    }
+    if (options.onProgress) {
+      try { options.onProgress(migrated + errors, todo.length); } catch { /* ignore */ }
+    }
+  }
+
+  return {
+    total,
+    migrated,
+    skipped,
+    errors,
+    targetDim: active.dim,
+    targetModel: active.model,
+  };
 }
 
 /**
