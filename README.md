@@ -2,7 +2,7 @@
 
 # SwarmOps
 
-**Production-hardened multi-agent orchestration for Claude Code.** Two killer features no competitor in the Claude Code space ships: 🎬 **replayable agent traces** (`swarmops trace replay <id>` — Gantt swimlane HTML viewer, self-contained, archivable) and 🧠 **smart swarm routing into YOUR `~/.claude/agents/`** (`swarm_init({task, strategy: "specialized"})` semantically dispatches to your hand-built agents, not generic fallbacks). Plus: persistent semantic memory across sessions (mxbai-embed-large 1024-dim, 80% recall), prompt caching that cuts input-token cost 50-90%, real architectural typing instead of `typeof === 'function'` probes. Forked from [ruvnet/ruflo](https://github.com/ruvnet/ruflo) — gracious credit, our own product.
+Multi-agent orchestration for Claude Code. Fork of [ruvnet/ruflo](https://github.com/ruvnet/ruflo) with persistent semantic memory (mxbai-embed-large, 1024-dim), prompt-cache shaping, replayable agent traces, and semantic routing into user-installed `~/.claude/agents/`.
 
 [![Stars](https://img.shields.io/github/stars/h4ckm1n-dev/SwarmOps?style=flat-square&logo=github&color=gold)](https://github.com/h4ckm1n-dev/SwarmOps)
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](https://opensource.org/licenses/MIT)
@@ -40,34 +40,24 @@ ruflo --version  # confirms global symlink
 | **`memory-bridge` controller dispatch** | 22 untyped `typeof === 'function'` probes | typed `ControllerCapabilities` interface | architectural |
 | **Silent catch blocks** | 1207 across cli/src, no logging | `swallowError(label, err)` adoption in 8 hot paths (debug-gated) | observability |
 
-## Killer features
+## Replayable agent traces
 
-Two capabilities you can't get anywhere else in the Claude Code ecosystem today:
-
-### 🎬 Replayable agent traces — `swarmops trace replay <session-id>`
-
-Every agent dispatch in SwarmOps writes trajectory data to `~/.claude/.claude-flow/memory/store.json`. SwarmOps reads it back as an interactive **Gantt swimlane HTML viewer** — one row per step, time on the X axis, color-coded by action class (tool / MCP / SendMessage / error), opacity-faded for low-quality steps. Click any bar → full step JSON in a side panel. Self-contained HTML (no CDN, no dependencies) — opens in any browser, archivable, attachable to bug reports.
+Every agent dispatch writes `TrajectoryData` to `~/.claude/.claude-flow/memory/store.json`. The trace viewer reads it back as a Gantt swimlane: one row per step, time on the X axis, color-coded by action class (tool / MCP / SendMessage / error). Bar click → side panel with full step JSON. HTML is self-contained (inline CSS + vanilla JS, no CDN), ~15 KB for a 5-step trajectory.
 
 ```bash
 swarmops trace list                   # browse recent sessions
-swarmops trace replay latest --open   # render + open in browser
+swarmops trace replay <id> [--open]   # render HTML, optionally open in browser
+swarmops trace replay latest          # newest by startedAt
 swarmops trace prune --older-than 30d # cleanup
 ```
 
-**Nobody else in the Claude Code orchestration space ships this.** LangSmith does it for LangGraph ($39/seat); Braintrust is model-only; Anthropic Agent Teams ships nothing comparable. SwarmOps gives it to you free, local, no telemetry. See [`research-roadmap/GAP-1-DESIGN.md`](./research-roadmap/GAP-1-DESIGN.md) for the design rationale.
+Design notes in [`research-roadmap/GAP-1-DESIGN.md`](./research-roadmap/GAP-1-DESIGN.md). XSS-safe (`safeJson` escapes `</script>`, U+2028, U+2029). Light/dark mode via `prefers-color-scheme`.
 
-### 🧠 Smart swarm routing using YOUR installed agents — `swarm_init({task, strategy: "specialized"})`
+## Semantic routing into user-installed agents
 
-SwarmOps reads your `~/.claude/{agents,skills,commands,plugins}/` registry and **semantically routes tasks to the right user-installed agent**. Upstream's MCP layer is blind to user agents — it spawns generic `coder` / `tester` regardless of what you have. SwarmOps:
+`swarm_init({ task, strategy: "specialized" })` reads `~/.claude/{agents,skills,commands,plugins}/` and dispatches to user agents based on task semantics. Upstream's MCP layer is blind to the user registry; SwarmOps indexes it at MCP boot via `agent_list`, `guidance_capabilities`, and `hooks_route`.
 
-- Indexes your agents at MCP boot via `agent_list`, `guidance_capabilities`, `hooks_route`
-- Uses **mxbai-embed-large** (1024-dim semantic embeddings via local Ollama) + hybrid scoring (`0.7·cosine + 0.3·keyword`) to match task descriptions to agents
-- Examples it correctly routes: `"trading bot"` → `polymarket-analyzer` (yours), `"JWT auth"` → `auth-engineer` (yours), NOT the upstream-bundled `kali-metasploit` (which a bag-of-words matcher would surface)
-- Indexes foreign MCP servers (plugin + claude.ai integrations) so the swarm can route to those too
-
-This is the difference between "a swarm of generic agents" and "your hand-built agent ecosystem actually being used." Combined with the trace viewer above, you can SEE which of your agents got picked and how they collaborated.
-
----
+Scoring: `0.7·cosine + 0.3·keyword` over `mxbai-embed-large` (1024-dim) embeddings via local Ollama. Examples of correct routing: `"trading bot"` → `polymarket-analyzer`; `"JWT auth"` → `auth-engineer`; `"deploy to k8s"` → `kubernetes-coordinator`. Foreign MCP servers (plugin + claude.ai) are indexed in `guidance_capabilities` and routable too. Falls back to MiniLM if Ollama is unreachable.
 
 ## About SwarmOps
 
@@ -166,22 +156,7 @@ Full execution dossier in [`research-roadmap/execution/`](./research-roadmap/exe
 - `ControllerCapabilities` interface — `caps.reasoningBank?.recordTrajectory(t)` instead of `if (typeof bridge.reasoningBank?.recordTrajectory === 'function') { ... }` × 22
 - `swallowError(label, err, hint?)` — single recipient for intentional silent catches, debug-level gated. Replaces `} catch { /* defensive */ }` in the 8 hottest sites (memory-bridge, db-pool, embedder-resolver, rabitq-index)
 
-**11. Replayable agent traces with Gantt swimlane viewer** (Tier 2 feature, no competitor coverage)
-- `swarmops trace list / replay / prune` — full CLI surface for browsing past agent sessions
-- Renders to a self-contained HTML5 file (~15 KB for a 5-step trajectory): inline CSS + inline vanilla JS, no CDN, no build step, no dependencies
-- One swimlane row per step on a shared time axis; bars color-coded by action class (tool / MCP / SendMessage / error); opacity-faded for low-quality steps
-- Click any bar → side panel with full step JSON, "Copy" button for clipboard
-- Light-mode default with `prefers-color-scheme: dark` for dark mode
-- Reads from existing `TrajectoryData` in `~/.claude/.claude-flow/memory/store.json` — no new instrumentation needed
-- XSS-safe via `safeJson` (escapes `</script>`, U+2028, U+2029) — even hostile trajectory `result` fields can't pop a console
-- Static, archivable, emailable — perfect for bug reports
-
-**12. Smart routing to user-installed agents at swarm boot** (the wedge nobody else hits)
-- `swarm_init({ task, strategy: "specialized" })` reads `~/.claude/{agents,skills,commands,plugins}/` and routes tasks semantically — not by upstream's bundled-agent fallback
-- Hybrid scoring: `0.7·cosine + 0.3·keyword` over `mxbai-embed-large` (1024-dim) embeddings via local Ollama
-- Real-world routing wins documented in [`ANALYSIS.md`](./ANALYSIS.md): `"trading bot"` → your `polymarket-analyzer`; `"JWT auth"` → your `auth-engineer`; `"deploy to k8s"` → your `kubernetes-coordinator`
-- Foreign MCP servers (plugin + claude.ai integrations) indexed in `guidance_capabilities` so they're swarm-routable too
-- The swarm now USES your hand-built agent ecosystem instead of replacing it
+See the Replayable agent traces and Semantic routing sections above for details on the trace viewer (Gap 1) and user-agent routing capabilities.
 - 19 of 22 probes converted; the 3 deferred are generic `bridgeGetController(name)` accessors that legitimately need string-keyed dispatch
 
 ### What SwarmOps does NOT add
