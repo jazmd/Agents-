@@ -215,7 +215,10 @@ describe('#bug24 — executeAgentTask end-to-end credential routing', () => {
     const callArgs = fetchSpy.mock.calls[0];
     const headers = callArgs[1].headers as Record<string, string>;
     expect(headers.Authorization).toBe('Bearer oauth-tok-e2e');
-    expect(headers['anthropic-beta']).toBe('oauth-2025-04-20');
+    // OAuth beta must remain (asserts wire format) but the call may also
+    // append `extended-cache-ttl-2025-04-11` when prompt-cache shaping is
+    // active (#perf-cache-2026-05). Tolerate both single and comma-joined.
+    expect(headers['anthropic-beta']).toContain('oauth-2025-04-20');
     expect(headers['x-api-key']).toBeUndefined();
   });
 

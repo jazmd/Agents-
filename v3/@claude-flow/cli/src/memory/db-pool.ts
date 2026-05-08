@@ -58,6 +58,7 @@
  */
 
 import * as fs from 'fs';
+import { swallowError } from '@claude-flow/shared';
 import { readFileMaybeEncrypted, writeFileRestricted } from '../fs-secure.js';
 
 /**
@@ -121,9 +122,10 @@ export async function getPooledDB(dbPath: string): Promise<PoolGetResult> {
   let mtimeMs = 0;
   try {
     mtimeMs = fs.statSync(dbPath).mtimeMs;
-  } catch {
+  } catch (err) {
     // Fall through — treat as cold load; readFileMaybeEncrypted will
     // throw the real error if the file truly doesn't exist.
+    swallowError('db-pool.statSync', err, dbPath);
   }
 
   const cached = _pool.get(dbPath);
@@ -134,7 +136,7 @@ export async function getPooledDB(dbPath: string): Promise<PoolGetResult> {
   // Cold load (or stale): close the old handle (if any), read +
   // parse fresh, install in pool.
   if (cached) {
-    try { cached.db.close(); } catch { /* defensive */ }
+    try { cached.db.close(); } catch (err) { swallowError('db-pool.close-stale', err); }
   }
   const fileBuffer = readFileMaybeEncrypted(dbPath, null);
   const db = new SQL.Database(fileBuffer);
@@ -159,7 +161,8 @@ export function persistPooledDB(dbPath: string): void {
   // Refresh observed mtime so we don't reload our own write.
   try {
     cached.mtimeMs = fs.statSync(dbPath).mtimeMs;
-  } catch {
+  } catch (err) {
+    swallowError('db-pool.persist-statSync', err, dbPath);
     cached.mtimeMs = Date.now();
   }
 }
@@ -196,13 +199,13 @@ export function invalidatePool(dbPath?: string): void {
   if (dbPath) {
     const cached = _pool.get(dbPath);
     if (cached) {
-      try { cached.db.close(); } catch { /* defensive */ }
+      try { cached.db.close(); } catch (err) { swallowError('db-pool.invalidate-close', err, dbPath); }
       _pool.delete(dbPath);
     }
     return;
   }
-  for (const [, entry] of _pool) {
-    try { entry.db.close(); } catch { /* defensive */ }
+  for (const [p, entry] of _pool) {
+    try { entry.db.close(); } catch (err) { swallowError('db-pool.invalidate-close-all', err, p); }
   }
   _pool.clear();
 }

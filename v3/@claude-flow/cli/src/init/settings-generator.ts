@@ -6,6 +6,8 @@
 import os from 'os';
 import path from 'path';
 
+import { resolveInstallContext } from '@claude-flow/shared';
+
 import type { InitOptions, HooksConfig, PlatformInfo } from './types.js';
 import { detectPlatform } from './types.js';
 
@@ -30,8 +32,12 @@ import { detectPlatform } from './types.js';
 export function isGlobalInstall(targetDir: string | undefined): boolean {
   if (!targetDir) return false;
   try {
-    const home = os.homedir();
-    const homeClaude = path.join(home, '.claude');
+    // STRAT-1: route through the shared resolver so this stays in sync with
+    // every other site that asks the same question. The resolver returns
+    // claudeRoot = ~/.claude when global; we then check whether targetDir
+    // sits inside it.
+    const ctx = resolveInstallContext({ home: os.homedir() });
+    const homeClaude = ctx.isGlobalInstall ? ctx.claudeRoot : path.join(os.homedir(), '.claude');
     const resolvedTarget = path.resolve(targetDir);
     return resolvedTarget === homeClaude || resolvedTarget.startsWith(homeClaude + path.sep);
   } catch {

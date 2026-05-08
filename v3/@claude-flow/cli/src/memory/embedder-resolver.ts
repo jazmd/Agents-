@@ -29,6 +29,7 @@
  * @module memory/embedder-resolver
  */
 
+import { swallowError } from '@claude-flow/shared';
 import { embedTexts as ollamaEmbedTexts } from '../registry/ollama-embedder.js';
 
 /** The active embedder selected by `getActiveEmbedder()`. */
@@ -188,8 +189,9 @@ export async function getActiveEmbedder(
         resolverCache = ollama;
         return ollama;
       }
-    } catch {
+    } catch (err) {
       // Swallow probe errors — never let probing crash the bridge.
+      swallowError('embedder-resolver.probeOllama', err, 'falling back to MiniLM');
     }
     const miniLM = buildMiniLMFallback();
     resolverCache = miniLM;

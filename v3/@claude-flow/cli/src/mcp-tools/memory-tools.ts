@@ -1001,23 +1001,49 @@ export const memoryTools: MCPTool[] = [
           namespaces = ['default', 'claude-memories', 'auto-memory', 'patterns', 'tasks', 'feedback'];
         }
       }
+      // PERF-2: collapse N per-namespace searches into ONE union scan.
+      // Embed query once, run a single SQL pass with `namespace IN (…)`, then
+      // score + dedupe in JS. See bridgeSearchEntriesMulti for the impl.
       const allResults: Array<{ key: string; content: string; score: number; namespace: string; source: string }> = [];
-
-      for (const searchNs of namespaces) {
-        try {
-          const r = await searchEntries({ query, namespace: searchNs, limit: limit * 2 });
-          if (r?.results) {
-            for (const entry of r.results) {
-              allResults.push({
-                key: entry.key || entry.id || '',
-                content: (entry.content || (entry as any).value || '').toString().slice(0, 200),
-                score: entry.score || 0,
-                namespace: searchNs,
-                source: searchNs === 'claude-memories' ? 'claude-code' : searchNs === 'auto-memory' ? 'auto-memory' : 'agentdb',
-              });
-            }
+      try {
+        const bridge = await import('../memory/memory-bridge.js');
+        const multi = await bridge.bridgeSearchEntriesMulti({
+          namespaces,
+          query,
+          limit: limit * 2,
+        });
+        if (multi?.results) {
+          for (const entry of multi.results) {
+            const entryNs = entry.namespace || 'default';
+            allResults.push({
+              key: entry.key || entry.id || '',
+              content: (entry.content || '').toString().slice(0, 200),
+              score: entry.score || 0,
+              namespace: entryNs,
+              source: entryNs === 'claude-memories' ? 'claude-code' : entryNs === 'auto-memory' ? 'auto-memory' : 'agentdb',
+            });
           }
-        } catch { /* namespace may not exist */ }
+        }
+      } catch {
+        // Bridge unavailable — fall back to the legacy per-namespace loop so
+        // the tool still returns something. This branch should be cold in
+        // practice since the bridge is the canonical search path.
+        for (const searchNs of namespaces) {
+          try {
+            const r = await searchEntries({ query, namespace: searchNs, limit: limit * 2 });
+            if (r?.results) {
+              for (const entry of r.results) {
+                allResults.push({
+                  key: entry.key || entry.id || '',
+                  content: (entry.content || (entry as any).value || '').toString().slice(0, 200),
+                  score: entry.score || 0,
+                  namespace: searchNs,
+                  source: searchNs === 'claude-memories' ? 'claude-code' : searchNs === 'auto-memory' ? 'auto-memory' : 'agentdb',
+                });
+              }
+            }
+          } catch { /* namespace may not exist */ }
+        }
       }
 
       // Sort by score, deduplicate by key, take top N

@@ -283,12 +283,17 @@ const TASK_PATTERNS = {
   'deploy|docker|ci|cd|pipeline|infrastructure': 'devops',
 };
 
+// Pre-compiled regex pairs — built once at module load instead of on every
+// routeTask() call. Each entry is [pattern, compiledRegex, agent].
+const COMPILED_TASK_PATTERNS = Object.entries(TASK_PATTERNS).map(
+  ([pattern, agent]) => [pattern, new RegExp(pattern, 'i'), agent]
+);
+
 function routeTask(task) {
   const taskLower = task.toLowerCase();
 
   // Check patterns
-  for (const [pattern, agent] of Object.entries(TASK_PATTERNS)) {
-    const regex = new RegExp(pattern, 'i');
+  for (const [pattern, regex, agent] of COMPILED_TASK_PATTERNS) {
     if (regex.test(taskLower)) {
       return {
         agent,

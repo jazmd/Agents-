@@ -76,6 +76,8 @@ const commandLoaders: Record<string, CommandLoader> = {
   'transfer-store': () => import('./transfer-store.js'),
   cleanup: () => import('./cleanup.js'),
   autopilot: () => import('./autopilot.js'),
+  // Anthropic prompt-cache observability (#perf-cache-2026-05)
+  'cache-stats': () => import('./cache.js'),
 };
 
 // Cache for loaded commands
@@ -184,6 +186,7 @@ export async function getGuidanceCommand() { return loadCommand('guidance'); }
 export async function getApplianceCommand() { return loadCommand('appliance'); }
 export async function getCleanupCommand() { return loadCommand('cleanup'); }
 export async function getAutopilotCommand() { return loadCommand('autopilot'); }
+export async function getCacheStatsCommand() { return loadCommand('cache-stats'); }
 
 /**
  * Core commands loaded synchronously (available immediately)
@@ -238,7 +241,7 @@ export async function getCommandsByCategory(): Promise<Record<string, Command[]>
     analyzeCmd, routeCmd, progressCmd, providersCmd,
     pluginsCmd, deploymentCmd, claimsCmd, issuesCmd,
     updateCmd, processCmd, guidanceCmd, applianceCmd,
-    cleanupCmd, autopilotCmd,
+    cleanupCmd, autopilotCmd, cacheStatsCmd,
   ] = await Promise.all([
     loadCommand('daemon'), loadCommand('doctor'), loadCommand('embeddings'), loadCommand('neural'),
     loadCommand('performance'), loadCommand('security'), loadCommand('ruvector'), loadCommand('hive-mind'),
@@ -246,7 +249,7 @@ export async function getCommandsByCategory(): Promise<Record<string, Command[]>
     loadCommand('analyze'), loadCommand('route'), loadCommand('progress'), loadCommand('providers'),
     loadCommand('plugins'), loadCommand('deployment'), loadCommand('claims'), loadCommand('issues'),
     loadCommand('update'), loadCommand('process'), loadCommand('guidance'), loadCommand('appliance'),
-    loadCommand('cleanup'), loadCommand('autopilot'),
+    loadCommand('cleanup'), loadCommand('autopilot'), loadCommand('cache-stats'),
   ]);
 
   return {
@@ -264,7 +267,7 @@ export async function getCommandsByCategory(): Promise<Record<string, Command[]>
       migrateCmd, workflowCmd,
     ].filter(Boolean) as Command[],
     analysis: [
-      analyzeCmd, routeCmd, progressCmd,
+      analyzeCmd, routeCmd, progressCmd, cacheStatsCmd,
     ].filter(Boolean) as Command[],
     management: [
       providersCmd, pluginsCmd, deploymentCmd, claimsCmd,

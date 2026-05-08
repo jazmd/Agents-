@@ -2,21 +2,26 @@
 
 # SwarmOps
 
-**Hardened, optimized fork of [Ruflo](https://github.com/ruvnet/claude-flow) for global `~/.claude` installs**
+**Drop-in fork of [ruflo](https://github.com/ruvnet/ruflo) — `memory_search` 74ms → 1.6ms (46×), cold start 218ms → 56ms (74% faster). Same CLI, same MCP tools, hardened for global `~/.claude` installs.**
 
-[![Star on GitHub](https://img.shields.io/github/stars/h4ckm1n-dev/SwarmOps?style=for-the-badge&logo=github&color=gold)](https://github.com/h4ckm1n-dev/SwarmOps)
-[![Upstream PR #1828](https://img.shields.io/badge/Upstream_PR-%231828-D97757?style=for-the-badge&logoColor=white&logo=github)](https://github.com/ruvnet/ruflo/pull/1828)
-[![MIT License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![Stars](https://img.shields.io/github/stars/h4ckm1n-dev/SwarmOps?style=flat-square&logo=github&color=gold)](https://github.com/h4ckm1n-dev/SwarmOps)
+[![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](https://opensource.org/licenses/MIT)
+[![Tests](https://img.shields.io/badge/tests-330%2B-brightgreen?style=flat-square)](https://github.com/h4ckm1n-dev/SwarmOps/tree/main/v3/%40claude-flow/cli/__tests__)
+[![upstream tracking](https://img.shields.io/badge/upstream-current_with_ruvnet/ruflo-blue?style=flat-square&logo=git)](https://github.com/ruvnet/ruflo)
 
 </div>
 
-> **SwarmOps is a fork of [`ruvnet/ruflo`](https://github.com/ruvnet/claude-flow)**. All credit for the original architecture, agent ecosystem, and MCP tooling goes to [`rUv`](https://ruv.io) and contributors. This fork ships **31 bugfixes + perf wins** discovered while running ruflo as a globally-installed `~/.claude` setup, plus integration improvements for users with their own large agent/skill libraries. Most fixes are also tracked in upstream [PR #1828](https://github.com/ruvnet/ruflo/pull/1828) — when that merges, this fork can be archived.
+## Quick install
 
-## Why SwarmOps over upstream Ruflo
+```bash
+git clone https://github.com/h4ckm1n-dev/SwarmOps.git
+cd SwarmOps && npm install && npm link
+ruflo --version  # confirms global symlink
+```
 
-Upstream Ruflo assumes a per-project install layout (`<project>/.claude/`). Many real-world setups install it globally at `~/.claude/` instead — and **a lot breaks silently** in that mode. SwarmOps fixes 31 systemic issues that surface only on global installs, plus performance and security wins that benefit everyone.
+> Drop-in replacement for `@claude-flow/cli`. Same `ruflo` binary, same MCP coordination, same agent registry. The 5 fixes that matter most: install-time path resolution, in-process DB pool, `mxbai-embed-large` semantic search, AIDefence wiring, and `npm audit`-clean dependencies.
 
-### Measurable improvements (vs upstream)
+## Measurable improvements (vs upstream Ruflo)
 
 | Area | Upstream Ruflo | SwarmOps | Δ |
 |---|---|---|---|
@@ -28,9 +33,13 @@ Upstream Ruflo assumes a per-project install layout (`<project>/.claude/`). Many
 | **Statusline render** | 361 ms | 295 ms | −18% |
 | **Memory search recall** (paraphrased queries) | 60% (MiniLM 384-dim) | 80% (mxbai-embed-large 1024-dim) | **+33%** |
 | **Hook-route accuracy on user skills** | bag-of-words (false positives like `kali-metasploit` for JWT-auth tasks) | semantic embeddings (`polymarket-analyzer` for "trading bot") | qualitative |
-| **`npm audit` vulnerabilities** | 14 (4 high) | 4 (0 high) | undici/yaml CVEs patched |
+| **`npm audit` vulnerabilities** | 14 (4 high) | 4 moderate (0 high) | undici/yaml CVEs patched |
 
-### What SwarmOps adds
+## About this fork
+
+> All credit for the original architecture, agent ecosystem, and MCP tooling goes to [`rUv`](https://ruv.io) and contributors. SwarmOps started as an unmerged upstream PR ([#1828](https://github.com/ruvnet/ruflo/pull/1828)) collecting **31 bugfixes + perf wins** discovered while running ruflo as a globally-installed `~/.claude` setup. We track upstream's `main` branch (last sync: today, clean 4-commit merge) while shipping features upstream doesn't yet — see [`research-roadmap/`](./research-roadmap/) for the strategic plan.
+
+## What SwarmOps adds
 
 **1. Works correctly when installed globally at `~/.claude/`** (upstream silently breaks)
 - Hook commands resolve to `$HOME/.claude/helpers/...` instead of double-`.claude` (`/.claude/.claude/...` — `MODULE_NOT_FOUND` chain)

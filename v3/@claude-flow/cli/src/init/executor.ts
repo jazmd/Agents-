@@ -9,6 +9,8 @@ import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { dirname } from 'path';
 
+import { resolveInstallContext } from '@claude-flow/shared';
+
 // ESM-compatible __dirname
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -843,12 +845,18 @@ async function writeSettings(
  * surface it in the skipped-message), or null if none found.
  */
 function detectExistingRufloMCP(targetDir: string): string | null {
+  // STRAT-1: claudeRoot drives the .claude/mcp.json candidate; the
+  // ~/.claude.json file lives one level UP from claudeRoot so we still
+  // derive it from the home directory directly.
   const home = (process.env.HOME ?? process.env.USERPROFILE) ?? '';
+  const installCtx = resolveInstallContext({ forceGlobal: true });
   const candidates = new Set<string>();
   // User-global Claude Code config locations
   if (home) {
     candidates.add(path.join(home, '.claude.json'));
-    candidates.add(path.join(home, '.claude', 'mcp.json'));
+  }
+  if (installCtx.claudeRoot) {
+    candidates.add(path.join(installCtx.claudeRoot, 'mcp.json'));
   }
   // Walk parents of targetDir up to root, checking for .mcp.json at each
   let dir = path.resolve(targetDir);
@@ -1955,9 +1963,11 @@ async function writeClaudeMd(
   // Also write/append global ~/.claude/CLAUDE.md so ruflo tools are used automatically (#1497).
   // Opt-out via --no-global / options.skipGlobalClaudeMd (#1744 — keeps global rules file pristine
   // for users who don't want a per-machine pointer block).
-  const homeDir = process.env.HOME || process.env.USERPROFILE || '';
-  if (homeDir && !options.skipGlobalClaudeMd) {
-    const globalClaudeDir = path.join(homeDir, '.claude');
+  // STRAT-1: route through the shared resolver so the global-mode path
+  // matches every other consumer (settings-generator, mcp-server, …).
+  const installCtx = resolveInstallContext({ forceGlobal: true });
+  if (installCtx.claudeRoot && !options.skipGlobalClaudeMd) {
+    const globalClaudeDir = installCtx.claudeRoot;
     const globalClaudeMd = path.join(globalClaudeDir, 'CLAUDE.md');
     const rufloBlock = [
       '',
