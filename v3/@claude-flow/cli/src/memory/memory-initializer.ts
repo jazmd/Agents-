@@ -12,10 +12,28 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { readFileMaybeEncrypted, writeFileRestricted } from '../fs-secure.js';
+// #bug31: shared in-process DB pool — eliminates the per-call file
+// read + sql.js re-parse that dominated 440 ms baseline.
+import {
+  getPooledDB,
+  persistPooledDB,
+  isSchemaVerified,
+  markSchemaVerified,
+  invalidatePool,
+  type RouteSource,
+} from './db-pool.js';
 
 // ADR-053: Lazy import of AgentDB v3 bridge
 let _bridge: typeof import('./memory-bridge.js') | null | undefined;
 async function getBridge(): Promise<typeof import('./memory-bridge.js') | null> {
+  // #bug31: explicit escape hatch so benchmarks and tests (and any
+  // caller that wants to exercise the raw sql.js fallback path the
+  // in-process pool optimises) can short-circuit the bridge. Checked
+  // FIRST so the bridge is bypassed even after another caller in the
+  // same process has already cached it.
+  if (process.env.CLAUDE_FLOW_DISABLE_BRIDGE === '1') {
+    return null;
+  }
   if (_bridge === null) return null;
   if (_bridge) return _bridge;
   try {
@@ -982,16 +1000,21 @@ export async function ensureSchemaColumns(dbPath: string): Promise<{
       return { success: true, columnsAdded: [] };
     }
 
-    const initSqlJs = (await import('sql.js')).default;
-    const SQL = await initSqlJs();
+    // #bug31: once we've verified the schema for a given path in
+    // this process, never reopen the DB just to confirm. Hot-path
+    // memory_store / memory_search no longer pay this 80–150 ms tax.
+    if (isSchemaVerified(dbPath)) {
+      return { success: true, columnsAdded: [] };
+    }
 
-    const fileBuffer = readFileMaybeEncrypted(dbPath, null);
-    const db = new SQL.Database(fileBuffer);
+    // Use the pooled handle — first call cold-loads, subsequent
+    // calls (in this process) hit the in-memory cache.
+    const { db } = await getPooledDB(dbPath);
 
     // Get current columns in memory_entries
     const tableInfo = db.exec("PRAGMA table_info(memory_entries)");
     const existingColumns = new Set(
-      tableInfo[0]?.values?.map(row => row[1] as string) || []
+      tableInfo[0]?.values?.map((row: unknown[]) => row[1] as string) || []
     );
 
     // Required columns that may be missing in older schemas
@@ -1025,12 +1048,14 @@ export async function ensureSchemaColumns(dbPath: string): Promise<{
     }
 
     if (modified) {
-      // Save updated database
-      const data = db.export();
-      writeFileRestricted(dbPath, Buffer.from(data), { encrypt: true });
+      // #bug31: persist via the pool so our cached mtime stays in
+      // sync with disk and we don't reload our own write.
+      persistPooledDB(dbPath);
     }
 
-    db.close();
+    // Mark verified — even if `modified` is false, we now know the
+    // columns are present and won't reprobe in this process.
+    markSchemaVerified(dbPath);
     return { success: true, columnsAdded };
   } catch (error) {
     return {
@@ -1253,6 +1278,9 @@ export async function initializeMemoryDatabase(options: {
 
       // Close database
       db.close();
+      // #bug31: drop any stale pooled handle for this path so the
+      // freshly-initialized DB is reloaded on next memory_* call.
+      invalidatePool(dbPath);
 
       // Also create schema file for reference
       const schemaPath = path.join(dbDir, 'schema.sql');
@@ -1476,6 +1504,9 @@ export async function applyTemporalDecay(dbPath?: string): Promise<{
     const data = db.export();
     fs.writeFileSync(path_, Buffer.from(data));
     db.close();
+    // #bug31: this code path writes outside the pool — invalidate so
+    // pool reloads with the decay updates on the next memory_* call.
+    invalidatePool(path_);
 
     return {
       success: true,
@@ -2026,6 +2057,8 @@ export async function verifyMemoryInit(dbPath: string, options?: {
     const data = db.export();
     writeFileRestricted(dbPath, Buffer.from(data), { encrypt: true });
     db.close();
+    // #bug31: write outside pool — invalidate to avoid stale handle.
+    invalidatePool(dbPath);
 
     const passed = tests.filter(t => t.passed).length;
     const failed = tests.filter(t => !t.passed).length;
@@ -2113,11 +2146,10 @@ export async function storeEntry(options: {
     // Ensure schema has all required columns (migration for older DBs)
     await ensureSchemaColumns(dbPath);
 
-    const initSqlJs = (await import('sql.js')).default;
-    const SQL = await initSqlJs();
-
-    const fileBuffer = readFileMaybeEncrypted(dbPath, null);
-    const db = new SQL.Database(fileBuffer);
+    // #bug31: pooled handle — first call cold-loads (~440 ms),
+    // subsequent calls in this process hit the in-memory cache (~10 ms).
+    const { db, source } = await getPooledDB(dbPath);
+    const _routedThrough: RouteSource = source;
 
     const id = `entry_${Date.now()}_${Math.random().toString(36).substring(7)}`;
     const now = Date.now();
@@ -2162,10 +2194,10 @@ export async function storeEntry(options: {
       ttl ? now + (ttl * 1000) : null
     ]);
 
-    // Save
-    const data = db.export();
-    writeFileRestricted(dbPath, Buffer.from(data), { encrypt: true });
-    db.close();
+    // #bug31: persist via the pool — keeps the cached handle alive
+    // and refreshes our observed mtime so the next read in this
+    // process doesn't false-positive on the bump we just caused.
+    persistPooledDB(dbPath);
 
     // Add to HNSW index for faster future searches
     if (embeddingJson) {
@@ -2181,8 +2213,11 @@ export async function storeEntry(options: {
     return {
       success: true,
       id,
-      embedding: embeddingJson ? { dimensions: embeddingDimensions!, model: embeddingModel! } : undefined
-    };
+      embedding: embeddingJson ? { dimensions: embeddingDimensions!, model: embeddingModel! } : undefined,
+      // #bug31: surface which path served the request so benchmarks
+      // and tool callers can verify the pool is being hit.
+      _routedThrough
+    } as any;
   } catch (error) {
     return {
       success: false,
@@ -2252,11 +2287,8 @@ export async function searchEntries(options: {
       const { searchRabitq } = await import('./rabitq-index.js');
       const rabitqCandidates = await searchRabitq(queryEmbedding, { k: limit * 2, namespace: effectiveNamespace });
       if (rabitqCandidates && rabitqCandidates.length > 0) {
-        // Rerank candidates with exact cosine similarity from SQLite
-        const initSqlJs = (await import('sql.js')).default;
-        const SQL = await initSqlJs();
-        const fileBuffer = readFileMaybeEncrypted(dbPath, null);
-        const db = new SQL.Database(fileBuffer);
+        // #bug31: pooled handle (read-only rerank — no persist needed).
+        const { db } = await getPooledDB(dbPath);
         const reranked: { id: string; key: string; content: string; score: number; namespace: string }[] = [];
 
         for (const candidate of rabitqCandidates) {
@@ -2283,7 +2315,6 @@ export async function searchEntries(options: {
           }
           stmt.free();
         }
-        db.close();
 
         if (reranked.length > 0) {
           reranked.sort((a, b) => b.score - a.score);
@@ -2305,11 +2336,9 @@ export async function searchEntries(options: {
     }
 
     // Fall back to brute-force SQLite search
-    const initSqlJs = (await import('sql.js')).default;
-    const SQL = await initSqlJs();
-
-    const fileBuffer = readFileMaybeEncrypted(dbPath, null);
-    const db = new SQL.Database(fileBuffer);
+    // #bug31: pooled handle (read-only — no persist).
+    const { db, source } = await getPooledDB(dbPath);
+    const _bruteRoute: RouteSource = source;
 
     // Get entries with embeddings
     const searchStmt = db.prepare(
@@ -2366,7 +2395,7 @@ export async function searchEntries(options: {
       }
     }
 
-    db.close();
+    // #bug31: do NOT close — handle is shared via the pool.
 
     // Sort by score
     results.sort((a, b) => b.score - a.score);
@@ -2374,8 +2403,10 @@ export async function searchEntries(options: {
     return {
       success: true,
       results: results.slice(0, limit),
-      searchTime: Date.now() - startTime
-    };
+      searchTime: Date.now() - startTime,
+      // #bug31: surface route — caller / benchmark can verify cache hit.
+      _routedThrough: _bruteRoute
+    } as any;
   } catch (error) {
     return {
       success: false,
@@ -2459,11 +2490,8 @@ export async function listEntries(options: {
     // Ensure schema has all required columns (migration for older DBs)
     await ensureSchemaColumns(dbPath);
 
-    const initSqlJs = (await import('sql.js')).default;
-    const SQL = await initSqlJs();
-
-    const fileBuffer = readFileMaybeEncrypted(dbPath, null);
-    const db = new SQL.Database(fileBuffer);
+    // #bug31: pooled handle (read-only listing — no persist).
+    const { db } = await getPooledDB(dbPath);
 
     // Get total count
     const countStmt = namespace
@@ -2526,7 +2554,7 @@ export async function listEntries(options: {
       }
     }
 
-    db.close();
+    // #bug31: do NOT close — handle stays in the pool for reuse.
 
     return { success: true, entries, total };
   } catch (error) {
@@ -2587,11 +2615,8 @@ export async function getEntry(options: {
     // Ensure schema has all required columns (migration for older DBs)
     await ensureSchemaColumns(dbPath);
 
-    const initSqlJs = (await import('sql.js')).default;
-    const SQL = await initSqlJs();
-
-    const fileBuffer = readFileMaybeEncrypted(dbPath, null);
-    const db = new SQL.Database(fileBuffer);
+    // #bug31: pooled handle — read + atomic update of access_count.
+    const { db } = await getPooledDB(dbPath);
 
     // Find entry by key
     const getStmt = db.prepare(`
@@ -2611,7 +2636,7 @@ export async function getEntry(options: {
     const result = getRows.length > 0 ? [{ values: getRows }] : [];
 
     if (!result[0]?.values?.[0]) {
-      db.close();
+      // #bug31: do NOT close — pooled handle is shared.
       return { success: true, found: false };
     }
 
@@ -2626,11 +2651,8 @@ export async function getEntry(options: {
       WHERE id = ?
     `, [String(id)]);
 
-    // Save updated database
-    const data = db.export();
-    writeFileRestricted(dbPath, Buffer.from(data), { encrypt: true });
-
-    db.close();
+    // #bug31: persist via the pool — keeps cached mtime in sync.
+    persistPooledDB(dbPath);
 
     let tags: string[] = [];
     if (tagsJson) {
@@ -2728,11 +2750,8 @@ export async function deleteEntry(options: {
     // Ensure schema has all required columns (migration for older DBs)
     await ensureSchemaColumns(dbPath);
 
-    const initSqlJs = (await import('sql.js')).default;
-    const SQL = await initSqlJs();
-
-    const fileBuffer = readFileMaybeEncrypted(dbPath, null);
-    const db = new SQL.Database(fileBuffer);
+    // #bug31: pooled handle — soft-delete + count + persist.
+    const { db } = await getPooledDB(dbPath);
 
     // Check if entry exists first
     const checkStmt = db.prepare(`
@@ -2751,10 +2770,9 @@ export async function deleteEntry(options: {
     const checkResult = checkRows.length > 0 ? [{ values: checkRows }] : [];
 
     if (!checkResult[0]?.values?.[0]) {
-      // Get remaining count before closing
       const countResult = db.exec(`SELECT COUNT(*) FROM memory_entries WHERE status = 'active'`);
       const remainingEntries = countResult[0]?.values?.[0]?.[0] as number || 0;
-      db.close();
+      // #bug31: do NOT close — pooled handle is shared.
       return {
         success: true,
         deleted: false,
@@ -2784,11 +2802,8 @@ export async function deleteEntry(options: {
     const countResult = db.exec(`SELECT COUNT(*) FROM memory_entries WHERE status = 'active'`);
     const remainingEntries = countResult[0]?.values?.[0]?.[0] as number || 0;
 
-    // Save updated database
-    const data = db.export();
-    writeFileRestricted(dbPath, Buffer.from(data), { encrypt: true });
-
-    db.close();
+    // #bug31: persist via the pool (refreshes cached mtime).
+    persistPooledDB(dbPath);
 
     // Clean up in-memory HNSW index so ghost vectors don't appear in searches.
     // Remove the entry from the HNSW entries map and invalidate the index.
