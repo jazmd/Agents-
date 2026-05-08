@@ -162,3 +162,6 @@ hive-mind-prompt-*.txt
 .env.*
 !.env.example
 !.env.*.example
+
+# Clop media-optimizer output (sits next to source media)
+optimised/
