@@ -30,7 +30,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -91,37 +91,117 @@ export function resolveEmbeddingCachePath(): string {
 }
 
 /**
- * Load the on-disk cache. Returns an empty object on any failure
- * (missing file, corrupt JSON, etc.) — never throws. Corrupt cache is
- * not a fatal error; we just rebuild it.
+ * #bug32 — module-level cache + mtime watermark.
+ *
+ * Before this fix, every `embedTexts()` call did:
+ *   readFileSync(CACHE_PATH, 'utf8')   // 4.9 MB → ~7 ms
+ *   JSON.parse(raw)                    // ~3.5 ms
+ * for a combined ~10.5 ms even when the cache was unchanged. That
+ * was 41% of the 152 ms cache-load benchmark in ANALYSIS.md (Bug 32).
+ *
+ * Now we:
+ *   1. Keep `_cache` and `_cacheMtime` at module scope, keyed by
+ *      `_cachePath` so a test override busts the cache cleanly.
+ *   2. On each call, do a cheap `statSync(CACHE_PATH).mtimeMs` (~µs).
+ *   3. Reload from disk ONLY when the file's mtime is newer than
+ *      what we last loaded. Otherwise reuse the in-memory map.
+ *   4. On save, update `_cache` in place + bump `_cacheMtime` from
+ *      the freshly-stat'd file so the next call short-circuits.
+ *
+ * Cross-process safety: writes from another process bump the mtime,
+ * which we observe and reload. Concurrent writes from the same
+ * process are safe — JSON.stringify is sync and we re-stat after.
+ */
+let _cache: CacheShape | null = null;
+let _cacheMtime = 0;
+let _cachePath = '';
+
+/**
+ * Load the on-disk cache (mtime-keyed). Returns an empty object on
+ * any failure (missing file, corrupt JSON, etc.) — never throws.
+ * Corrupt cache is not a fatal error; we just rebuild it.
  */
 function loadCache(path: string): CacheShape {
+  // Cheap stat probe — `statSync` on a 5 MB JSON file is ~µs vs
+  // ~10 ms for the read+parse path. We always re-stat so concurrent
+  // writers (other processes / tools) are picked up automatically.
+  let mtimeMs = 0;
   try {
-    if (!existsSync(path)) return {};
+    mtimeMs = statSync(path).mtimeMs;
+  } catch {
+    // File missing — clear cache and return empty.
+    if (_cachePath === path) {
+      _cache = {};
+      _cacheMtime = 0;
+    }
+    return {};
+  }
+
+  // Same path + same mtime → in-memory hit (the hot path).
+  if (_cache !== null && _cachePath === path && _cacheMtime === mtimeMs) {
+    return _cache;
+  }
+
+  // Cold load (or stale): read+parse fresh and install.
+  try {
     const raw = readFileSync(path, 'utf8');
     const parsed = JSON.parse(raw);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as CacheShape;
+      _cache = parsed as CacheShape;
+      _cacheMtime = mtimeMs;
+      _cachePath = path;
+      return _cache;
     }
-    return {};
+    _cache = {};
+    _cacheMtime = mtimeMs;
+    _cachePath = path;
+    return _cache;
   } catch {
     // Corrupt cache file should never break the matcher.
-    return {};
+    _cache = {};
+    _cacheMtime = mtimeMs;
+    _cachePath = path;
+    return _cache;
   }
 }
 
 /**
  * Persist the cache. Best-effort — silently swallows write errors so a
  * read-only filesystem can't break embedding lookups.
+ *
+ * #bug32: also updates the module-level cache + mtime so the next
+ * `loadCache(path)` short-circuits without going to disk.
  */
 function saveCache(path: string, cache: CacheShape): void {
   try {
     const dir = dirname(path);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(path, JSON.stringify(cache), 'utf8');
+    // Keep module-level cache hot — mirror the just-written contents
+    // and bump the watermark from the freshly-stat'd file. Avoids the
+    // need to read+parse on the very next call.
+    _cache = cache;
+    try {
+      _cacheMtime = statSync(path).mtimeMs;
+    } catch {
+      _cacheMtime = Date.now();
+    }
+    _cachePath = path;
   } catch {
     // Persistence failed — keep going, in-memory cache still helps.
   }
+}
+
+/**
+ * #bug32: test-only — wipe the module-level cache so unit tests can
+ * exercise the cold-load path explicitly. Not exposed in the
+ * public API surface (no JSDoc tag), but exported for the bench /
+ * regression suite.
+ */
+export function _resetEmbeddingCacheForTests(): void {
+  _cache = null;
+  _cacheMtime = 0;
+  _cachePath = '';
 }
 
 function cacheKey(model: string, text: string): string {
@@ -230,9 +310,11 @@ export async function embedTexts(
   const cachePath = opts?.cachePath ?? resolveEmbeddingCachePath();
   const useCache = opts?.noCache !== true;
 
-  // Per-call in-memory snapshot of the cache. We always re-read to pick
-  // up writes from concurrent processes (cheap — embedding caches
-  // shouldn't grow huge).
+  // #bug32: `loadCache` is now mtime-keyed at module scope. The hot
+  // path (no concurrent writer) returns the same in-memory map for
+  // free; only when another process bumps the file's mtime do we
+  // re-read+re-parse. This drops the per-call overhead from ~10 ms
+  // (read+parse 4.9 MB JSON) to ~µs (statSync + Map ref).
   const cache: CacheShape = useCache ? loadCache(cachePath) : {};
 
   for (const model of chain) {
