@@ -33,8 +33,24 @@ pub async fn run(provider: &str) -> Result<()> {
         "claude" => anyhow::bail!(
             "provider `claude` requires building with `--features provider-claude`"
         ),
+        #[cfg(feature = "provider-managed-agents")]
+        "managed-agents" => {
+            // Reads ANTHROPIC_API_KEY then ANTHROPIC_KEY. Surface the
+            // helpful error when neither is set.
+            let cfg = aperture_providers_managed_agents::Config::from_env()
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
+            Box::new(aperture_providers_managed_agents::ManagedAgentsResearcher::new(
+                MemoryDataSource, cfg,
+            ))
+        }
+        #[cfg(not(feature = "provider-managed-agents"))]
+        "managed-agents" => anyhow::bail!(
+            "provider `managed-agents` requires building with `--features provider-managed-agents`"
+        ),
         other => anyhow::bail!(
-            "unknown provider: {other} (known: `memory`, `claude` [feature `provider-claude`])"
+            "unknown provider: {other} \
+             (known: `memory`, `claude` [feature `provider-claude`], \
+              `managed-agents` [feature `provider-managed-agents`])"
         ),
     };
 

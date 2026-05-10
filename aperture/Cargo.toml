@@ -8,6 +8,7 @@ members = [
     "crates/aperture-tui",
     "crates/aperture-wasm",
     "crates/aperture-providers-claude",
+    "crates/aperture-providers-managed-agents",
 ]
 
 [workspace.package]
