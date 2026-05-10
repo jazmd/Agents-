@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
 import useEmblaCarousel from 'embla-carousel-react';
+import Autoplay from 'embla-carousel-autoplay';
 import { 
   ArrowRight, 
   Code, 
@@ -57,6 +58,7 @@ const rufloCapabilities = [
 export default function Landing() {
   const [scrolled, setScrolled] = useState(false);
   const [emblaRef, emblaApi] = useEmblaCarousel({ loop: true, align: 'start' });
+  const [heroEmblaRef] = useEmblaCarousel({ loop: true }, [Autoplay({ delay: 3000, stopOnInteraction: false })]);
 
   const scrollPrev = useCallback(() => {
     if (emblaApi) emblaApi.scrollPrev();
@@ -169,13 +171,23 @@ export default function Landing() {
             <div className="relative group">
               <div className="absolute -inset-4 bg-gradient-to-tr from-blue-600/20 to-purple-600/20 rounded-[3rem] blur-2xl opacity-50 group-hover:opacity-75 transition-opacity duration-500" />
               <div className="relative aspect-square rounded-[2.5rem] bg-slate-100 overflow-hidden border border-slate-200 shadow-2xl">
-                <div className="absolute inset-0 bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center">
-                  <div className="absolute inset-0 flex flex-col items-center justify-center p-12 text-center space-y-4 bg-white/40 backdrop-blur-sm">
-                    <div className="w-20 h-20 rounded-2xl bg-white shadow-lg flex items-center justify-center mb-4">
-                      <Sparkles className="w-10 h-10 text-blue-600" />
-                    </div>
-                    <h4 className="text-2xl font-bold text-slate-900 tracking-tight">Innovation Mindset</h4>
-                    <p className="text-sm text-slate-500 italic max-w-xs font-medium">"The best way to predict the future is to build it autonomously."</p>
+                <div className="embla w-full h-full" ref={heroEmblaRef}>
+                  <div className="embla__container h-full">
+                    {[
+                      "https://images.unsplash.com/photo-1522071820081-009f0129c71c?auto=format&fit=crop&q=80&w=800",
+                      "https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&q=80&w=800",
+                      "https://images.unsplash.com/photo-1542744173-8e7e53415bb0?auto=format&fit=crop&q=80&w=800",
+                      "https://images.unsplash.com/photo-1531482615713-2afd69097998?auto=format&fit=crop&q=80&w=800"
+                    ].map((imgUrl, i) => (
+                      <div key={i} className="embla__slide w-full h-full flex-[0_0_100%] relative">
+                        <img 
+                          src={imgUrl} 
+                          alt="Building products" 
+                          className="w-full h-full object-cover"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 via-transparent to-transparent" />
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
