@@ -82,6 +82,33 @@ pub trait DataSource: Send + Sync {
     async fn corp_actions(&self, _symbol: &str) -> Result<Payload, DataError> {
         Err(not_supported("corp_actions"))
     }
+    async fn earnings_calendar(&self, _window_days: Option<u32>) -> Result<Payload, DataError> {
+        Err(not_supported("earnings_calendar"))
+    }
+    async fn movers(&self, _scope: Option<&str>) -> Result<Payload, DataError> {
+        Err(not_supported("movers"))
+    }
+    async fn screener(&self, _criteria: Option<&str>) -> Result<Payload, DataError> {
+        Err(not_supported("screener"))
+    }
+    async fn index_members(&self, _symbol: &str) -> Result<Payload, DataError> {
+        Err(not_supported("index_members"))
+    }
+    async fn vol_surface(&self, _symbol: &str) -> Result<Payload, DataError> {
+        Err(not_supported("vol_surface"))
+    }
+    async fn technicals(&self, _symbol: &str, _indicator: &str) -> Result<Payload, DataError> {
+        Err(not_supported("technicals"))
+    }
+    async fn correlation_matrix(&self, _symbols: &[String]) -> Result<Payload, DataError> {
+        Err(not_supported("correlation_matrix"))
+    }
+    async fn filings(&self, _symbol: &str) -> Result<Payload, DataError> {
+        Err(not_supported("filings"))
+    }
+    async fn sentiment(&self, _symbol: &str) -> Result<Payload, DataError> {
+        Err(not_supported("sentiment"))
+    }
 }
 
 fn not_supported(what: &str) -> DataError {

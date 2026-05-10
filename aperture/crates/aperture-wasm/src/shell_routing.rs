@@ -242,6 +242,120 @@ pub fn build_route(
                 }),
             ))
         }
+
+        // Wave-3 panes: earnings/movers/screen/members/ivol/tech/corr/filings/
+        // order/sentiment. All speak to their `pane.<id>` address.
+        Verb::Earnings => {
+            let mut p = json!({"verb": "EARNINGS"});
+            if let Some(w) = first_arg(&cmd.args).and_then(|s| s.parse::<u32>().ok()) {
+                p["window_days"] = json!(w);
+            }
+            Some((MessageType::Direct, "aperture:pane.earnings".into(), p))
+        }
+        Verb::Movers => {
+            let mut p = json!({"verb": "MOVERS"});
+            if let Some(scope) = first_arg(&cmd.args) {
+                p["scope"] = json!(scope);
+            }
+            Some((MessageType::Direct, "aperture:pane.movers".into(), p))
+        }
+        Verb::Screen => {
+            let mut p = json!({"verb": "SCREEN"});
+            // The criteria is a quoted string when present; otherwise the args
+            // are joined into a free-form expression.
+            let criteria = cmd
+                .args
+                .iter()
+                .find_map(|a| match a {
+                    Arg::Quoted(s) => Some(s.clone()),
+                    _ => None,
+                })
+                .or_else(|| {
+                    if cmd.args.is_empty() {
+                        None
+                    } else {
+                        Some(
+                            cmd.args
+                                .iter()
+                                .map(|a| a.as_str())
+                                .collect::<Vec<_>>()
+                                .join(" "),
+                        )
+                    }
+                });
+            if let Some(c) = criteria {
+                p["criteria"] = json!(c);
+            }
+            Some((MessageType::Direct, "aperture:pane.screen".into(), p))
+        }
+        Verb::Members => {
+            let symbol = cmd.symbol.clone()?;
+            Some((
+                MessageType::Direct,
+                "aperture:pane.members".into(),
+                json!({"verb": "MEMBERS", "symbol": symbol}),
+            ))
+        }
+        Verb::Ivol => {
+            let symbol = cmd.symbol.clone()?;
+            Some((
+                MessageType::Direct,
+                "aperture:pane.ivol".into(),
+                json!({"verb": "IVOL", "symbol": symbol}),
+            ))
+        }
+        Verb::Tech => {
+            let symbol = cmd.symbol.clone()?;
+            let indicator = first_arg(&cmd.args).unwrap_or_else(|| "SMA".into());
+            Some((
+                MessageType::Direct,
+                "aperture:pane.tech".into(),
+                json!({"verb": "TECH", "symbol": symbol, "indicator": indicator}),
+            ))
+        }
+        Verb::Corr => {
+            let symbols: Vec<String> = cmd
+                .args
+                .iter()
+                .map(|a| a.as_str().to_ascii_uppercase())
+                .collect();
+            Some((
+                MessageType::Direct,
+                "aperture:pane.corr".into(),
+                json!({"verb": "CORR", "symbols": symbols}),
+            ))
+        }
+        Verb::Filings => {
+            let symbol = cmd.symbol.clone()?;
+            Some((
+                MessageType::Direct,
+                "aperture:pane.filings".into(),
+                json!({"verb": "FILINGS", "symbol": symbol}),
+            ))
+        }
+        Verb::Order => {
+            // Free-form ORDER from the cmdbar: forward args verbatim. The
+            // SvelteKit host is expected to enrich with side / qty / type via
+            // a richer UI.
+            let mut p = json!({"verb": "ORDER", "args": args_to_json(&cmd.args)});
+            if let Some(s) = cmd.symbol.clone() {
+                p["symbol"] = json!(s);
+            }
+            Some((MessageType::Direct, "aperture:pane.order".into(), p))
+        }
+        Verb::Blotter => Some((
+            MessageType::Direct,
+            "aperture:pane.order".into(),
+            json!({"verb": "BLOTTER"}),
+        )),
+        Verb::Sentiment => {
+            let symbol = cmd.symbol.clone()?;
+            Some((
+                MessageType::Direct,
+                "aperture:pane.sentiment".into(),
+                json!({"verb": "SENTIMENT", "symbol": symbol}),
+            ))
+        }
     }
 }
 
@@ -303,6 +417,17 @@ pub fn verb_str(v: &Verb) -> &'static str {
         Verb::Corpact => "CORPACT",
         Verb::Inbox => "INBOX",
         Verb::Export => "EXPORT",
+        Verb::Earnings => "EARNINGS",
+        Verb::Movers => "MOVERS",
+        Verb::Screen => "SCREEN",
+        Verb::Members => "MEMBERS",
+        Verb::Ivol => "IVOL",
+        Verb::Tech => "TECH",
+        Verb::Corr => "CORR",
+        Verb::Filings => "FILINGS",
+        Verb::Order => "ORDER",
+        Verb::Blotter => "BLOTTER",
+        Verb::Sentiment => "SENTIMENT",
     }
 }
 

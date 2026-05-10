@@ -25,6 +25,17 @@ pub mod corpact;
 pub mod inbox;
 pub mod export;
 
+pub mod earnings;
+pub mod movers;
+pub mod screen;
+pub mod members;
+pub mod ivol;
+pub mod tech;
+pub mod corr;
+pub mod filings;
+pub mod order;
+pub mod sentiment;
+
 pub use quote::QuotePane;
 pub use chart::ChartPane;
 pub use watchlist::WatchlistPane;
@@ -42,6 +53,17 @@ pub use risk::RiskPane;
 pub use corpact::CorpactPane;
 pub use inbox::InboxPane;
 pub use export::ExportPane;
+
+pub use earnings::EarningsPane;
+pub use movers::MoversPane;
+pub use screen::ScreenPane;
+pub use members::MembersPane;
+pub use ivol::IvolPane;
+pub use tech::TechPane;
+pub use corr::CorrPane;
+pub use filings::FilingsPane;
+pub use order::OrderPane;
+pub use sentiment::SentimentPane;
 
 #[cfg(test)]
 pub(crate) mod test_helpers {

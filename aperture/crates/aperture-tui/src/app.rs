@@ -182,7 +182,18 @@ async fn execute_line(state: &mut AppState, source: &dyn DataSource, line: &str)
             | Verb::Risk
             | Verb::Corpact
             | Verb::Inbox
-            | Verb::Export => {
+            | Verb::Export
+            | Verb::Earnings
+            | Verb::Movers
+            | Verb::Screen
+            | Verb::Members
+            | Verb::Ivol
+            | Verb::Tech
+            | Verb::Corr
+            | Verb::Filings
+            | Verb::Order
+            | Verb::Blotter
+            | Verb::Sentiment => {
                 // Wide capability surface — these verbs are served by the
                 // dedicated `--agent=pane.<id>` processes via the swarm bus.
                 // The in-process ratatui shell only renders the four core
@@ -212,6 +223,16 @@ fn verb_route(v: &Verb) -> &'static str {
         Verb::Corpact => "corpact",
         Verb::Inbox => "inbox",
         Verb::Export => "export",
+        Verb::Earnings => "earnings",
+        Verb::Movers => "movers",
+        Verb::Screen => "screen",
+        Verb::Members => "members",
+        Verb::Ivol => "ivol",
+        Verb::Tech => "tech",
+        Verb::Corr => "corr",
+        Verb::Filings => "filings",
+        Verb::Order | Verb::Blotter => "order",
+        Verb::Sentiment => "sentiment",
         _ => "?",
     }
 }

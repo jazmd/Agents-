@@ -43,6 +43,17 @@ pub async fn dispatch(agent_id: &str) -> Result<bool> {
         "pane.inbox" => run!(panes::InboxPane::new()),
         "pane.export" => run!(panes::ExportPane::new()),
 
+        "pane.earnings" => run!(panes::EarningsPane::new()),
+        "pane.movers" => run!(panes::MoversPane::new()),
+        "pane.screen" => run!(panes::ScreenPane::new()),
+        "pane.members" => run!(panes::MembersPane::new()),
+        "pane.ivol" => run!(panes::IvolPane::new()),
+        "pane.tech" => run!(panes::TechPane::new()),
+        "pane.corr" => run!(panes::CorrPane::new()),
+        "pane.filings" => run!(panes::FilingsPane::new()),
+        "pane.order" => run!(panes::OrderPane::new()),
+        "pane.sentiment" => run!(panes::SentimentPane::new()),
+
         "agent.data" => run!(data::DataAgent::new()),
         _ => Ok(false),
     }
@@ -67,6 +78,16 @@ pub const KNOWN_AGENTS: &[&str] = &[
     "pane.corpact",
     "pane.inbox",
     "pane.export",
+    "pane.earnings",
+    "pane.movers",
+    "pane.screen",
+    "pane.members",
+    "pane.ivol",
+    "pane.tech",
+    "pane.corr",
+    "pane.filings",
+    "pane.order",
+    "pane.sentiment",
     "agent.data",
 ];
 

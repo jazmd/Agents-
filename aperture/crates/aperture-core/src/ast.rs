@@ -24,6 +24,17 @@ pub enum Verb {
     Corpact,
     Inbox,
     Export,
+    Earnings,
+    Movers,
+    Screen,
+    Members,
+    Ivol,
+    Tech,
+    Corr,
+    Filings,
+    Order,
+    Blotter,
+    Sentiment,
 }
 
 impl Verb {
@@ -73,6 +84,28 @@ impl Verb {
             Some(Verb::Inbox)
         } else if eq("EXPORT") {
             Some(Verb::Export)
+        } else if eq("EARNINGS") {
+            Some(Verb::Earnings)
+        } else if eq("MOVERS") {
+            Some(Verb::Movers)
+        } else if eq("SCREEN") {
+            Some(Verb::Screen)
+        } else if eq("MEMBERS") {
+            Some(Verb::Members)
+        } else if eq("IVOL") {
+            Some(Verb::Ivol)
+        } else if eq("TECH") {
+            Some(Verb::Tech)
+        } else if eq("CORR") {
+            Some(Verb::Corr)
+        } else if eq("FILINGS") {
+            Some(Verb::Filings)
+        } else if eq("ORDER") {
+            Some(Verb::Order)
+        } else if eq("BLOTTER") {
+            Some(Verb::Blotter)
+        } else if eq("SENTIMENT") {
+            Some(Verb::Sentiment)
         } else {
             None
         }
@@ -90,6 +123,11 @@ impl Verb {
                 | Verb::Insider
                 | Verb::Financials
                 | Verb::Corpact
+                | Verb::Members
+                | Verb::Ivol
+                | Verb::Tech
+                | Verb::Filings
+                | Verb::Sentiment
         )
     }
 }

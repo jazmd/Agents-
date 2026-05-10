@@ -95,7 +95,13 @@ fn bare_verb(t: &Tok) -> Option<Verb> {
         | Verb::Fx
         | Verb::Risk
         | Verb::Inbox
-        | Verb::Export) => Some(v),
+        | Verb::Export
+        | Verb::Earnings
+        | Verb::Movers
+        | Verb::Screen
+        | Verb::Corr
+        | Verb::Order
+        | Verb::Blotter) => Some(v),
         _ => None,
     }
 }
