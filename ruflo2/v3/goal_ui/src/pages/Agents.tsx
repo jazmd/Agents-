@@ -44,9 +44,7 @@ import { AgentActivityPanel } from "@/components/agents/AgentActivityPanel";
 import { RealTimeEventLog } from "@/components/agents/RealTimeEventLog";
 import { ExecutionDashboard } from "@/components/agents/ExecutionDashboard";
 import { ResearchReviewCard } from "@/components/ResearchReviewCard";
-import { fetchRufloActivity, RufloActivity } from "@/lib/rufloActivity";
-import { fetchExecutorActivity, runExecutorSmokeTask, ExecutorRun } from "@/lib/executorActivity";
-import { executorProof, executorProofUpdatedAt } from "@/lib/executorProof";
+import { Navbar } from "@/components/Navbar";
 
 type AgentStatus = "idle" | "working" | "blocked";
 type SwarmMode = "distributed" | "pipeline" | "collaborative";
@@ -60,14 +58,6 @@ interface Agent {
 }
 
 export default function Agents() {
-  const [rufloActivity, setRufloActivity] = useState<RufloActivity | null>(null);
-  const [rufloError, setRufloError] = useState<string | null>(null);
-  const [isRufloConnected, setIsRufloConnected] = useState(false);
-
-  const [executorRuns, setExecutorRuns] = useState<ExecutorRun[]>([]);
-  const [executorError, setExecutorError] = useState<string | null>(null);
-  const [executorBusy, setExecutorBusy] = useState(false);
-
   const [goal, setGoal] = useState("");
   const [swarmMode, setSwarmMode] = useState<SwarmMode>("distributed");
   const [isRunning, setIsRunning] = useState(false);
@@ -97,72 +87,6 @@ export default function Agents() {
     compileCheck: true,
     testCoverage: 85,
     securityScore: 92,
-  });
-
-  useEffect(() => {
-    let mounted = true;
-    let timer: number | undefined;
-    const controller = new AbortController();
-
-    const poll = async () => {
-      try {
-        const [data, exec] = await Promise.all([
-          fetchRufloActivity(controller.signal),
-          fetchExecutorActivity(controller.signal).catch(() => ({ runs: [] })),
-        ]);
-        if (!mounted) return;
-        setRufloActivity(data);
-        setRufloError(null);
-        setIsRufloConnected(true);
-        setExecutorRuns(exec.runs || []);
-      } catch (err) {
-        if (!mounted) return;
-        const message = err instanceof Error ? err.message : "Failed to load ruflo activity";
-        setRufloError(message);
-        setIsRufloConnected(false);
-      } finally {
-        if (!mounted) return;
-        timer = window.setTimeout(poll, 2000);
-      }
-    };
-
-    poll();
-
-    return () => {
-      mounted = false;
-      controller.abort();
-      if (timer) window.clearTimeout(timer);
-    };
-  }, []);
-
-  const lastExecutorRun = executorRuns[0];
-
-  const handleRunExecutorSmoke = async () => {
-    setExecutorBusy(true);
-    setExecutorError(null);
-    try {
-      const run = await runExecutorSmokeTask();
-      setExecutorRuns((prev) => [run, ...prev].slice(0, 20));
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Executor failed";
-      setExecutorError(message);
-    } finally {
-      setExecutorBusy(false);
-    }
-  };
-
-  const coderAgents = (rufloActivity?.agents?.agents || []).filter((a: any) => {
-    const rawType = a?.type ?? a?.agentType;
-    const rawName = a?.name ?? a?.agentName ?? a?.agentId ?? a?.id;
-    const t = typeof rawType === "string" ? rawType.toLowerCase() : "";
-    const n = typeof rawName === "string" ? rawName.toLowerCase() : "";
-    return t.includes("coder") || n.includes("coder") || n.includes("coding");
-  });
-
-  const runningTasks = (rufloActivity?.tasks?.tasks || []).filter((t: any) => {
-    const rawStatus = t?.status ?? t?.taskStatus;
-    const s = typeof rawStatus === "string" ? rawStatus.toLowerCase() : "";
-    return s.includes("running") || s.includes("in_progress") || s.includes("in progress");
   });
 
   const handleGeneratePlan = () => {
@@ -714,12 +638,13 @@ export default function Agents() {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
-      <div className="container mx-auto p-6 space-y-6">
+    <div className="min-h-screen bg-slate-50/50 font-sans">
+      <Navbar />
+      <div className="container mx-auto p-6 pt-28 space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-primary via-purple-500 to-blue-500 bg-clip-text text-transparent">
+            <h1 className="text-4xl font-bold tracking-tight text-slate-900">
               Coding Agent Swarm
             </h1>
             <p className="text-muted-foreground mt-2">
@@ -727,171 +652,6 @@ export default function Agents() {
             </p>
           </div>
         </div>
-
-        {/* Live Activity (connected to local ruflo CLI via Vite middleware) */}
-        <Card className="border-2 border-primary/10">
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between gap-4">
-              <div className="space-y-1">
-                <CardTitle className="flex items-center gap-2">
-                  <Network className="w-5 h-5 text-primary" />
-                  Live Swarm Activity
-                </CardTitle>
-                <CardDescription>
-                  {isRufloConnected ? "Connected to local ruflo CLI" : "Disconnected (simulation below still works)"}
-                </CardDescription>
-              </div>
-              <Badge variant={isRufloConnected ? "default" : "destructive"}>
-                {isRufloConnected ? "Connected" : "Disconnected"}
-              </Badge>
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {rufloError && (
-              <div className="text-sm text-destructive break-words">
-                {rufloError}
-              </div>
-            )}
-
-            {executorError && (
-              <div className="text-sm text-destructive break-words">
-                {executorError}
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">Swarm</CardTitle>
-                  <CardDescription className="text-xs">
-                    {rufloActivity?.swarm?.id || "No swarm id"}
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span>Status</span>
-                    <Badge variant="secondary">{rufloActivity?.swarm?.status || "unknown"}</Badge>
-                  </div>
-                  <div className="flex items-center justify-between text-sm gap-2">
-                    <span>Objective</span>
-                    <span className="text-muted-foreground text-right truncate max-w-[220px]">
-                      {rufloActivity?.swarm?.objective || "-"}
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span>Progress</span>
-                    <span className="text-muted-foreground">{rufloActivity?.swarm?.progress ?? 0}%</span>
-                  </div>
-                  <Progress value={rufloActivity?.swarm?.progress ?? 0} />
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">Coder Agents</CardTitle>
-                  <CardDescription className="text-xs">Live agents matching coder/coding</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span>Total</span>
-                    <span className="text-muted-foreground">{coderAgents.length}</span>
-                  </div>
-                  <div className="text-xs text-muted-foreground space-y-1 max-h-[120px] overflow-auto">
-                    {coderAgents.length === 0 ? (
-                      <div>No coder agents active.</div>
-                    ) : (
-                      coderAgents.slice(0, 10).map((a: any, idx: number) => (
-                        <div
-                          key={`${a.id || a.agentId || a.name || a.agentName || "agent"}-${idx}`}
-                          className="flex items-center justify-between gap-2"
-                        >
-                          <span className="truncate">{a.name || a.agentName || a.agentId || a.id || "agent"}</span>
-                          <Badge variant="outline" className="shrink-0">{String(a.status || a.taskStatus || "unknown")}</Badge>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm">Running Tasks</CardTitle>
-                  <CardDescription className="text-xs">From `ruflo task list`</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span>Running</span>
-                    <span className="text-muted-foreground">{runningTasks.length}</span>
-                  </div>
-                  <div className="text-xs text-muted-foreground space-y-1 max-h-[120px] overflow-auto">
-                    {runningTasks.length === 0 ? (
-                      <div>No running tasks.</div>
-                    ) : (
-                      runningTasks.slice(0, 10).map((t: any, idx: number) => (
-                        <div
-                          key={`${t.id || t.taskId || "task"}-${idx}`}
-                          className="flex items-center justify-between gap-2"
-                        >
-                          <span className="truncate">{t.description || t.taskDescription || t.id || t.taskId || "task"}</span>
-                          <Badge variant="outline" className="shrink-0">{String(t.status || t.taskStatus || "unknown")}</Badge>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
-
-            <Card className="border border-primary/15">
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <CardTitle className="text-sm">Codex + Gemini Executor</CardTitle>
-                    <CardDescription className="text-xs">
-                      Click to run a Gemini-powered code edit (updates `src/lib/executorProof.ts`)
-                    </CardDescription>
-                  </div>
-                  <Button size="sm" onClick={handleRunExecutorSmoke} disabled={executorBusy} className="gap-2">
-                    {executorBusy ? <RotateCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-                    {executorBusy ? "Running" : "Run smoke task"}
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent className="space-y-2 text-sm">
-                <div className="flex items-center justify-between gap-2">
-                  <span>Proof</span>
-                  <Badge variant="outline" className="max-w-[70%] truncate">
-                    {executorProof}
-                  </Badge>
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <span>Updated</span>
-                  <span className="text-muted-foreground truncate">{executorProofUpdatedAt}</span>
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <span>Last run</span>
-                  {lastExecutorRun ? (
-                    <Badge
-                      variant={
-                        lastExecutorRun.status === "succeeded"
-                          ? "default"
-                          : lastExecutorRun.status === "failed"
-                            ? "destructive"
-                            : "secondary"
-                      }
-                      className="truncate max-w-[70%]"
-                    >
-                      {lastExecutorRun.status} · {lastExecutorRun.id}
-                    </Badge>
-                  ) : (
-                    <span className="text-muted-foreground">none</span>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </CardContent>
-        </Card>
 
         {/* Goal Input */}
         <Card className="border-2 border-primary/20">
@@ -936,26 +696,26 @@ export default function Agents() {
                 currentState={currentState}
                 goalState={goalState}
                 stateGaps={stateGaps}
-                primaryColor="#a855f7"
-                accentColor="#3b82f6"
+                primaryColor="#0088FF"
+                accentColor="#10B981"
               />
             </div>
 
             <div>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold flex items-center gap-2 animate-fade-in">
-                  <Bot className="w-5 h-5 text-purple-500" />
+                  <Bot className="w-5 h-5 text-blue-500" />
                   Research Phase Progress
                 </h3>
                 {isRunning && (
-                  <Badge variant="outline" className="animate-pulse bg-purple-500/10 text-purple-400 border-purple-500/50">
-                    <span className="inline-block w-2 h-2 bg-purple-500 rounded-full mr-2 animate-pulse"></span>
+                  <Badge variant="outline" className="animate-pulse bg-blue-500/10 text-blue-500 border-blue-500/50 rounded-full">
+                    <span className="inline-block w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></span>
                     Researching...
                   </Badge>
                 )}
               </div>
               <div className="space-y-4 relative">
-                <div className="absolute left-2 top-6 bottom-6 w-0.5 bg-gradient-to-b from-purple-500/50 via-blue-500/50 to-green-500/50" 
+                <div className="absolute left-2 top-6 bottom-6 w-0.5 bg-gradient-to-b from-blue-500/50 via-indigo-500/50 to-emerald-500/50" 
                      style={{ 
                        height: `${shouldShowPhase(researchPhases.length - 1) ? '100%' : `${(currentPhase / researchPhases.length) * 100}%`}`,
                        transition: 'height 0.5s ease-out'
@@ -980,13 +740,13 @@ export default function Agents() {
                         status={getPhaseStatus(index)}
                         data={phase.data}
                         metrics={phase.metrics}
-                        primaryColor="#a855f7"
-                        accentColor="#3b82f6"
-                        cardBackgroundColor="#1a1a1a"
-                        cardBorderColor="#404040"
-                        textColor="#ffffff"
-                        secondaryTextColor="#a3a3a3"
-                        successColor="#22c55e"
+                        primaryColor="#0088FF"
+                        accentColor="#10B981"
+                        cardBackgroundColor="#ffffff"
+                        cardBorderColor="#E2E8F0"
+                        textColor="#2A2A3C"
+                        secondaryTextColor="#64748B"
+                        successColor="#10B981"
                         animationSpeed="normal"
                         compactMode={false}
                       />

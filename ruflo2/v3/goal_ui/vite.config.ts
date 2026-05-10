@@ -65,14 +65,20 @@ function rufloApiPlugin() {
             return json(res, 200, JSON.parse(stdout));
           }
 
+          if (req.url === "/api/ruflo/plugins") {
+            const { stdout } = await runRuflo(["plugins", "list", "--format", "json"]);
+            return json(res, 200, JSON.parse(stdout));
+          }
+
           if (req.url === "/api/ruflo/activity") {
-            const [status, swarm, agents, tasks] = await Promise.all([
+            const [status, swarm, agents, tasks, plugins] = await Promise.all([
               runRuflo(["status", "--format", "json"]).then((r) => JSON.parse(r.stdout)),
               runRuflo(["swarm", "status", "--format", "json"]).then((r) => JSON.parse(r.stdout)),
               runRuflo(["agent", "list", "--format", "json"]).then((r) => JSON.parse(r.stdout)),
               runRuflo(["task", "list", "--format", "json"]).then((r) => JSON.parse(r.stdout)),
+              runRuflo(["plugins", "list", "--format", "json"]).then((r) => JSON.parse(r.stdout)).catch(() => ({ plugins: [] })),
             ]);
-            return json(res, 200, { status, swarm, agents, tasks });
+            return json(res, 200, { status, swarm, agents, tasks, plugins });
           }
 
           return json(res, 404, { error: "Unknown endpoint" });

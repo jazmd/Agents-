@@ -5,7 +5,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import Landing from "./pages/Landing";
 import Index from "./pages/Index";
-import Demo from "./pages/Demo";
 import Agents from "./pages/Agents";
 import NotFound from "./pages/NotFound";
 
@@ -20,8 +19,9 @@ const App = () => (
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/goap" element={<Index />} />
-          <Route path="/demo" element={<Demo />} />
+          <Route path="/research" element={<Index />} />
           <Route path="/agents" element={<Agents />} />
+          <Route path="/platform" element={<Landing />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>

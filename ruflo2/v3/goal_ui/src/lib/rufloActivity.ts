@@ -49,11 +49,22 @@ export type RufloTask = {
   [key: string]: unknown;
 };
 
+export type RufloPlugin = {
+  id?: string;
+  name?: string;
+  version?: string;
+  status?: string;
+  type?: string;
+  description?: string;
+  [key: string]: unknown;
+};
+
 export type RufloActivity = {
   status: RufloSystemStatus;
   swarm: RufloSwarmStatus;
   agents: { agents: RufloAgent[]; total: number };
   tasks: { tasks: RufloTask[]; total: number };
+  plugins: { plugins: RufloPlugin[]; total: number };
 };
 
 export async function fetchRufloActivity(signal?: AbortSignal): Promise<RufloActivity> {

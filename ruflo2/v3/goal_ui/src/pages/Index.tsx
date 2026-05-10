@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Link as RouterLink } from "react-router-dom";
+import useEmblaCarousel from 'embla-carousel-react';
 import {
   Brain,
   Search,
@@ -25,8 +26,14 @@ import {
   ExternalLink,
   Code,
   Play,
+  Briefcase,
+  Users,
+  BarChart,
+  Globe,
+  Layers,
+  Cpu
 } from "lucide-react";
-import { AgentStep } from "@/components/AgentStep";
+import { AgentStep, StepStatus } from "@/components/AgentStep";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -36,10 +43,10 @@ import { ResearchReportModal } from "@/components/ResearchReportModal";
 import { ReviseResearchForm, type ResearchConfig } from "@/components/ReviseResearchForm";
 import { StateAssessmentCard } from "@/components/StateAssessmentCard";
 import { GOAPConfigDisplay } from "@/components/GOAPConfigDisplay";
-import { GOAPPlanner, type Step } from "@/lib/goapPlanner";
-import { createResearchGOAPActions, createResearchWorldStates } from "@/lib/goapResearchTemplate";
+import { GOAPPlanner, parseGoal, type Step, type DataItem } from "@/lib/goapPlanner";
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
+import { Navbar } from "@/components/Navbar";
 
 interface WidgetConfig {
   primaryColor: string;
@@ -68,9 +75,27 @@ interface WidgetConfig {
 const defaultResearchConfig: ResearchConfig = {
   goal: "",
   stateDefinition: {
-    currentState: { goalDefined: true, informationGathered: false },
-    goalState: { verified: true, insightsGenerated: true },
-    stateGaps: ["Information needs to be gathered", "Analysis required", "Insights need generation"],
+    currentState: { 
+      goalDefined: true, 
+      goalParsed: false, 
+      stateAssessed: false, 
+      informationGathered: false, 
+      documentsAnalyzed: false, 
+      knowledgeSynthesized: false, 
+      insightsGenerated: false, 
+      verified: false 
+    },
+    goalState: { 
+      goalDefined: true, 
+      goalParsed: true, 
+      stateAssessed: true, 
+      informationGathered: true, 
+      documentsAnalyzed: true, 
+      knowledgeSynthesized: true, 
+      insightsGenerated: true, 
+      verified: true 
+    },
+    stateGaps: ["Goal needs to be parsed", "Information needs to be gathered", "Analysis required", "Insights need generation", "Results need verification"],
   },
   researchGuidance: {
     focusAreas: [],
@@ -129,27 +154,27 @@ Always include sources, confidence levels, and timestamps when available.`,
 const Index = () => {
   const { toast } = useToast();
   const [widgetConfig, setWidgetConfig] = useState<WidgetConfig>({
-    primaryColor: "#8b5cf6",
-    accentColor: "#22c55e",
-    backgroundColor: "#1a1a1a",
-    cardBackgroundColor: "#262626",
-    cardBorderColor: "#404040",
-    textColor: "#ffffff",
-    secondaryTextColor: "#a3a3a3",
-    successColor: "#22c55e",
-    title: "Goal-Oriented Action Planning",
-    description: "AI-powered research planning using A* pathfinding and dynamic agent coordination",
-    brandName: "",
+    primaryColor: "#0088FF",
+    accentColor: "#0088FF",
+    backgroundColor: "#F8FAFC",
+    cardBackgroundColor: "#ffffff",
+    cardBorderColor: "#E2E8F0",
+    textColor: "#2A2A3C",
+    secondaryTextColor: "#64748B",
+    successColor: "#10B981",
+    title: "GOAPsimplified",
+    description: "Autonomous AI agents that turn plain-English goals into executable plans using Goal-Oriented Action Planning (GOAP).",
+    brandName: "FAIDHIFAHMI PLATFORM",
     defaultGoal: "Research the latest advancements in quantum computing",
-    fontFamily: "system-ui",
-    borderRadius: "0.5rem",
+    fontFamily: "Schibsted Grotesk, sans-serif",
+    borderRadius: "2rem",
     animationSpeed: "normal",
-    cardSpacing: "1rem",
+    cardSpacing: "1.5rem",
     showMetrics: true,
     showStats: true,
     compactMode: false,
     enableAI: true,
-    aiModel: "google/gemini-2.5-flash",
+    aiModel: "google/gemini-2.0-flash",
   });
   const [showCustomizer, setShowCustomizer] = useState(false);
   const [userGoal, setUserGoal] = useState<string>("");
@@ -170,6 +195,386 @@ const Index = () => {
   const goapCardsRef = useRef<HTMLDivElement>(null);
   const objectiveRef = useRef<HTMLDivElement>(null);
   const finalAnalysisRef = useRef<HTMLDivElement>(null);
+  const [emblaRef, emblaApi] = useEmblaCarousel({ loop: true, align: 'start' });
+
+  const scrollPrev = useCallback(() => {
+    if (emblaApi) emblaApi.scrollPrev();
+  }, [emblaApi]);
+
+  const scrollNext = useCallback(() => {
+    if (emblaApi) emblaApi.scrollNext();
+  }, [emblaApi]);
+
+  const rufloCapabilities = [
+    {
+      title: "Multi-Agent Swarms",
+      description: "Orchestrate 100+ specialized agents across machines and teams with zero-trust federation.",
+      icon: Users,
+      color: "#8B5CF6"
+    },
+    {
+      title: "Self-Learning Memory",
+      description: "Persistent AgentDB with HNSW indexing for 150x faster pattern retrieval and cross-session recall.",
+      icon: Brain,
+      color: "#06B6D4"
+    },
+    {
+      title: "GOAP A* Planning",
+      description: "Decompose high-level goals into executable plans using state-space search and adaptive replanning.",
+      icon: Target,
+      color: "#F59E0B"
+    },
+    {
+      title: "Agent Federation",
+      description: "Zero-trust protocol for agents to discover, authenticate, and collaborate across organizations.",
+      icon: Globe,
+      color: "#10B981"
+    },
+    {
+      title: "Neural Optimization",
+      description: "Self-improving local model layer using SONA patterns and ReasoningBank trajectory learning.",
+      icon: Cpu,
+      color: "#EF4444"
+    }
+  ];
+
+  // GOAP Action definitions
+  const createGOAPActions = (goal: string) => {
+    const { domain, action, keywords } = parseGoal(goal);
+    const keywordStr = keywords.join(", ");
+
+    return [
+      {
+        name: "analyzeGoal",
+        cost: 1,
+        preconditions: { goalDefined: true },
+        effects: { goalParsed: true },
+        stepGenerator: (userGoal: string) => ({
+          id: "1",
+          title: "Goal Analysis",
+          description: `Analyzing "${userGoal.slice(0, 60)}..." and breaking it down into actionable sub-goals.`,
+          icon: Target,
+          status: "pending" as StepStatus,
+          data: [
+            { 
+              text: "Parse objective", 
+              icon: FileText,
+              details: {
+                objective: "Extract and structure the high-level goal from natural language input",
+                preconditions: ["User input received", "NLP module initialized"],
+                effects: ["Structured goal object created", "Sub-goals identified"],
+                agents: ["Parser Agent", "NLP Agent"],
+              }
+            },
+            { 
+              text: "Identify dependencies", 
+              icon: Link,
+              details: {
+                objective: "Map relationships between actions and their requirements",
+                preconditions: ["Goal parsed", "Action library loaded"],
+                effects: ["Dependency graph generated", "Critical path identified"],
+                agents: ["Dependency Analyzer", "Graph Builder"],
+                sources: ["Action Registry", "State Definitions"]
+              }
+            },
+            { 
+              text: "Map state transitions", 
+              icon: Workflow,
+              details: {
+                objective: "Define how each action transforms the world state",
+                preconditions: ["Dependencies mapped", "State space defined"],
+                effects: ["Transition matrix created", "State reachability confirmed"],
+                agents: ["State Mapper", "Validator Agent"],
+                citations: ["GOAP: Goal-Oriented Action Planning - Orkin, J. (2006)"]
+              }
+            },
+          ],
+          metrics: [{ label: "Sub-goals", value: "3" }, { label: "Actions", value: "7" }],
+        }),
+      },
+      {
+        name: "assessState",
+        cost: 1,
+        preconditions: { goalParsed: true },
+        effects: { stateAssessed: true },
+        stepGenerator: () => ({
+          id: "2",
+          title: "State Assessment",
+          description: `Evaluating current knowledge about ${domain} and identifying information gaps.`,
+          icon: Brain,
+          status: "pending" as StepStatus,
+          data: [
+            { 
+              text: "Assessing current state...", 
+              icon: Database,
+              details: {
+                objective: `Assess current knowledge and capability state for ${goal}`,
+                effects: ["Baseline established", "Gaps identified"],
+                agents: ["State Assessor"],
+              }
+            },
+            { 
+              text: "Defining success criteria...", 
+              icon: CheckCircle2,
+              details: {
+                objective: `Define success criteria and validation requirements for ${domain}`,
+                preconditions: ["Goals defined"],
+                effects: ["Validation criteria set", "Acceptance tests defined"],
+              }
+            },
+            { 
+              text: "Analyzing gaps...", 
+              icon: TrendingUp,
+              details: {
+                objective: `Quantify differences between current and target state for ${action} in ${domain}`,
+                effects: ["Priority list generated", "Resource needs identified"],
+                agents: ["Gap Analyzer", "Priority Ranker"],
+              }
+            },
+          ],
+          metrics: [],
+        }),
+      },
+      {
+        name: "gatherInformation",
+        cost: 2,
+        preconditions: { stateAssessed: true },
+        effects: { informationGathered: true },
+        stepGenerator: () => ({
+          id: "3",
+          title: "Web Search",
+          description: `Conducting intelligent searches for: ${keywordStr}`,
+          icon: Search,
+          status: "pending" as StepStatus,
+          data: [
+            { 
+              text: `Searching for ${action} ${keywords[0] || "methods"}...`, 
+              icon: Search,
+              details: {
+                objective: `Execute targeted web searches for ${goal}`,
+                sources: ["arXiv.org", "Google Scholar", "ACM Digital Library"],
+                agents: ["Search Agent", "Query Optimizer"],
+              }
+            },
+            { 
+              text: "Gathering sources...", 
+              icon: Database,
+              details: {
+                objective: `Aggregate and catalog information sources for ${domain}`,
+                effects: ["Source database populated", "Relevance scores assigned"],
+              }
+            },
+            { 
+              text: "Calculating relevance...", 
+              icon: TrendingUp,
+              details: {
+                objective: `Calculate information quality and applicability metrics for ${keywordStr}`,
+                agents: ["Relevance Scorer", "ML Classifier"],
+                citations: ["Information Retrieval Metrics - Manning et al."]
+              }
+            },
+          ],
+          metrics: [],
+        }),
+      },
+      {
+        name: "analyzeDocuments",
+        cost: 2,
+        preconditions: { informationGathered: true },
+        effects: { documentsAnalyzed: true },
+        stepGenerator: () => ({
+          id: "4",
+          title: "Document Analysis",
+          description: `Processing documents related to ${domain} to extract key insights.`,
+          icon: FileSearch,
+          status: "pending" as StepStatus,
+          data: [
+            { 
+              text: "Parsing documents...", 
+              icon: FileText,
+              details: {
+                objective: `Extract structured data from ${domain} documents for ${goal}`,
+                preconditions: ["Documents retrieved", "Parser modules loaded"],
+                effects: ["Content extracted", "Metadata catalogued"],
+                agents: ["Document Parser", "Text Extractor"],
+                sources: ["PDF Parser", "HTML Scraper", "API Responses"]
+              }
+            },
+            { 
+              text: "Extracting insights...", 
+              icon: Lightbulb,
+              details: {
+                objective: `Identify key findings about ${keywordStr}`,
+                preconditions: ["Documents parsed", "NLP models ready"],
+                effects: ["Insights database populated", "Key points highlighted"],
+                agents: ["Insight Extractor", "NLP Analyzer", "Pattern Recognizer"],
+                citations: ["Named Entity Recognition - Nadeau & Sekine"]
+              }
+            },
+            { 
+              text: "Validating claims...", 
+              icon: Shield,
+              details: {
+                objective: `Verify factual accuracy for ${action} in ${domain}`,
+                preconditions: ["Insights extracted", "Validation rules defined"],
+                effects: ["Accuracy scores assigned", "Unreliable sources flagged"],
+                agents: ["Fact Checker", "Source Validator", "Cross-Referencer"],
+                sources: ["Fact-checking APIs", "Citation Databases"]
+              }
+            },
+          ],
+          metrics: [],
+        }),
+      },
+      {
+        name: "synthesizeKnowledge",
+        cost: 2,
+        preconditions: { documentsAnalyzed: true },
+        effects: { knowledgeSynthesized: true },
+        stepGenerator: () => ({
+          id: "5",
+          title: "Knowledge Synthesis",
+          description: `Synthesizing information from multiple ${domain} sources.`,
+          icon: GitBranch,
+          status: "pending" as StepStatus,
+          data: [
+            { 
+              text: "Cross-referencing sources...", 
+              icon: Link,
+              details: {
+                objective: `Correlate ${domain} information across multiple sources for ${goal}`,
+                preconditions: ["Multiple sources validated", "Correlation rules set"],
+                effects: ["Source connections mapped", "Confidence levels adjusted"],
+                agents: ["Cross-Referencer", "Correlation Analyzer"],
+                sources: ["Academic papers", "Industry reports", "Technical documentation"]
+              }
+            },
+            { 
+              text: "Merging concepts...", 
+              icon: GitBranch,
+              details: {
+                objective: `Combine ${keywordStr} concepts into unified knowledge structures`,
+                preconditions: ["Concepts identified", "Relationships defined"],
+                effects: ["Knowledge graph updated", "Concept taxonomy refined"],
+                agents: ["Concept Merger", "Ontology Builder", "Semantic Analyzer"],
+                citations: ["Knowledge Graphs - Hogan et al. (2021)"]
+              }
+            },
+            { 
+              text: "Resolving conflicts...", 
+              icon: CheckCircle2,
+              details: {
+                objective: `Handle contradictory information about ${action} in ${domain}`,
+                preconditions: ["Conflicts detected", "Resolution strategies loaded"],
+                effects: ["Consensus reached", "Conflict resolution logged"],
+                agents: ["Conflict Resolver", "Evidence Weigher", "Decision Maker"],
+                sources: ["Source credibility scores", "Temporal data", "Expert systems"]
+              }
+            },
+          ],
+          metrics: [{ label: "Sources", value: "18" }, { label: "Concepts", value: "12" }],
+        }),
+      },
+      {
+        name: "generateInsights",
+        cost: 2,
+        preconditions: { knowledgeSynthesized: true },
+        effects: { insightsGenerated: true },
+        stepGenerator: () => ({
+          id: "6",
+          title: "Insight Generation",
+          description: `Generating actionable insights for ${domain} based on research findings.`,
+          icon: Lightbulb,
+          status: "pending" as StepStatus,
+          data: [
+            { 
+              text: "Generating insights...", 
+              icon: Zap,
+              details: {
+                objective: `Create novel conclusions from synthesized ${domain} knowledge for ${goal}`,
+                preconditions: ["Knowledge synthesized", "Analysis complete"],
+                effects: ["Actionable insights created", "Recommendations formulated"],
+                agents: ["Insight Generator", "Recommendation Engine", "Inference Agent"],
+                citations: ["Automated Reasoning - Robinson (1965)", "AI Planning - Ghallab et al."]
+              }
+            },
+            { 
+              text: "Prioritizing by impact...", 
+              icon: TrendingUp,
+              details: {
+                objective: `Rank insights about ${keywordStr} by potential value and applicability`,
+                preconditions: ["Insights generated", "Impact metrics defined"],
+                effects: ["Priority scores assigned", "Implementation order set"],
+                agents: ["Priority Ranker", "Impact Analyzer", "ROI Calculator"],
+                sources: ["Business metrics", "Historical outcomes", "Expert heuristics"]
+              }
+            },
+            { 
+              text: "Validating feasibility...", 
+              icon: CheckCircle2,
+              details: {
+                objective: `Assess practicality of ${action} recommendations for ${domain}`,
+                preconditions: ["Insights prioritized", "Constraint database available"],
+                effects: ["Feasibility scores computed", "Resource needs estimated"],
+                agents: ["Feasibility Validator", "Resource Planner", "Constraint Checker"],
+                sources: ["Available resources", "Technical constraints", "Timeline requirements"]
+              }
+            },
+          ],
+          metrics: [],
+        }),
+      },
+      {
+        name: "verify",
+        cost: 1,
+        preconditions: { insightsGenerated: true },
+        effects: { verified: true },
+        stepGenerator: () => ({
+          id: "7",
+          title: "Verification",
+          description: "Cross-checking findings and ensuring accuracy before final presentation.",
+          icon: CheckCircle2,
+          status: "pending" as StepStatus,
+          data: [
+            { 
+              text: "Verifying insights...", 
+              icon: Shield,
+              details: {
+                objective: `Perform final quality assurance on ${domain} insights for ${goal}`,
+                preconditions: ["Insights validated", "Verification criteria set"],
+                effects: ["Quality confirmed", "Errors corrected"],
+                agents: ["Quality Assurance Agent", "Verification Bot", "Audit Agent"],
+                sources: ["Quality standards", "Best practices", "Validation protocols"]
+              }
+            },
+            { 
+              text: "Checking sources...", 
+              icon: Filter,
+              details: {
+                objective: `Re-validate all ${keywordStr} information sources for final output`,
+                preconditions: ["Sources catalogued", "Verification complete"],
+                effects: ["Source reliability confirmed", "Citations verified"],
+                agents: ["Source Checker", "Citation Validator", "Provenance Tracker"],
+                citations: ["Information Provenance - Buneman et al. (2001)"]
+              }
+            },
+            { 
+              text: "Calculating confidence...", 
+              icon: TrendingUp,
+              details: {
+                objective: `Calculate overall confidence in ${action} research findings`,
+                preconditions: ["All checks complete", "Confidence model loaded"],
+                effects: ["Final confidence score computed", "Report ready"],
+                agents: ["Confidence Calculator", "Statistical Analyzer", "Meta-Evaluator"],
+                sources: ["Validation results", "Source quality scores", "Cross-reference matches"]
+              }
+            },
+          ],
+          metrics: [],
+        }),
+      },
+    ];
+  };
 
   // Handle goal submission and planning
   const handleGoalSubmit = async (goal: string) => {
@@ -185,7 +590,7 @@ const Index = () => {
     setCurrentGOAPState(researchConfig.stateDefinition.currentState);
 
     // Create GOAP planner
-    const actions = createResearchGOAPActions(goal);
+    const actions = createGOAPActions(goal);
     const planner = new GOAPPlanner(actions);
 
     // Calculate adaptive metrics based on goal complexity and GOAP config
@@ -202,7 +607,27 @@ const Index = () => {
       : researchConfig.parameters.maxSteps; // Normal for closed mode
 
     // Define current and goal states
-    const { currentState, goalState } = createResearchWorldStates();
+    const currentState = {
+      goalDefined: true,
+      goalParsed: false,
+      stateAssessed: false,
+      informationGathered: false,
+      documentsAnalyzed: false,
+      knowledgeSynthesized: false,
+      insightsGenerated: false,
+      verified: false,
+    };
+
+    const goalState = {
+      goalDefined: true,
+      goalParsed: true,
+      stateAssessed: true,
+      informationGathered: true,
+      documentsAnalyzed: true,
+      knowledgeSynthesized: true,
+      insightsGenerated: true,
+      verified: true,
+    };
 
     // Generate plan
     const plan = planner.plan(currentState, goalState, goal);
@@ -547,7 +972,6 @@ const Index = () => {
       }, 300);
     }
   }, [showFinalAnalysis]);
-
   return (
     <div 
       className="min-h-screen transition-colors duration-300"
@@ -556,89 +980,51 @@ const Index = () => {
         fontFamily: widgetConfig.fontFamily,
       }}
     >
-      {/* Hero Section */}
-      <div className="border-b" style={{ borderColor: `${widgetConfig.primaryColor}40` }}>
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
-          <div className="text-center animate-fade-in">
-            <div 
-              className="inline-flex items-center gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded border text-xs sm:text-sm mb-3 sm:mb-4"
-              style={{ 
-                backgroundColor: `${widgetConfig.primaryColor}20`,
-                borderColor: `${widgetConfig.primaryColor}40`,
-                color: widgetConfig.primaryColor
-              }}
-            >
-              <Network className="w-3 h-3 sm:w-4 sm:h-4" />
-              <span className="text-xs sm:text-sm">{widgetConfig.brandName || "GOAP Multi-Agent System"}</span>
+      <Navbar />
+      {/* RuFlo Research Hero Spotlight */}
+      <header className="relative pt-32 pb-24 overflow-hidden border-b border-slate-100 bg-white">
+        <div className="absolute inset-0 -z-10 bg-[radial-gradient(45%_45%_at_50%_50%,#3b82f608_0%,transparent_100%)]" />
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="flex flex-col items-center text-center space-y-8 animate-in fade-in slide-in-from-top-10 duration-1000">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-50 text-blue-600 text-[10px] font-bold tracking-[0.2em] uppercase border border-blue-100">
+              <Zap className="w-3.5 h-3.5 fill-blue-600" />
+              Autonomous Research Engine
             </div>
-            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-semibold mb-2 sm:mb-3 px-2" style={{ color: "#f5f5f5" }}>
-              {widgetConfig.title}
-            </h1>
-            <p className="text-xs sm:text-sm max-w-xl mx-auto px-4 mb-3" style={{ color: "#a3a3a3" }}>
-              {widgetConfig.description}
+            
+            <div className="space-y-4 max-w-4xl">
+              <h1 className="text-5xl md:text-7xl font-black tracking-tight text-slate-900 mb-2 leading-[1.1]">
+                GOAP<span className="text-blue-600">simplified</span>
+              </h1>
+              <div className="h-1.5 w-24 bg-blue-600 mx-auto rounded-full" />
+            </div>
+            
+            <p className="text-xl md:text-2xl text-slate-500 max-w-3xl mx-auto leading-relaxed font-medium">
+              State-of-the-art Goal-Oriented Action Planning (GOAP) for autonomous, multi-step market and technology intelligence.
             </p>
-            <div className="flex justify-center gap-2 flex-wrap">
-              <RouterLink to="/">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2 text-xs sm:text-sm"
-                >
-                  <ExternalLink className="w-3 h-3 sm:w-4 sm:h-4" />
-                  <span className="hidden sm:inline">Landing</span>
-                  <span className="sm:hidden">Home</span>
-                </Button>
-              </RouterLink>
-              {planGenerated && (
-                <Button
-                  onClick={resetAll}
-                  variant="outline"
-                  size="sm"
-                  className="gap-2 text-xs sm:text-sm"
-                >
-                  <RotateCcw className="w-3 h-3 sm:w-4 sm:h-4" />
-                  New Research
-                </Button>
-              )}
-              <RouterLink to="/demo">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2 text-xs sm:text-sm"
-                >
-                  <ExternalLink className="w-3 h-3 sm:w-4 sm:h-4" />
-                  <span className="hidden sm:inline">Widget Demo</span>
-                  <span className="sm:hidden">Demo</span>
-                </Button>
-              </RouterLink>
-              <RouterLink to="/agents">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2 text-xs sm:text-sm"
-                >
-                  <Code className="w-3 h-3 sm:w-4 sm:h-4" />
-                  <span className="hidden sm:inline">Agent Swarm</span>
-                  <span className="sm:hidden">Agents</span>
-                </Button>
-              </RouterLink>
-              <Button
-                onClick={() => setShowCustomizer(!showCustomizer)}
-                variant="outline"
-                size="sm"
-                className="gap-2 text-xs sm:text-sm"
-              >
-                <Settings className="w-3 h-3 sm:w-4 sm:h-4" />
-                <span className="hidden sm:inline">{showCustomizer ? "Close" : "Create Widget"}</span>
-                <span className="sm:hidden">{showCustomizer ? "Close" : "Widget"}</span>
-              </Button>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl pt-8">
+              {[
+                { icon: Target, title: "Objective Driven", desc: "Define high-level goals and let the AI decompose them into actionable steps." },
+                { icon: Workflow, title: "GOAP Planning", desc: "Advanced state-space search to find the most efficient path to your research goals." },
+                { icon: Shield, title: "Verifiable Logic", desc: "Every step is planned and executed with mathematical precision and full traceability." }
+              ].map((item, idx) => (
+                <div key={idx} className="h-full p-8 rounded-[2.5rem] bg-white border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 hover:shadow-blue-500/10 transition-all duration-300 group text-left">
+                  <div className="w-14 h-14 rounded-2xl bg-blue-50 flex items-center justify-center mb-6 transition-all duration-500 group-hover:scale-110 group-hover:rotate-3 shadow-inner text-blue-600">
+                    <item.icon className="w-7 h-7" />
+                  </div>
+                  <h3 className="text-xl font-bold text-slate-900 mb-3">{item.title}</h3>
+                  <p className="text-sm text-slate-500 leading-relaxed font-medium">{item.desc}</p>
+                </div>
+              ))}
             </div>
           </div>
         </div>
-      </div>
+      </header>
 
-      {/* Main Content */}
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
+      {/* Main Content / RuFlo Section */}
+      <div id="ruflo-section" className={`${planGenerated ? 'w-full max-w-[100vw] lg:px-8 xl:px-12' : 'max-w-4xl'} mx-auto px-4 sm:px-6 py-16 sm:py-20 scroll-mt-20 transition-all duration-700`}>
+
+
         {/* Widget Customization Modal */}
         <Dialog open={showCustomizer} onOpenChange={setShowCustomizer}>
           <DialogContent className="max-w-[95vw] sm:max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
@@ -706,8 +1092,8 @@ const Index = () => {
             <div className="flex items-center gap-3">
               <Sparkles className="w-5 h-5 animate-spin" style={{ color: widgetConfig.primaryColor }} />
               <div>
-                <h3 className="font-medium" style={{ color: "#f5f5f5" }}>Planning Research Workflow</h3>
-                <p className="text-sm" style={{ color: "#a3a3a3" }}>
+                <h3 className="font-medium" style={{ color: widgetConfig.textColor }}>Planning Research Workflow</h3>
+                <p className="text-sm" style={{ color: widgetConfig.secondaryTextColor }}>
                   Analyzing objective, identifying preconditions, calculating optimal action sequence...
                 </p>
               </div>
@@ -717,44 +1103,50 @@ const Index = () => {
 
         {/* Research Execution */}
         {planGenerated && steps.length > 0 && (
-          <>
-            {/* GOAP Configuration and State Assessment - Animated */}
-            {showGOAPCards && (
-              <div ref={goapCardsRef} className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
-                <div 
-                  className="opacity-0"
-                  style={{ 
-                    animation: 'fade-in 2s ease-out forwards',
-                    animationDelay: '0ms' 
-                  }}
-                >
-                  <StateAssessmentCard
-                    currentState={currentGOAPState}
-                    goalState={researchConfig.stateDefinition.goalState}
-                    stateGaps={researchConfig.stateDefinition.stateGaps}
-                    primaryColor={widgetConfig.primaryColor}
-                    accentColor={widgetConfig.accentColor}
-                  />
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 animate-in fade-in duration-1000">
+            {/* Sidebar: GOAP Assessment Cards */}
+            <aside className="lg:col-span-4 space-y-6">
+              {showGOAPCards && (
+                <div ref={goapCardsRef} className="space-y-6 lg:sticky lg:top-24">
+                  <div 
+                    className="opacity-0"
+                    style={{ 
+                      animation: 'fade-in 2s ease-out forwards',
+                      animationDelay: '0ms' 
+                    }}
+                  >
+                    <StateAssessmentCard
+                      currentState={currentGOAPState}
+                      goalState={researchConfig.stateDefinition.goalState}
+                      stateGaps={researchConfig.stateDefinition.stateGaps}
+                      primaryColor={widgetConfig.primaryColor}
+                      accentColor={widgetConfig.accentColor}
+                    />
+                  </div>
+                  <div 
+                    className="opacity-0"
+                    style={{ 
+                      animation: 'fade-in 2.5s ease-out forwards',
+                      animationDelay: '500ms' 
+                    }}
+                  >
+                    <GOAPConfigDisplay
+                      executionMode={researchConfig.goapConfig.executionMode}
+                      enableReplanning={researchConfig.goapConfig.enableReplanning}
+                      replanningTriggers={researchConfig.goapConfig.replanningTriggers}
+                      costOptimization={researchConfig.goapConfig.costOptimization}
+                      parallelExecution={researchConfig.goapConfig.parallelExecution}
+                      maxActionCost={researchConfig.actionConfig.maxActionCost}
+                      primaryColor={widgetConfig.primaryColor}
+                    />
+                  </div>
                 </div>
-                <div 
-                  className="opacity-0"
-                  style={{ 
-                    animation: 'fade-in 2.5s ease-out forwards',
-                    animationDelay: '1500ms' 
-                  }}
-                >
-                  <GOAPConfigDisplay
-                    executionMode={researchConfig.goapConfig.executionMode}
-                    enableReplanning={researchConfig.goapConfig.enableReplanning}
-                    replanningTriggers={researchConfig.goapConfig.replanningTriggers}
-                    costOptimization={researchConfig.goapConfig.costOptimization}
-                    parallelExecution={researchConfig.goapConfig.parallelExecution}
-                    maxActionCost={researchConfig.actionConfig.maxActionCost}
-                    primaryColor={widgetConfig.primaryColor}
-                  />
-                </div>
-              </div>
-            )}
+              )}
+            </aside>
+
+            {/* Main Content: Research Output */}
+            <div className="lg:col-span-8 space-y-8">
+
 
             {/* Control Button */}
             <div ref={objectiveRef} className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0 mb-6 sm:mb-8">
@@ -768,8 +1160,8 @@ const Index = () => {
                 <RotateCcw className="w-4 h-4" />
                 New Research
               </Button>
-              <div className="text-xs sm:text-sm flex-1 min-w-0 text-center px-4" style={{ color: "#a3a3a3" }}>
-                <span className="font-medium" style={{ color: "#f5f5f5" }}>Objective:</span> <span className="break-words">{userGoal}</span>
+              <div className="text-xs sm:text-sm flex-1 min-w-0 text-center px-4" style={{ color: widgetConfig.secondaryTextColor }}>
+                <span className="font-medium" style={{ color: widgetConfig.textColor }}>Objective:</span> <span className="break-words">{userGoal}</span>
               </div>
               {/* Issue #1694: explicit "Start Research" gate so the plan is reviewable before execution. */}
               {!isRunning && visibleSteps <= 1 ? (
@@ -847,7 +1239,7 @@ const Index = () => {
                   <div className="text-2xl font-semibold mb-1" style={{ color: widgetConfig.primaryColor }}>
                     {steps.filter((s) => s.status === "completed").length}
                   </div>
-                  <div className="text-xs" style={{ color: "#a3a3a3" }}>Completed</div>
+                  <div className="text-xs" style={{ color: widgetConfig.secondaryTextColor }}>Completed</div>
                 </div>
                 <div 
                   className="border p-4 text-center"
@@ -860,7 +1252,7 @@ const Index = () => {
                   <div className="text-2xl font-semibold mb-1" style={{ color: widgetConfig.primaryColor }}>
                     {steps.filter((s) => s.status === "active").length}
                   </div>
-                  <div className="text-xs" style={{ color: "#a3a3a3" }}>Active</div>
+                  <div className="text-xs" style={{ color: widgetConfig.secondaryTextColor }}>Active</div>
                 </div>
                 <div 
                   className="border p-4 text-center"
@@ -870,10 +1262,10 @@ const Index = () => {
                     borderRadius: widgetConfig.borderRadius,
                   }}
                 >
-                  <div className="text-2xl font-semibold mb-1" style={{ color: "#737373" }}>
+                  <div className="text-2xl font-semibold mb-1" style={{ color: widgetConfig.secondaryTextColor }}>
                     {steps.filter((s) => s.status === "pending").length}
                   </div>
-                  <div className="text-xs" style={{ color: "#a3a3a3" }}>Pending</div>
+                  <div className="text-xs" style={{ color: widgetConfig.secondaryTextColor }}>Pending</div>
                 </div>
               </div>
             )}
@@ -907,18 +1299,18 @@ const Index = () => {
                         Final Research Report
                         <CheckCircle2 className="w-5 h-5" />
                       </h3>
-                      <p className="text-sm mb-4" style={{ color: "#a3a3a3" }}>
+                      <p className="text-sm mb-4" style={{ color: widgetConfig.secondaryTextColor }}>
                         Comprehensive analysis generated by multi-agent GOAP research system
                       </p>
                       
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
                         <div className="rounded p-3" style={{ backgroundColor: `${widgetConfig.backgroundColor}80` }}>
-                          <div className="text-xs mb-1" style={{ color: "#a3a3a3" }}>Total Steps</div>
-                          <div className="text-xl font-semibold" style={{ color: "#f5f5f5" }}>{steps.length}</div>
+                          <div className="text-xs mb-1" style={{ color: widgetConfig.secondaryTextColor }}>Total Steps</div>
+                          <div className="text-xl font-semibold" style={{ color: widgetConfig.textColor }}>{steps.length}</div>
                         </div>
                         <div className="rounded p-3" style={{ backgroundColor: `${widgetConfig.backgroundColor}80` }}>
-                          <div className="text-xs mb-1" style={{ color: "#a3a3a3" }}>Data Points</div>
-                          <div className="text-xl font-semibold" style={{ color: "#f5f5f5" }}>
+                          <div className="text-xs mb-1" style={{ color: widgetConfig.secondaryTextColor }}>Data Points</div>
+                          <div className="text-xl font-semibold" style={{ color: widgetConfig.textColor }}>
                             {steps.reduce((acc, step) => acc + (step.data?.length || 0), 0)}
                           </div>
                         </div>
@@ -927,11 +1319,11 @@ const Index = () => {
                           <div className="text-xl font-semibold" style={{ color: widgetConfig.accentColor }}>94%</div>
                         </div>
                         <div className="rounded p-3" style={{ backgroundColor: `${widgetConfig.backgroundColor}80` }}>
-                          <div className="text-xs mb-1 flex items-center gap-1" style={{ color: "#a3a3a3" }}>
+                          <div className="text-xs mb-1 flex items-center gap-1" style={{ color: widgetConfig.secondaryTextColor }}>
                             <Clock className="w-3 h-3" />
                             Duration
                           </div>
-                          <div className="text-xl font-semibold" style={{ color: "#f5f5f5" }}>
+                          <div className="text-xl font-semibold" style={{ color: widgetConfig.textColor }}>
                             {Math.round(steps.length * 3.5)}s
                           </div>
                         </div>
@@ -1225,7 +1617,8 @@ const Index = () => {
                 </div>
               </div>
             )}
-          </>
+            </div>
+          </div>
         )}
       </div>
 
@@ -1285,21 +1678,81 @@ const Index = () => {
         </DialogContent>
       </Dialog>
 
+      {/* RuFlo Showcase Carousel Section */}
+      <section className="py-24 bg-slate-50 overflow-hidden">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
+            <div className="space-y-4">
+              <h2 className="text-3xl md:text-4xl font-bold text-slate-900 tracking-tight">
+                The faidhifahmi Platform
+              </h2>
+              <p className="text-slate-600 max-w-xl text-lg">
+                Building a decentralized nervous system for AI agents, enabling autonomous collaboration across boundaries.
+              </p>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <Button 
+                variant="outline" 
+                size="icon" 
+                onClick={scrollPrev}
+                className="rounded-full border-slate-200 bg-white hover:bg-slate-50 transition-all"
+              >
+                <ChevronRight className="w-5 h-5 rotate-180" />
+              </Button>
+              <Button 
+                variant="outline" 
+                size="icon" 
+                onClick={scrollNext}
+                className="rounded-full border-slate-200 bg-white hover:bg-slate-50 transition-all"
+              >
+                <ChevronRight className="w-5 h-5" />
+              </Button>
+            </div>
+          </div>
+
+          <div className="embla overflow-hidden cursor-grab active:cursor-grabbing" ref={emblaRef}>
+            <div className="embla__container flex gap-6">
+              {rufloCapabilities.map((cap, i) => (
+                <div key={i} className="embla__slide flex-[0_0_85%] md:flex-[0_0_30%] min-w-0">
+                  <div className="h-full p-8 rounded-3xl bg-white border border-slate-100 shadow-sm hover:shadow-md transition-all duration-300 group">
+                    <div 
+                      className="w-12 h-12 rounded-2xl flex items-center justify-center mb-6 transition-all duration-500 group-hover:scale-110 group-hover:rotate-3"
+                      style={{ backgroundColor: `${cap.color}15`, color: cap.color }}
+                    >
+                      <cap.icon className="w-6 h-6" />
+                    </div>
+                    <h3 className="text-xl font-bold text-slate-900 mb-3">{cap.title}</h3>
+                    <p className="text-slate-500 leading-relaxed text-sm">
+                      {cap.description}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Footer */}
-      <footer className="border-t mt-16 py-6" style={{ borderColor: `${widgetConfig.primaryColor}20` }}>
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 text-center">
-          <p className="text-sm" style={{ color: widgetConfig.secondaryTextColor }}>
-            Created with <span style={{ color: widgetConfig.accentColor }}>❤️</span> by{" "}
-            <a 
-              href="https://ruv.io" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="font-medium hover:underline transition-colors"
-              style={{ color: widgetConfig.primaryColor }}
-            >
-              rUv.io
-            </a>
-          </p>
+      <footer className="border-t py-12 bg-white" style={{ borderColor: `#8b5cf610` }}>
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="flex flex-col md:flex-row justify-between items-center gap-8">
+            <div className="space-y-2">
+              <div className="text-xl font-bold text-slate-900">Faidhi Fahmi</div>
+              <p className="text-sm text-slate-500">Product Leader & CEO</p>
+            </div>
+            
+            <div className="flex items-center gap-6">
+              <a href="https://faidhifahmi.my" target="_blank" rel="noopener noreferrer" className="text-sm text-slate-500 hover:text-slate-900 transition-colors">Website</a>
+              <a href="https://www.linkedin.com/in/faidhifahmi/" target="_blank" rel="noopener noreferrer" className="text-sm text-slate-500 hover:text-slate-900 transition-colors">LinkedIn</a>
+              <a href="https://ruv.io" target="_blank" rel="noopener noreferrer" className="text-sm text-slate-500 hover:text-slate-900 transition-colors">rUv.io</a>
+            </div>
+
+            <p className="text-xs text-slate-400">
+              © {new Date().getFullYear()} Faidhi Fahmi. All rights reserved.
+            </p>
+          </div>
         </div>
       </footer>
     </div>

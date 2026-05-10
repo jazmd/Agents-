@@ -96,7 +96,7 @@ export const GoalInput = ({ onSubmit, isPlanning, onAdvancedSettings, onConfigUp
       <div className="flex items-center justify-between mb-3 sm:mb-4">
         <div className="flex items-center gap-2">
           <Target className="w-4 h-4 sm:w-5 sm:h-5 text-foreground" />
-          <h2 className="text-base sm:text-lg font-semibold text-foreground">Define Research Objective</h2>
+          <h2 className="text-base sm:text-lg font-semibold text-foreground">How Can I Help You Today?</h2>
         </div>
         {onAdvancedSettings && (
           <Button

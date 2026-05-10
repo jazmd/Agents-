@@ -25,10 +25,15 @@ export const StateAssessmentCard = ({
   const currentStateEntries = Object.entries(currentState);
   const goalStateEntries = Object.entries(goalState);
 
-  // Calculate progress percentage
-  const completedCount = currentStateEntries.filter(([_, value]) => value === true).length;
+  // Calculate progress percentage based on goal state satisfaction
   const totalCount = goalStateEntries.length;
-  const progressPercentage = Math.round((completedCount / totalCount) * 100);
+  const completedCount = goalStateEntries.filter(([key, targetValue]) => {
+    return currentState[key] === targetValue;
+  }).length;
+  
+  const progressPercentage = totalCount > 0 
+    ? Math.min(100, Math.round((completedCount / totalCount) * 100)) 
+    : 0;
 
   // Animate state entries appearing one by one
   useEffect(() => {
@@ -135,15 +140,15 @@ export const StateAssessmentCard = ({
                       )}
                     </div>
                     
-                    <div className="flex-1">
-                      <span className="font-mono text-xs font-medium">
+                    <div className="flex-1 min-w-0">
+                      <span className="font-mono text-xs font-medium truncate block">
                         {key.replace(/_/g, ' ')}
                       </span>
                     </div>
                     
                     <Badge 
                       variant={isTrue ? "default" : "secondary"} 
-                      className={`text-xs transition-all duration-300 ${isAnimating ? 'animate-pulse' : ''}`}
+                      className={`text-[10px] sm:text-xs transition-all duration-300 max-w-[80px] truncate ${isAnimating ? 'animate-pulse' : ''}`}
                     >
                       {String(value)}
                     </Badge>
@@ -195,14 +200,14 @@ export const StateAssessmentCard = ({
                       <CheckCircle2 className="w-4 h-4 text-white" />
                     </div>
                     
-                    <div className="flex-1">
-                      <span className="font-mono text-xs font-medium">
+                    <div className="flex-1 min-w-0">
+                      <span className="font-mono text-xs font-medium truncate block">
                         {key.replace(/_/g, ' ')}
                       </span>
                     </div>
                     
                     <Badge 
-                      className="text-xs"
+                      className="text-[10px] sm:text-xs max-w-[80px] truncate"
                       style={{ 
                         backgroundColor: isAchieved ? undefined : accentColor, 
                         color: 'white' 
@@ -239,7 +244,7 @@ export const StateAssessmentCard = ({
                   style={{ animationDelay: `${(index + currentStateEntries.length) * 100}ms` }}
                 >
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-mono font-medium">
+                    <span className="text-xs font-mono font-medium truncate pr-2 flex-1 min-w-0">
                       {key.replace(/_/g, ' ')}
                     </span>
                     {isTransitioning && (
