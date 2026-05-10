@@ -46,11 +46,11 @@ export function Navbar() {
             </Link>
           ))}
           <a 
-            href="https://faidhifahmi.my" 
+            href="https://www.linkedin.com/in/faidhifahmi/" 
             target="_blank" 
             className="text-sm font-semibold text-slate-600 hover:text-blue-600 transition-colors"
           >
-            Personal Site
+            My Linkedin
           </a>
         </div>
 

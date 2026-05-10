@@ -1,6 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Link as RouterLink } from "react-router-dom";
-import useEmblaCarousel from 'embla-carousel-react';
 import {
   Brain,
   Search,
@@ -195,48 +194,6 @@ const Index = () => {
   const goapCardsRef = useRef<HTMLDivElement>(null);
   const objectiveRef = useRef<HTMLDivElement>(null);
   const finalAnalysisRef = useRef<HTMLDivElement>(null);
-  const [emblaRef, emblaApi] = useEmblaCarousel({ loop: true, align: 'start' });
-
-  const scrollPrev = useCallback(() => {
-    if (emblaApi) emblaApi.scrollPrev();
-  }, [emblaApi]);
-
-  const scrollNext = useCallback(() => {
-    if (emblaApi) emblaApi.scrollNext();
-  }, [emblaApi]);
-
-  const rufloCapabilities = [
-    {
-      title: "Multi-Agent Swarms",
-      description: "Orchestrate 100+ specialized agents across machines and teams with zero-trust federation.",
-      icon: Users,
-      color: "#8B5CF6"
-    },
-    {
-      title: "Self-Learning Memory",
-      description: "Persistent AgentDB with HNSW indexing for 150x faster pattern retrieval and cross-session recall.",
-      icon: Brain,
-      color: "#06B6D4"
-    },
-    {
-      title: "GOAP A* Planning",
-      description: "Decompose high-level goals into executable plans using state-space search and adaptive replanning.",
-      icon: Target,
-      color: "#F59E0B"
-    },
-    {
-      title: "Agent Federation",
-      description: "Zero-trust protocol for agents to discover, authenticate, and collaborate across organizations.",
-      icon: Globe,
-      color: "#10B981"
-    },
-    {
-      title: "Neural Optimization",
-      description: "Self-improving local model layer using SONA patterns and ReasoningBank trajectory learning.",
-      icon: Cpu,
-      color: "#EF4444"
-    }
-  ];
 
   // GOAP Action definitions
   const createGOAPActions = (goal: string) => {
@@ -998,50 +955,14 @@ const Index = () => {
               <div className="h-1.5 w-24 bg-blue-600 mx-auto rounded-full" />
             </div>
             
-            <p className="text-xl md:text-2xl text-slate-500 max-w-3xl mx-auto leading-relaxed font-medium">
+            <p className="text-xl md:text-2xl text-slate-500 max-w-3xl mx-auto leading-relaxed font-medium mb-8">
               State-of-the-art Goal-Oriented Action Planning (GOAP) for autonomous, multi-step market and technology intelligence.
             </p>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl pt-8">
-              {[
-                { icon: Target, title: "Objective Driven", desc: "Define high-level goals and let the AI decompose them into actionable steps." },
-                { icon: Workflow, title: "GOAP Planning", desc: "Advanced state-space search to find the most efficient path to your research goals." },
-                { icon: Shield, title: "Verifiable Logic", desc: "Every step is planned and executed with mathematical precision and full traceability." }
-              ].map((item, idx) => (
-                <div key={idx} className="h-full p-8 rounded-[2.5rem] bg-white border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 hover:shadow-blue-500/10 transition-all duration-300 group text-left">
-                  <div className="w-14 h-14 rounded-2xl bg-blue-50 flex items-center justify-center mb-6 transition-all duration-500 group-hover:scale-110 group-hover:rotate-3 shadow-inner text-blue-600">
-                    <item.icon className="w-7 h-7" />
-                  </div>
-                  <h3 className="text-xl font-bold text-slate-900 mb-3">{item.title}</h3>
-                  <p className="text-sm text-slate-500 leading-relaxed font-medium">{item.desc}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content / RuFlo Section */}
-      <div id="ruflo-section" className={`${planGenerated ? 'w-full max-w-[100vw] lg:px-8 xl:px-12' : 'max-w-4xl'} mx-auto px-4 sm:px-6 py-16 sm:py-20 scroll-mt-20 transition-all duration-700`}>
-
-
-        {/* Widget Customization Modal */}
-        <Dialog open={showCustomizer} onOpenChange={setShowCustomizer}>
-          <DialogContent className="max-w-[95vw] sm:max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
-            <DialogHeader>
-              <DialogTitle>Widget Customization</DialogTitle>
-            </DialogHeader>
-            <WidgetCustomizer
-              config={widgetConfig}
-              onConfigChange={setWidgetConfig}
-              onGenerate={handleGenerateWidget}
-            />
-          </DialogContent>
-        </Dialog>
-
-        {/* Goal Input */}
+        {/* Goal Input in Hero */}
         {!planGenerated && (
           <div 
+            className="w-full max-w-4xl mx-auto z-10 text-left"
             style={{ 
               '--card-bg': widgetConfig.backgroundColor,
               '--border-color': `${widgetConfig.primaryColor}40`
@@ -1080,10 +1001,10 @@ const Index = () => {
           </div>
         )}
 
-        {/* Planning Status */}
+        {/* Planning Status in Hero */}
         {isPlanning && (
           <div 
-            className="mt-8 border rounded-lg p-6 animate-pulse"
+            className="w-full max-w-4xl mx-auto mt-8 border rounded-lg p-6 animate-pulse z-10 text-left"
             style={{ 
               backgroundColor: `${widgetConfig.backgroundColor}dd`,
               borderColor: `${widgetConfig.primaryColor}40`
@@ -1100,6 +1021,45 @@ const Index = () => {
             </div>
           </div>
         )}
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full max-w-5xl pt-8">
+              {[
+                { icon: Target, title: "1. Define Objective", desc: "Clearly state your desired end goal, or use our AI categories to generate a precise starting point." },
+                { icon: Settings, title: "2. Configure Settings", desc: "Optionally tweak the advanced parameters to control execution depth, constraints, and strategy." },
+                { icon: Workflow, title: "3. Generate Plan", desc: "Click generate and watch the GOAP engine autonomously decompose your objective into an actionable roadmap." }
+              ].map((item, idx) => (
+                <div key={idx} className="h-full p-8 rounded-[2.5rem] bg-white border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 hover:shadow-blue-500/10 transition-all duration-300 group text-left">
+                  <div className="w-14 h-14 rounded-2xl bg-blue-50 flex items-center justify-center mb-6 transition-all duration-500 group-hover:scale-110 group-hover:rotate-3 shadow-inner text-blue-600">
+                    <item.icon className="w-7 h-7" />
+                  </div>
+                  <h3 className="text-xl font-bold text-slate-900 mb-3">{item.title}</h3>
+                  <p className="text-sm text-slate-500 leading-relaxed font-medium">{item.desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content / RuFlo Section */}
+      <div id="ruflo-section" className={`${planGenerated ? 'w-full max-w-[100vw] lg:px-8 xl:px-12' : 'max-w-4xl'} mx-auto px-4 sm:px-6 py-16 sm:py-20 scroll-mt-20 transition-all duration-700`}>
+
+
+        {/* Widget Customization Modal */}
+        <Dialog open={showCustomizer} onOpenChange={setShowCustomizer}>
+          <DialogContent className="max-w-[95vw] sm:max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
+            <DialogHeader>
+              <DialogTitle>Widget Customization</DialogTitle>
+            </DialogHeader>
+            <WidgetCustomizer
+              config={widgetConfig}
+              onConfigChange={setWidgetConfig}
+              onGenerate={handleGenerateWidget}
+            />
+          </DialogContent>
+        </Dialog>
+
+
 
         {/* Research Execution */}
         {planGenerated && steps.length > 0 && (
@@ -1678,61 +1638,7 @@ const Index = () => {
         </DialogContent>
       </Dialog>
 
-      {/* RuFlo Showcase Carousel Section */}
-      <section className="py-24 bg-slate-50 overflow-hidden">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6">
-          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
-            <div className="space-y-4">
-              <h2 className="text-3xl md:text-4xl font-bold text-slate-900 tracking-tight">
-                The faidhifahmi Platform
-              </h2>
-              <p className="text-slate-600 max-w-xl text-lg">
-                Building a decentralized nervous system for AI agents, enabling autonomous collaboration across boundaries.
-              </p>
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <Button 
-                variant="outline" 
-                size="icon" 
-                onClick={scrollPrev}
-                className="rounded-full border-slate-200 bg-white hover:bg-slate-50 transition-all"
-              >
-                <ChevronRight className="w-5 h-5 rotate-180" />
-              </Button>
-              <Button 
-                variant="outline" 
-                size="icon" 
-                onClick={scrollNext}
-                className="rounded-full border-slate-200 bg-white hover:bg-slate-50 transition-all"
-              >
-                <ChevronRight className="w-5 h-5" />
-              </Button>
-            </div>
-          </div>
 
-          <div className="embla overflow-hidden cursor-grab active:cursor-grabbing" ref={emblaRef}>
-            <div className="embla__container flex gap-6">
-              {rufloCapabilities.map((cap, i) => (
-                <div key={i} className="embla__slide flex-[0_0_85%] md:flex-[0_0_30%] min-w-0">
-                  <div className="h-full p-8 rounded-3xl bg-white border border-slate-100 shadow-sm hover:shadow-md transition-all duration-300 group">
-                    <div 
-                      className="w-12 h-12 rounded-2xl flex items-center justify-center mb-6 transition-all duration-500 group-hover:scale-110 group-hover:rotate-3"
-                      style={{ backgroundColor: `${cap.color}15`, color: cap.color }}
-                    >
-                      <cap.icon className="w-6 h-6" />
-                    </div>
-                    <h3 className="text-xl font-bold text-slate-900 mb-3">{cap.title}</h3>
-                    <p className="text-slate-500 leading-relaxed text-sm">
-                      {cap.description}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
 
       {/* Footer */}
       <footer className="border-t py-12 bg-white" style={{ borderColor: `#8b5cf610` }}>

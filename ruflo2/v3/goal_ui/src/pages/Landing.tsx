@@ -101,7 +101,7 @@ export default function Landing() {
 
             <div className="flex flex-wrap justify-center gap-4 pt-6">
               {[
-                { icon: Briefcase, text: "CEO @ iLyF" },
+                { icon: Briefcase, text: "CPO (Chief Product Officer) @ iLyF" },
                 { icon: Target, text: "Founder Institute SEA '22" },
                 { icon: BarChart, text: "8+ Years in Startup Ecosystem" }
               ].map((item, idx) => (
@@ -146,7 +146,7 @@ export default function Landing() {
               </h2>
               <div className="space-y-4">
                 <p className="text-lg text-slate-600 leading-relaxed">
-                  With over 8 years in the startup ecosystem, I've dedicated my career to bridging the gap between complex technology and real-world impact. As the CEO of iLyF and a graduate of the Founder Institute, I focus on scaling innovation through data-driven strategies and autonomous AI systems.
+                  With over 8 years in the startup ecosystem, I've dedicated my career to bridging the gap between complex technology and real-world impact. As the CPO (Chief Product Officer) of iLyF and a graduate of the Founder Institute, I focus on scaling innovation through data-driven strategies and autonomous AI systems.
                 </p>
                 <p className="text-lg text-slate-600 leading-relaxed">
                   My approach combines rigorous product management with a deep understanding of AI orchestration—creating systems like faidhifahmi that don't just execute, but learn and evolve.
@@ -158,8 +158,8 @@ export default function Landing() {
                   <div className="text-xs text-slate-400 uppercase tracking-[0.2em] font-bold mt-1">Years Exp</div>
                 </div>
                 <div>
-                  <div className="text-3xl font-bold text-slate-900">100+</div>
-                  <div className="text-xs text-slate-400 uppercase tracking-[0.2em] font-bold mt-1">Agents Built</div>
+                  <div className="text-3xl font-bold text-slate-900">300+</div>
+                  <div className="text-xs text-slate-400 uppercase tracking-[0.2em] font-bold mt-1">Automation Deployed</div>
                 </div>
                 <div>
                   <div className="text-3xl font-bold text-slate-900">2022</div>
@@ -288,13 +288,12 @@ export default function Landing() {
                 <span className="font-bold tracking-tight text-2xl text-slate-900 uppercase">Faidhi Fahmi</span>
               </div>
               <p className="text-slate-500 max-w-xs font-medium">
-                CEO @ iLyF | Founder Institute SEA '22 | Product & AI Leader
+                CPO (Chief Product Officer) @ iLyF | Founder Institute SEA '22 | Product & AI Leader
               </p>
             </div>
             
             <div className="flex flex-wrap justify-center gap-12 text-slate-600 font-bold uppercase tracking-[0.2em] text-[10px]">
-              <a href="https://faidhifahmi.my" target="_blank" className="hover:text-blue-600 transition-colors">Personal Site</a>
-              <a href="https://www.linkedin.com/in/faidhifahmi/" target="_blank" className="hover:text-blue-600 transition-colors">LinkedIn</a>
+              <a href="https://www.linkedin.com/in/faidhifahmi/" target="_blank" className="hover:text-blue-600 transition-colors">My Linkedin</a>
               <Link to="/goap" className="hover:text-blue-600 transition-colors">faidhifahmi OS</Link>
             </div>
           </div>

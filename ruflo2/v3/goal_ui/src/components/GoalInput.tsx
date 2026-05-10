@@ -92,11 +92,12 @@ export const GoalInput = ({ onSubmit, isPlanning, onAdvancedSettings, onConfigUp
   };
 
   return (
-    <div className="bg-card border border-border rounded-lg p-4 sm:p-6">
+    <div className="relative bg-card border-2 border-primary/20 shadow-2xl shadow-primary/10 rounded-[2rem] p-6 sm:p-10 lg:p-12 transition-all duration-500 overflow-hidden">
+      <div className="absolute top-[-50%] right-[-10%] w-96 h-96 bg-primary/5 blur-[100px] pointer-events-none rounded-full" />
       <div className="flex items-center justify-between mb-3 sm:mb-4">
-        <div className="flex items-center gap-2">
-          <Target className="w-4 h-4 sm:w-5 sm:h-5 text-foreground" />
-          <h2 className="text-base sm:text-lg font-semibold text-foreground">How Can I Help You Today?</h2>
+        <div className="flex items-center gap-2 relative z-10">
+          <Target className="w-5 h-5 sm:w-6 sm:h-6 text-primary" />
+          <h2 className="text-lg sm:text-xl lg:text-2xl font-bold text-foreground">How Can I Help You Today?</h2>
         </div>
         {onAdvancedSettings && (
           <Button
@@ -119,7 +120,7 @@ export const GoalInput = ({ onSubmit, isPlanning, onAdvancedSettings, onConfigUp
             value={goal}
             onChange={(e) => setGoal(e.target.value)}
             placeholder="Enter your research goal or objective..."
-            className="min-h-[80px] sm:min-h-[100px] resize-none bg-background border-border text-foreground text-sm"
+            className="min-h-[100px] sm:min-h-[120px] lg:min-h-[160px] text-base lg:text-lg resize-none bg-background/50 border-border/50 text-foreground relative z-10 focus-visible:ring-primary/30"
             disabled={isPlanning}
           />
           <p className="text-[10px] sm:text-xs text-muted-foreground mt-1.5 sm:mt-2">

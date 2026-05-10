@@ -638,55 +638,65 @@ export default function Agents() {
   ];
 
   return (
-    <div className="min-h-screen bg-slate-50/50 font-sans">
+    <div className="min-h-screen bg-slate-50 font-sans transition-colors duration-300">
       <Navbar />
-      <div className="container mx-auto p-6 pt-28 space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-4xl font-bold tracking-tight text-slate-900">
-              Coding Agent Swarm
-            </h1>
-            <p className="text-muted-foreground mt-2">
-              Intelligent multi-agent system for collaborative software development
+      
+      {/* Coding Swarm Hero Spotlight */}
+      <header className="relative pt-32 pb-24 overflow-hidden border-b border-slate-100 bg-white">
+        <div className="absolute inset-0 -z-10 bg-[radial-gradient(45%_45%_at_50%_50%,#3b82f608_0%,transparent_100%)]" />
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="flex flex-col items-center text-center space-y-8 animate-in fade-in slide-in-from-top-10 duration-1000">
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-50 text-blue-600 text-[10px] font-bold tracking-[0.2em] uppercase border border-blue-100">
+              <Zap className="w-3.5 h-3.5 fill-blue-600" />
+              Collaborative Software Development
+            </div>
+            
+            <div className="space-y-4 max-w-4xl">
+              <h1 className="text-5xl md:text-7xl font-black tracking-tight text-slate-900 mb-2 leading-[1.1]">
+                CODING<span className="text-blue-600">simplified</span>
+              </h1>
+              <div className="h-1.5 w-24 bg-blue-600 mx-auto rounded-full" />
+            </div>
+            
+            <p className="text-xl md:text-2xl text-slate-500 max-w-3xl mx-auto leading-relaxed font-medium mb-8">
+              Intelligent multi-agent system for architecture, implementation, and rigorous testing.
             </p>
+
+            {/* Goal Input in Hero */}
+            <div className="w-full max-w-4xl mx-auto z-10 text-left relative bg-white border-2 border-blue-500/20 shadow-2xl shadow-blue-500/10 rounded-[2rem] p-6 sm:p-10 lg:p-12 transition-all duration-500 overflow-hidden">
+              <div className="absolute top-[-50%] right-[-10%] w-96 h-96 bg-blue-500/5 blur-[100px] pointer-events-none rounded-full" />
+              
+              <div className="flex items-center justify-between mb-4 sm:mb-6">
+                <div className="flex items-center gap-2 relative z-10">
+                  <Target className="w-5 h-5 sm:w-6 sm:h-6 text-blue-600" />
+                  <h2 className="text-lg sm:text-xl lg:text-2xl font-bold text-slate-900">Define Coding Objective</h2>
+                </div>
+                <AdvancedSettingsModal />
+              </div>
+              
+              <div className="flex flex-col sm:flex-row gap-4 relative z-10">
+                <Input
+                  placeholder="e.g., Build REST API with JWT authentication and PostgreSQL"
+                  value={goal}
+                  onChange={(e) => setGoal(e.target.value)}
+                  className="flex-1 min-h-[60px] text-base lg:text-lg bg-slate-50 border-slate-200 focus-visible:ring-blue-500/30"
+                />
+                <Button 
+                  className="h-[60px] px-8 text-base font-semibold gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-500/20 rounded-xl"
+                  onClick={handleGeneratePlan}
+                  disabled={!goal.trim() || isRunning}
+                >
+                  <Bot className="w-5 h-5" />
+                  {isPlanGenerated && !isRunning ? "Regenerate Plan" : "Generate Plan"}
+                </Button>
+              </div>
+            </div>
           </div>
         </div>
+      </header>
 
-        {/* Goal Input */}
-        <Card className="border-2 border-primary/20">
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <div className="space-y-1.5">
-                <CardTitle className="flex items-center gap-2">
-                  <Target className="w-5 h-5 text-primary" />
-                  Coding Objective
-                </CardTitle>
-                <CardDescription>Define what you want the agent swarm to build</CardDescription>
-              </div>
-              <AdvancedSettingsModal />
-            </div>
-          </CardHeader>
-          <CardContent>
-            <div className="flex gap-3">
-              <Input
-                placeholder="e.g., Build REST API with JWT authentication and PostgreSQL"
-                value={goal}
-                onChange={(e) => setGoal(e.target.value)}
-                className="flex-1"
-              />
-              <Button 
-                variant="outline" 
-                className="gap-2"
-                onClick={handleGeneratePlan}
-                disabled={!goal.trim() || isRunning}
-              >
-                <Bot className="w-4 h-4" />
-                {isPlanGenerated && !isRunning ? "Regenerate Plan" : "Generate Plan"}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+      {/* Main Content Area */}
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-16 sm:py-20 scroll-mt-20">
 
         {/* Research Phase */}
         {isPlanGenerated && workflowStage === "research" && (
@@ -1325,24 +1335,7 @@ export default function Agents() {
           </div>
         )}
 
-        {/* Placeholder when plan not generated */}
-        {!isPlanGenerated && (
-          <Card className="border-2 border-dashed border-primary/20">
-            <CardContent className="py-12 text-center">
-              <Bot className="w-16 h-16 mx-auto mb-4 text-muted-foreground opacity-50" />
-              <h3 className="text-xl font-semibold mb-2 text-muted-foreground">
-                Ready to Plan
-              </h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                Enter a coding objective above and click "Generate Plan" to see the agent swarm in action
-              </p>
-              <div className="text-xs text-muted-foreground space-y-1">
-                <p>Example: "Build REST API with JWT authentication and PostgreSQL"</p>
-                <p>Example: "Create a React dashboard with charts and real-time data"</p>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+
       </div>
     </div>
   );
