@@ -637,12 +637,12 @@ export default function Agents() {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-background via-background to-primary/5">
+    <div className="min-h-screen bg-slate-50/50 font-sans">
       <div className="container mx-auto p-6 space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-primary via-purple-500 to-blue-500 bg-clip-text text-transparent">
+            <h1 className="text-4xl font-bold tracking-tight text-slate-900">
               Coding Agent Swarm
             </h1>
             <p className="text-muted-foreground mt-2">
@@ -694,26 +694,26 @@ export default function Agents() {
                 currentState={currentState}
                 goalState={goalState}
                 stateGaps={stateGaps}
-                primaryColor="#a855f7"
-                accentColor="#3b82f6"
+                primaryColor="#0088FF"
+                accentColor="#10B981"
               />
             </div>
 
             <div>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-lg font-semibold flex items-center gap-2 animate-fade-in">
-                  <Bot className="w-5 h-5 text-purple-500" />
+                  <Bot className="w-5 h-5 text-blue-500" />
                   Research Phase Progress
                 </h3>
                 {isRunning && (
-                  <Badge variant="outline" className="animate-pulse bg-purple-500/10 text-purple-400 border-purple-500/50">
-                    <span className="inline-block w-2 h-2 bg-purple-500 rounded-full mr-2 animate-pulse"></span>
+                  <Badge variant="outline" className="animate-pulse bg-blue-500/10 text-blue-500 border-blue-500/50 rounded-full">
+                    <span className="inline-block w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></span>
                     Researching...
                   </Badge>
                 )}
               </div>
               <div className="space-y-4 relative">
-                <div className="absolute left-2 top-6 bottom-6 w-0.5 bg-gradient-to-b from-purple-500/50 via-blue-500/50 to-green-500/50" 
+                <div className="absolute left-2 top-6 bottom-6 w-0.5 bg-gradient-to-b from-blue-500/50 via-indigo-500/50 to-emerald-500/50" 
                      style={{ 
                        height: `${shouldShowPhase(researchPhases.length - 1) ? '100%' : `${(currentPhase / researchPhases.length) * 100}%`}`,
                        transition: 'height 0.5s ease-out'
@@ -738,13 +738,13 @@ export default function Agents() {
                         status={getPhaseStatus(index)}
                         data={phase.data}
                         metrics={phase.metrics}
-                        primaryColor="#a855f7"
-                        accentColor="#3b82f6"
-                        cardBackgroundColor="#1a1a1a"
-                        cardBorderColor="#404040"
-                        textColor="#ffffff"
-                        secondaryTextColor="#a3a3a3"
-                        successColor="#22c55e"
+                        primaryColor="#0088FF"
+                        accentColor="#10B981"
+                        cardBackgroundColor="#ffffff"
+                        cardBorderColor="#E2E8F0"
+                        textColor="#2A2A3C"
+                        secondaryTextColor="#64748B"
+                        successColor="#10B981"
                         animationSpeed="normal"
                         compactMode={false}
                       />

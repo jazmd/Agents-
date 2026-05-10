@@ -16,12 +16,12 @@ const Demo = () => {
 <!-- Optional: Configure widget appearance -->
 <script>
   window.RufloResearchWidgetConfig = {
-    primaryColor: "#8b5cf6",
-    accentColor: "#22c55e",
-    backgroundColor: "#1a1a1a",
-    cardBackgroundColor: "#262626",
-    textColor: "#ffffff",
-    fontFamily: "system-ui",
+    primaryColor: "#0088FF",
+    accentColor: "#10B981",
+    backgroundColor: "#F8FAFC",
+    cardBackgroundColor: "#ffffff",
+    textColor: "#2A2A3C",
+    fontFamily: "Schibsted Grotesk, sans-serif",
     defaultGoal: "Research the latest advancements in quantum computing"
   };
 </script>
@@ -35,12 +35,12 @@ const Demo = () => {
   useEffect(() => {
     // Configure widget before loading
     (window as any).RufloResearchWidgetConfig = {
-      primaryColor: "#8b5cf6",
-      accentColor: "#22c55e",
-      backgroundColor: "#1a1a1a",
-      cardBackgroundColor: "#262626",
-      textColor: "#ffffff",
-      fontFamily: "system-ui",
+      primaryColor: "#0088FF",
+      accentColor: "#10B981",
+      backgroundColor: "#F8FAFC",
+      cardBackgroundColor: "#ffffff",
+      textColor: "#2A2A3C",
+      fontFamily: "Schibsted Grotesk, sans-serif",
       defaultGoal: "Research the latest advancements in quantum computing"
     };
 

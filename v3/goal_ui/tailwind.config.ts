@@ -73,6 +73,11 @@ export default {
       transitionProperty: {
         'smooth': 'var(--transition-smooth)',
       },
+      fontFamily: {
+        sans: ["Schibsted Grotesk", "sans-serif"],
+        serif: ["Lora", "serif"],
+        mono: ["JetBrains Mono", "monospace"],
+      },
       borderRadius: {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",

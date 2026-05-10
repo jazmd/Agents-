@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Link as RouterLink } from "react-router-dom";
+import useEmblaCarousel from 'embla-carousel-react';
 import {
   Brain,
   Search,
@@ -25,6 +26,12 @@ import {
   ExternalLink,
   Code,
   Play,
+  Briefcase,
+  Users,
+  BarChart,
+  Globe,
+  Layers,
+  Cpu
 } from "lucide-react";
 import { AgentStep, StepStatus } from "@/components/AgentStep";
 import { Button } from "@/components/ui/button";
@@ -128,27 +135,27 @@ Always include sources, confidence levels, and timestamps when available.`,
 const Index = () => {
   const { toast } = useToast();
   const [widgetConfig, setWidgetConfig] = useState<WidgetConfig>({
-    primaryColor: "#8b5cf6",
-    accentColor: "#22c55e",
-    backgroundColor: "#1a1a1a",
-    cardBackgroundColor: "#262626",
-    cardBorderColor: "#404040",
-    textColor: "#ffffff",
-    secondaryTextColor: "#a3a3a3",
-    successColor: "#22c55e",
-    title: "Goal-Oriented Action Planning",
-    description: "AI-powered research planning using A* pathfinding and dynamic agent coordination",
-    brandName: "",
+    primaryColor: "#0088FF",
+    accentColor: "#0088FF",
+    backgroundColor: "#F8FAFC",
+    cardBackgroundColor: "#ffffff",
+    cardBorderColor: "#E2E8F0",
+    textColor: "#2A2A3C",
+    secondaryTextColor: "#64748B",
+    successColor: "#10B981",
+    title: "RuFlo Research",
+    description: "Autonomous AI agents that turn plain-English goals into executable plans using Goal-Oriented Action Planning (GOAP).",
+    brandName: "RUFLO PLATFORM",
     defaultGoal: "Research the latest advancements in quantum computing",
-    fontFamily: "system-ui",
-    borderRadius: "0.5rem",
+    fontFamily: "Schibsted Grotesk, sans-serif",
+    borderRadius: "2rem",
     animationSpeed: "normal",
-    cardSpacing: "1rem",
+    cardSpacing: "1.5rem",
     showMetrics: true,
     showStats: true,
     compactMode: false,
     enableAI: true,
-    aiModel: "google/gemini-2.5-flash",
+    aiModel: "google/gemini-2.0-flash",
   });
   const [showCustomizer, setShowCustomizer] = useState(false);
   const [userGoal, setUserGoal] = useState<string>("");
@@ -169,6 +176,48 @@ const Index = () => {
   const goapCardsRef = useRef<HTMLDivElement>(null);
   const objectiveRef = useRef<HTMLDivElement>(null);
   const finalAnalysisRef = useRef<HTMLDivElement>(null);
+  const [emblaRef, emblaApi] = useEmblaCarousel({ loop: true, align: 'start' });
+
+  const scrollPrev = useCallback(() => {
+    if (emblaApi) emblaApi.scrollPrev();
+  }, [emblaApi]);
+
+  const scrollNext = useCallback(() => {
+    if (emblaApi) emblaApi.scrollNext();
+  }, [emblaApi]);
+
+  const rufloCapabilities = [
+    {
+      title: "Multi-Agent Swarms",
+      description: "Orchestrate 100+ specialized agents across machines and teams with zero-trust federation.",
+      icon: Users,
+      color: "#8B5CF6"
+    },
+    {
+      title: "Self-Learning Memory",
+      description: "Persistent AgentDB with HNSW indexing for 150x faster pattern retrieval and cross-session recall.",
+      icon: Brain,
+      color: "#06B6D4"
+    },
+    {
+      title: "GOAP A* Planning",
+      description: "Decompose high-level goals into executable plans using state-space search and adaptive replanning.",
+      icon: Target,
+      color: "#F59E0B"
+    },
+    {
+      title: "Agent Federation",
+      description: "Zero-trust protocol for agents to discover, authenticate, and collaborate across organizations.",
+      icon: Globe,
+      color: "#10B981"
+    },
+    {
+      title: "Neural Optimization",
+      description: "Self-improving local model layer using SONA patterns and ReasoningBank trajectory learning.",
+      icon: Cpu,
+      color: "#EF4444"
+    }
+  ];
 
   // GOAP Action definitions
   const createGOAPActions = (goal: string) => {
@@ -913,78 +962,161 @@ const Index = () => {
         fontFamily: widgetConfig.fontFamily,
       }}
     >
-      {/* Hero Section */}
-      <div className="border-b" style={{ borderColor: `${widgetConfig.primaryColor}40` }}>
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
-          <div className="text-center animate-fade-in">
+      {/* Header / Personal Hero Section */}
+      <header className="relative pt-24 pb-20 overflow-hidden">
+        <div className="absolute inset-0 -z-10 bg-[radial-gradient(45%_45%_at_50%_50%,#8b5cf615_0%,transparent_100%)]" />
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="flex flex-col items-center text-center space-y-8 animate-in fade-in slide-in-from-top-10 duration-1000">
             <div 
-              className="inline-flex items-center gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded border text-xs sm:text-sm mb-3 sm:mb-4"
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-[10px] font-bold tracking-[0.2em] uppercase transition-all duration-500 hover:scale-105 hover:tracking-[0.25em]"
               style={{ 
-                backgroundColor: `${widgetConfig.primaryColor}20`,
-                borderColor: `${widgetConfig.primaryColor}40`,
-                color: widgetConfig.primaryColor
+                backgroundColor: `${widgetConfig.primaryColor}10`,
+                color: widgetConfig.primaryColor,
+                border: `1px solid ${widgetConfig.primaryColor}25`
               }}
             >
-              <Network className="w-3 h-3 sm:w-4 sm:h-4" />
-              <span className="text-xs sm:text-sm">{widgetConfig.brandName || "GOAP Multi-Agent System"}</span>
+              <Sparkles className="w-3.5 h-3.5" />
+              Product Leader & Innovation Architect
             </div>
-            <h1 className="text-2xl sm:text-3xl lg:text-4xl font-semibold mb-2 sm:mb-3 px-2" style={{ color: "#f5f5f5" }}>
-              {widgetConfig.title}
-            </h1>
-            <p className="text-xs sm:text-sm max-w-xl mx-auto px-4 mb-3" style={{ color: "#a3a3a3" }}>
-              {widgetConfig.description}
+            
+            <div className="space-y-4">
+              <h1 className="text-5xl md:text-8xl font-bold tracking-tighter text-slate-900 mb-2 font-sans">
+                Faidhi Fahmi
+              </h1>
+              <div className="h-1.5 w-24 bg-blue-600 mx-auto rounded-full" />
+            </div>
+            
+            <p className="text-xl md:text-3xl text-slate-500 max-w-3xl mx-auto leading-relaxed font-light font-sans italic">
+              Scaling innovation through <span className="text-slate-900 font-medium not-italic">autonomous AI systems</span> and data-driven product strategies.
             </p>
-            <div className="flex justify-center gap-2 flex-wrap">
-              {planGenerated && (
-                <Button
-                  onClick={resetAll}
-                  variant="outline"
-                  size="sm"
-                  className="gap-2 text-xs sm:text-sm"
+
+            <div className="flex flex-wrap justify-center gap-4 pt-6">
+              {[
+                { icon: Briefcase, text: "CEO @ iLyF" },
+                { icon: Target, text: "Founder Institute SEA '22" },
+                { icon: BarChart, text: "8+ Years in Startup Ecosystem" }
+              ].map((item, idx) => (
+                <div 
+                  key={idx} 
+                  className="flex items-center gap-3 px-6 py-3 rounded-2xl bg-white/50 backdrop-blur-sm border border-slate-200/60 shadow-sm transition-all hover:border-slate-300 hover:shadow-md"
                 >
-                  <RotateCcw className="w-3 h-3 sm:w-4 sm:h-4" />
-                  New Research
-                </Button>
-              )}
-              <RouterLink to="/demo">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2 text-xs sm:text-sm"
-                >
-                  <ExternalLink className="w-3 h-3 sm:w-4 sm:h-4" />
-                  <span className="hidden sm:inline">Widget Demo</span>
-                  <span className="sm:hidden">Demo</span>
-                </Button>
-              </RouterLink>
-              <RouterLink to="/agents">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2 text-xs sm:text-sm"
-                >
-                  <Code className="w-3 h-3 sm:w-4 sm:h-4" />
-                  <span className="hidden sm:inline">Agent Swarm</span>
-                  <span className="sm:hidden">Agents</span>
-                </Button>
-              </RouterLink>
+                  <item.icon className="w-4 h-4 text-blue-600" />
+                  <span className="text-sm font-semibold text-slate-700 tracking-tight">{item.text}</span>
+                </div>
+              ))}
+            </div>
+
+            <div className="pt-8 flex gap-4">
               <Button
-                onClick={() => setShowCustomizer(!showCustomizer)}
-                variant="outline"
-                size="sm"
-                className="gap-2 text-xs sm:text-sm"
+                onClick={() => {
+                  const el = document.getElementById('ruflo-section');
+                  el?.scrollIntoView({ behavior: 'smooth' });
+                }}
+                className="rounded-2xl px-10 h-14 text-base font-bold shadow-xl shadow-blue-500/20 transition-all hover:scale-105 active:scale-95 bg-blue-600 hover:bg-blue-700 text-white"
               >
-                <Settings className="w-3 h-3 sm:w-4 sm:h-4" />
-                <span className="hidden sm:inline">{showCustomizer ? "Close" : "Create Widget"}</span>
-                <span className="sm:hidden">{showCustomizer ? "Close" : "Widget"}</span>
+                Explore Projects
               </Button>
+              <a 
+                href="https://www.linkedin.com/in/faidhifahmi/" 
+                target="_blank" 
+                rel="noopener noreferrer"
+              >
+                <Button
+                  variant="outline"
+                  className="rounded-2xl px-10 h-14 text-base font-bold border-2 transition-all hover:bg-slate-50 active:scale-95"
+                >
+                  Get in Touch
+                </Button>
+              </a>
             </div>
           </div>
         </div>
+      </header>
+        
+        {/* Decorative elements */}
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 -z-10 w-full h-full opacity-30 pointer-events-none">
+          <div className="absolute top-[-10%] left-[10%] w-72 h-72 bg-blue-400 rounded-full blur-[120px]" />
+          <div className="absolute bottom-[10%] right-[10%] w-96 h-96 bg-indigo-300 rounded-full blur-[150px]" />
+        </div>
       </div>
 
-      {/* Main Content */}
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
+      {/* Professional Bio / About Section */}
+      <section className="max-w-6xl mx-auto px-4 sm:px-6 py-24">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-20 items-center">
+          <div className="space-y-8 animate-in fade-in slide-in-from-left-10 duration-1000">
+            <h2 className="text-4xl font-bold text-slate-900 tracking-tight">
+              Building products that feel <span className="text-blue-600">inevitable</span>.
+            </h2>
+            <p className="text-lg text-slate-600 leading-relaxed">
+              With over 8 years in the startup ecosystem, I've dedicated my career to bridging the gap between complex technology and real-world impact. As the CEO of iLyF and a graduate of the Founder Institute, I focus on scaling innovation through data-driven strategies and autonomous AI systems.
+            </p>
+            <p className="text-lg text-slate-600 leading-relaxed">
+              My approach combines rigorous product management with a deep understanding of AI orchestration—creating systems like RuFlo that don't just execute, but learn and evolve.
+            </p>
+            <div className="flex gap-10 pt-4">
+              <div>
+                <div className="text-3xl font-bold text-slate-900">8+</div>
+                <div className="text-sm text-slate-500 uppercase tracking-wider font-semibold">Years Exp</div>
+              </div>
+              <div>
+                <div className="text-3xl font-bold text-slate-900">100+</div>
+                <div className="text-sm text-slate-500 uppercase tracking-wider font-semibold">Agents Built</div>
+              </div>
+              <div>
+                <div className="text-3xl font-bold text-slate-900">2022</div>
+                <div className="text-sm text-slate-500 uppercase tracking-wider font-semibold">FI Graduate</div>
+              </div>
+            </div>
+          </div>
+          
+          <div className="relative group">
+            <div className="absolute -inset-4 bg-gradient-to-tr from-blue-600/20 to-purple-600/20 rounded-[3rem] blur-2xl opacity-50 group-hover:opacity-75 transition-opacity duration-500" />
+            <div className="relative aspect-square rounded-[2.5rem] bg-slate-100 overflow-hidden border border-slate-200 shadow-2xl">
+              <div className="absolute inset-0 bg-gradient-to-br from-slate-200 to-slate-300 flex items-center justify-center">
+                <Users className="w-32 h-32 text-slate-400 opacity-20" />
+                <div className="absolute inset-0 flex flex-col items-center justify-center p-12 text-center space-y-4">
+                  <div className="w-20 h-20 rounded-2xl bg-white shadow-lg flex items-center justify-center mb-4">
+                    <Sparkles className="w-10 h-10 text-blue-600" />
+                  </div>
+                  <h4 className="text-xl font-bold text-slate-900">Innovation Mindset</h4>
+                  <p className="text-sm text-slate-500 italic">"The best way to predict the future is to build it autonomously."</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Expertise Section */}
+      <section className="max-w-6xl mx-auto px-4 sm:px-6 py-20 border-t border-slate-100">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-12">
+          {[
+            { label: "Expertise", title: "Product Strategy", desc: "Scaling products from zero to millions of users with a focus on core value and unit economics.", icon: Layers },
+            { label: "Focus", title: "Agentic AI", desc: "Architecting autonomous systems that solve complex, multi-step problems using GOAP and LLMs.", icon: Brain },
+            { label: "Engine", title: "Data Analytics", desc: "Transforming raw data into actionable insights that drive growth and product innovation.", icon: BarChart },
+            { label: "Culture", title: "Leadership", desc: "Building high-performance teams and fostering a culture of rapid experimentation and excellence.", icon: Users },
+          ].map((item, i) => (
+            <div key={i} className="space-y-4">
+              <div className="flex items-center gap-2 text-[10px] font-bold tracking-widest text-blue-600 uppercase">
+                <item.icon className="w-3 h-3" />
+                {item.label}
+              </div>
+              <h3 className="text-xl font-bold text-slate-900">{item.title}</h3>
+              <p className="text-sm text-slate-500 leading-relaxed">{item.desc}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* Main Content / RuFlo Section */}
+      <div id="ruflo-section" className="max-w-4xl mx-auto px-4 sm:px-6 py-8 sm:py-12 scroll-mt-20">
+        <div className="text-center mb-16 space-y-4">
+          <h2 className="text-3xl font-bold text-slate-900 tracking-tight">RuFlo Research</h2>
+          <p className="text-slate-500 max-w-xl mx-auto">
+            A state-of-the-art autonomous research engine powered by Goal-Oriented Action Planning.
+          </p>
+        </div>
+
         {/* Widget Customization Modal */}
         <Dialog open={showCustomizer} onOpenChange={setShowCustomizer}>
           <DialogContent className="max-w-[95vw] sm:max-w-4xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
@@ -1052,8 +1184,8 @@ const Index = () => {
             <div className="flex items-center gap-3">
               <Sparkles className="w-5 h-5 animate-spin" style={{ color: widgetConfig.primaryColor }} />
               <div>
-                <h3 className="font-medium" style={{ color: "#f5f5f5" }}>Planning Research Workflow</h3>
-                <p className="text-sm" style={{ color: "#a3a3a3" }}>
+                <h3 className="font-medium" style={{ color: widgetConfig.textColor }}>Planning Research Workflow</h3>
+                <p className="text-sm" style={{ color: widgetConfig.secondaryTextColor }}>
                   Analyzing objective, identifying preconditions, calculating optimal action sequence...
                 </p>
               </div>
@@ -1114,8 +1246,8 @@ const Index = () => {
                 <RotateCcw className="w-4 h-4" />
                 New Research
               </Button>
-              <div className="text-xs sm:text-sm flex-1 min-w-0 text-center px-4" style={{ color: "#a3a3a3" }}>
-                <span className="font-medium" style={{ color: "#f5f5f5" }}>Objective:</span> <span className="break-words">{userGoal}</span>
+              <div className="text-xs sm:text-sm flex-1 min-w-0 text-center px-4" style={{ color: widgetConfig.secondaryTextColor }}>
+                <span className="font-medium" style={{ color: widgetConfig.textColor }}>Objective:</span> <span className="break-words">{userGoal}</span>
               </div>
               {/* Issue #1694: explicit "Start Research" gate so the plan is reviewable before execution. */}
               {!isRunning && visibleSteps <= 1 ? (
@@ -1193,7 +1325,7 @@ const Index = () => {
                   <div className="text-2xl font-semibold mb-1" style={{ color: widgetConfig.primaryColor }}>
                     {steps.filter((s) => s.status === "completed").length}
                   </div>
-                  <div className="text-xs" style={{ color: "#a3a3a3" }}>Completed</div>
+                  <div className="text-xs" style={{ color: widgetConfig.secondaryTextColor }}>Completed</div>
                 </div>
                 <div 
                   className="border p-4 text-center"
@@ -1206,7 +1338,7 @@ const Index = () => {
                   <div className="text-2xl font-semibold mb-1" style={{ color: widgetConfig.primaryColor }}>
                     {steps.filter((s) => s.status === "active").length}
                   </div>
-                  <div className="text-xs" style={{ color: "#a3a3a3" }}>Active</div>
+                  <div className="text-xs" style={{ color: widgetConfig.secondaryTextColor }}>Active</div>
                 </div>
                 <div 
                   className="border p-4 text-center"
@@ -1216,10 +1348,10 @@ const Index = () => {
                     borderRadius: widgetConfig.borderRadius,
                   }}
                 >
-                  <div className="text-2xl font-semibold mb-1" style={{ color: "#737373" }}>
+                  <div className="text-2xl font-semibold mb-1" style={{ color: widgetConfig.secondaryTextColor }}>
                     {steps.filter((s) => s.status === "pending").length}
                   </div>
-                  <div className="text-xs" style={{ color: "#a3a3a3" }}>Pending</div>
+                  <div className="text-xs" style={{ color: widgetConfig.secondaryTextColor }}>Pending</div>
                 </div>
               </div>
             )}
@@ -1253,18 +1385,18 @@ const Index = () => {
                         Final Research Report
                         <CheckCircle2 className="w-5 h-5" />
                       </h3>
-                      <p className="text-sm mb-4" style={{ color: "#a3a3a3" }}>
+                      <p className="text-sm mb-4" style={{ color: widgetConfig.secondaryTextColor }}>
                         Comprehensive analysis generated by multi-agent GOAP research system
                       </p>
                       
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2 sm:gap-3">
                         <div className="rounded p-3" style={{ backgroundColor: `${widgetConfig.backgroundColor}80` }}>
-                          <div className="text-xs mb-1" style={{ color: "#a3a3a3" }}>Total Steps</div>
-                          <div className="text-xl font-semibold" style={{ color: "#f5f5f5" }}>{steps.length}</div>
+                          <div className="text-xs mb-1" style={{ color: widgetConfig.secondaryTextColor }}>Total Steps</div>
+                          <div className="text-xl font-semibold" style={{ color: widgetConfig.textColor }}>{steps.length}</div>
                         </div>
                         <div className="rounded p-3" style={{ backgroundColor: `${widgetConfig.backgroundColor}80` }}>
-                          <div className="text-xs mb-1" style={{ color: "#a3a3a3" }}>Data Points</div>
-                          <div className="text-xl font-semibold" style={{ color: "#f5f5f5" }}>
+                          <div className="text-xs mb-1" style={{ color: widgetConfig.secondaryTextColor }}>Data Points</div>
+                          <div className="text-xl font-semibold" style={{ color: widgetConfig.textColor }}>
                             {steps.reduce((acc, step) => acc + (step.data?.length || 0), 0)}
                           </div>
                         </div>
@@ -1273,11 +1405,11 @@ const Index = () => {
                           <div className="text-xl font-semibold" style={{ color: widgetConfig.accentColor }}>94%</div>
                         </div>
                         <div className="rounded p-3" style={{ backgroundColor: `${widgetConfig.backgroundColor}80` }}>
-                          <div className="text-xs mb-1 flex items-center gap-1" style={{ color: "#a3a3a3" }}>
+                          <div className="text-xs mb-1 flex items-center gap-1" style={{ color: widgetConfig.secondaryTextColor }}>
                             <Clock className="w-3 h-3" />
                             Duration
                           </div>
-                          <div className="text-xl font-semibold" style={{ color: "#f5f5f5" }}>
+                          <div className="text-xl font-semibold" style={{ color: widgetConfig.textColor }}>
                             {Math.round(steps.length * 3.5)}s
                           </div>
                         </div>
@@ -1631,21 +1763,81 @@ const Index = () => {
         </DialogContent>
       </Dialog>
 
+      {/* RuFlo Showcase Carousel Section */}
+      <section className="py-24 bg-slate-50 overflow-hidden">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="flex flex-col md:flex-row md:items-end justify-between gap-6 mb-12">
+            <div className="space-y-4">
+              <h2 className="text-3xl md:text-4xl font-bold text-slate-900 tracking-tight">
+                The RuFlo Platform
+              </h2>
+              <p className="text-slate-600 max-w-xl text-lg">
+                Building a decentralized nervous system for AI agents, enabling autonomous collaboration across boundaries.
+              </p>
+            </div>
+            
+            <div className="flex items-center gap-2">
+              <Button 
+                variant="outline" 
+                size="icon" 
+                onClick={scrollPrev}
+                className="rounded-full border-slate-200 bg-white hover:bg-slate-50 transition-all"
+              >
+                <ChevronRight className="w-5 h-5 rotate-180" />
+              </Button>
+              <Button 
+                variant="outline" 
+                size="icon" 
+                onClick={scrollNext}
+                className="rounded-full border-slate-200 bg-white hover:bg-slate-50 transition-all"
+              >
+                <ChevronRight className="w-5 h-5" />
+              </Button>
+            </div>
+          </div>
+
+          <div className="embla overflow-hidden cursor-grab active:cursor-grabbing" ref={emblaRef}>
+            <div className="embla__container flex gap-6">
+              {rufloCapabilities.map((cap, i) => (
+                <div key={i} className="embla__slide flex-[0_0_85%] md:flex-[0_0_30%] min-w-0">
+                  <div className="h-full p-8 rounded-3xl bg-white border border-slate-100 shadow-sm hover:shadow-md transition-all duration-300 group">
+                    <div 
+                      className="w-12 h-12 rounded-2xl flex items-center justify-center mb-6 transition-all duration-500 group-hover:scale-110 group-hover:rotate-3"
+                      style={{ backgroundColor: `${cap.color}15`, color: cap.color }}
+                    >
+                      <cap.icon className="w-6 h-6" />
+                    </div>
+                    <h3 className="text-xl font-bold text-slate-900 mb-3">{cap.title}</h3>
+                    <p className="text-slate-500 leading-relaxed text-sm">
+                      {cap.description}
+                    </p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Footer */}
-      <footer className="border-t mt-16 py-6" style={{ borderColor: `${widgetConfig.primaryColor}20` }}>
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 text-center">
-          <p className="text-sm" style={{ color: widgetConfig.secondaryTextColor }}>
-            Created with <span style={{ color: widgetConfig.accentColor }}>❤️</span> by{" "}
-            <a 
-              href="https://ruv.io" 
-              target="_blank" 
-              rel="noopener noreferrer"
-              className="font-medium hover:underline transition-colors"
-              style={{ color: widgetConfig.primaryColor }}
-            >
-              rUv.io
-            </a>
-          </p>
+      <footer className="border-t py-12 bg-white" style={{ borderColor: `#8b5cf610` }}>
+        <div className="max-w-6xl mx-auto px-4 sm:px-6">
+          <div className="flex flex-col md:flex-row justify-between items-center gap-8">
+            <div className="space-y-2">
+              <div className="text-xl font-bold text-slate-900">Faidhi Fahmi</div>
+              <p className="text-sm text-slate-500">Product Leader & CEO</p>
+            </div>
+            
+            <div className="flex items-center gap-6">
+              <a href="https://faidhifahmi.my" target="_blank" rel="noopener noreferrer" className="text-sm text-slate-500 hover:text-slate-900 transition-colors">Website</a>
+              <a href="https://www.linkedin.com/in/faidhifahmi/" target="_blank" rel="noopener noreferrer" className="text-sm text-slate-500 hover:text-slate-900 transition-colors">LinkedIn</a>
+              <a href="https://ruv.io" target="_blank" rel="noopener noreferrer" className="text-sm text-slate-500 hover:text-slate-900 transition-colors">rUv.io</a>
+            </div>
+
+            <p className="text-xs text-slate-400">
+              © {new Date().getFullYear()} Faidhi Fahmi. All rights reserved.
+            </p>
+          </div>
         </div>
       </footer>
     </div>
