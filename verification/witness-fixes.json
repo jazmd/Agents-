@@ -162,6 +162,18 @@
       "desc": "daemon start no longer SIGTERMs daemons belonging to OTHER workspaces (ADR-014 per-workspace scope). Forked daemon argv is stamped with `--workspace <root>` (kept last) and killStaleDaemons{Posix,Windows} filter on it via daemonCommandLineBelongsToWorkspace \u2014 exact trailing match, never a path-prefix match, so `/a/proj` start can't reap `/a/proj-other`'s daemon. Pre-#1914 daemons (no stamp) are left for `daemon stop` (PID file). Unit guard __tests__/daemon-workspace-scope.test.ts.",
       "file": "v3/@claude-flow/cli/dist/src/commands/daemon.js",
       "marker": "daemonCommandLineBelongsToWorkspace"
+    },
+    {
+      "id": "#1902-#1903-guard",
+      "desc": "Plugin package.json install-safety CI guard (scripts/audit-plugin-packages.mjs) \u2014 fails CI on (A) an unpublished @claude-flow/* hard dep / non-optional peer (#1903 ruvector-upstream class), (B) a bare-stable peer range that can't resolve a 3.x prerelease publish (#1902), (C) a main/module/exports path not covered by `files`, (D) post-build, a main/module/exports path that doesn't exist on disk (#1904). Wired into v3-ci.yml as `plugin-package-audit` (builds plugins first so check D is live) and added to witness-verify needs[].",
+      "file": "scripts/audit-plugin-packages.mjs",
+      "marker": "KNOWN_PUBLISHED"
+    },
+    {
+      "id": "#1904",
+      "desc": "plugin-gastown-bridge \u2014 package.json `exports` advertised ./dist/index.mjs (+ ./formula, ./convoy subpaths) that the build never emitted, so those import specifiers 404'd in the published tarball. Fix: tsup.config.ts builds the formula/convoy entries (previously commented out), and package.json exports/main/module point at the actually-emitted .js/.cjs filenames. Validated by the plugin-package-audit CI guard (check D).",
+      "file": "v3/plugins/gastown-bridge/tsup.config.ts",
+      "marker": "formula: 'src/formula/index.ts'"
     }
   ]
 }
