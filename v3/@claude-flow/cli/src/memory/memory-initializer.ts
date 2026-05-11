@@ -2119,6 +2119,7 @@ export async function storeEntry(options: {
   namespace?: string;
   generateEmbeddingFlag?: boolean;
   tags?: string[];
+  metadata?: Record<string, unknown>;
   ttl?: number;
   dbPath?: string;
   upsert?: boolean;
@@ -2154,6 +2155,7 @@ export async function storeEntry(options: {
     namespace = 'default',
     generateEmbeddingFlag = true,
     tags = [],
+    metadata = {},
     ttl,
     dbPath: customPath,
     upsert = false
@@ -2213,7 +2215,7 @@ export async function storeEntry(options: {
       embeddingDimensions,
       embeddingModel,
       tags.length > 0 ? JSON.stringify(tags) : null,
-      '{}',
+      JSON.stringify(metadata),
       now,
       now,
       ttl ? now + (ttl * 1000) : null
