@@ -1,9 +1,9 @@
 # ADR-115 — Claude Managed Agents as a cloud backend for `rvagent`
 
-**Status**: Proposed (2026-05-12)
+**Status**: Accepted (2026-05-12) — implemented as the `managed_agent_*` MCP tools in the `ruflo-agent` plugin (see Implementation below)
 **Date**: 2026-05-12
 **Authors**: claude (drafted with rUv)
-**Related**: `ruflo-agent` plugin / `wasm_agent_*` MCP tools (`@ruvector/rvagent-wasm`) · ADR-026 (3-tier model routing) · ADR-095 G2 / ADR-104 (pluggable `ConsensusTransport` / `FederationTransport`) · ADR-097 (federation peers) · ADR-112 (MCP tool discoverability) · [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview)
+**Related**: `ruflo-agent` plugin (renamed from `ruflo-wasm`) / `wasm_agent_*` MCP tools (`@ruvector/rvagent-wasm`) · ADR-026 (3-tier model routing) · ADR-095 G2 / ADR-104 (pluggable `ConsensusTransport` / `FederationTransport`) · ADR-097 (federation peers) · ADR-112 (MCP tool discoverability) · [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview)
 **Supersedes**: nothing
 
 ## Context
@@ -109,8 +109,21 @@ This ADR records the *intent to build*; the plugin's internals (exact handle sha
 
 ### Neutral
 
-- Opt-in; users who don't set `runtime: "managed"` see no change. Worst case: an unused code path behind a flag.
+- Opt-in; users who don't use `managed_agent_*` see no change. Worst case: an unused code path behind an env-var.
 - This is "adopt an external standard" (Anthropic's harness), not invent one — same posture as ADR-114 (DSPy.ts).
+
+## Implementation (2026-05-12)
+
+Landed as a **separate `managed_agent_*` toolset** (rather than a `runtime:` flag on the existing `wasm_agent_*` tools — cleaner, zero risk to the WASM path; both toolsets now live in the renamed `ruflo-agent` plugin):
+
+- `plugins/ruflo-wasm/` → **`plugins/ruflo-agent/`** (`git mv`; `plugin.json` name/description/keywords now span both runtimes; `.claude-plugin/marketplace.json` entry + READMEs + `discover-plugins` skill + `verification/inventory.json` updated). The `wasm_agent_*` / `wasm_gallery_*` tool *names* are unchanged.
+- **`v3/@claude-flow/cli/src/mcp-tools/managed-agent-tools.ts`** — 6 new MCP tools, registered in `mcp-client.ts`, wrapping the Managed Agents REST API with plain `fetch` (no new SDK dep): `managed_agent_create` (`agents.create` + `environments.create` + `sessions.create`), `managed_agent_prompt` (`events.send(user.message)` + poll `GET /events` until a terminal `session.status_*`, default 180 s / cap 600 s), `managed_agent_status`, `managed_agent_events` (full transcript + a summary), `managed_agent_list`, `managed_agent_terminate` (`DELETE /sessions/{id}` ± the env). Key from `ANTHROPIC_API_KEY` / `CLAUDE_API_KEY`; every tool degrades gracefully with a structured "use `wasm_agent_create` for a local no-key runtime" error when absent. ADR-112-compliant descriptions (each names when `wasm_agent_*` / native is the right call instead). `mcpServers` / `skills` / `packages` / `networking` / `initScript` pass through to the agent/environment config.
+- **`plugins/ruflo-agent/skills/managed-agent/SKILL.md`** + **`commands/managed-agent.md`** — the cloud-runtime skill/command (the WASM-vs-managed decision table, the key prereq + fallback, the `mcpServers`-reachability caveat, the cost/cleanup discipline).
+- **`plugins/ruflo-agent/scripts/smoke.sh`** + **`.github/workflows/ruflo-agent-smoke.yml`** — structural CI guard (12 checks now: manifest is `ruflo-agent` with both-runtime keywords; all 10 `wasm_*` + all 6 `managed_agent_*` referenced; managed-agent skill keeps an explicit `allowed-tools` + offers the `wasm_agent_create` fallback; ADR cross-refs). Also wired into the `audit-cli-mcp-tools` / `audit-tool-descriptions` guards (311 registered / 0 dangling / 0 no-guidance).
+
+**Validated live** against `api.anthropic.com` with the org's Anthropic key (GCP `claude-flow/anthropic-api-key`), via `ruflo mcp exec -t managed_agent_*`: `create` (haiku, custom system) → `{sessionId, agentId, environmentId, status:"idle", model:"claude-haiku-4-5-20251001"}`; `prompt` ("echo … > /tmp/r.txt && cat …") → `{finished:true, status:"idle", stopReason:"end_turn", assistantText:"Done.", toolUses:[{name:"bash", input:{command:"echo … && cat …"}}], eventCount:13}`; `terminate` → `{sessionDeleted:true, environmentDeleted:true}`. No-key path returns the graceful error. `claude --plugin-dir plugins/ruflo-agent` loads the plugin and lists its skills (`managed-agent`, `wasm-agent`, `wasm-gallery`). `smoke.sh` 12/0; cli build clean.
+
+**Not yet done (follow-ups, called out above):** `runtime:"managed"` as a flag on `wasm_agent_*` (unification); a deployed/tunneled HTTP ruflo MCP server so the cloud agent gets ruflo's 314 tools (the combo needs a reachable URL); `task_assign` / federation dispatch to a Managed Agent session (#1916 items 3/4 — a third executor); cost-tracking integration + a `doctor`/GC check for orphaned sessions; `multiagent` / `define-outcomes` (research-preview, feature-flagged).
 
 ## Links
 
