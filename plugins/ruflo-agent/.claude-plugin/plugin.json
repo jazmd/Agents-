@@ -12,6 +12,8 @@
     "ruflo",
     "agent",
     "rvagent",
+    "rvagent-wasm",
+    "ruvllm-wasm",
     "wasm",
     "sandbox",
     "managed-agents",
