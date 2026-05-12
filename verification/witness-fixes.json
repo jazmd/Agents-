@@ -158,6 +158,12 @@
       "marker": "claude-sonnet-4-6"
     },
     {
+      "id": "#1914",
+      "desc": "daemon start no longer SIGTERMs daemons belonging to OTHER workspaces (ADR-014 per-workspace scope). Forked daemon argv is stamped with `--workspace <root>` (kept last) and killStaleDaemons{Posix,Windows} filter on it via daemonCommandLineBelongsToWorkspace \u2014 exact trailing match, never a path-prefix match, so `/a/proj` start can't reap `/a/proj-other`'s daemon. Pre-#1914 daemons (no stamp) are left for `daemon stop` (PID file). Unit guard __tests__/daemon-workspace-scope.test.ts.",
+      "file": "v3/@claude-flow/cli/dist/src/commands/daemon.js",
+      "marker": "daemonCommandLineBelongsToWorkspace"
+    },
+    {
       "id": "#1916",
       "desc": "agent_logs MCP tool registered (the `ruflo agent logs <id>` CLI subcommand called a tool that didn't exist \u2192 `MCP tool not found: agent_logs`). Also agent_status/agent_list/agent_logs now resolve hive-mind-spawned workers via loadAllAgents() \u2014 hive-mind_spawn writes to `.claude-flow/agents.json`, a different file from `.claude-flow/agents/store.json`, so `agent status <hive-worker-id>` returned `not_found`. (Task-execution dispatch for hive workers \u2014 #1916 items 3/4 \u2014 is a tracked follow-up.) Unit guard __tests__/agent-logs-hive-resolution.test.ts.",
       "file": "v3/@claude-flow/cli/dist/src/mcp-tools/agent-tools.js",

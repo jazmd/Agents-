@@ -1,8 +1,8 @@
 {
   "manifest": {
     "schema": "ruflo-witness/v1",
-    "issuedAt": "2026-05-12T04:23:22.360Z",
-    "gitCommit": "1de17a626d35fc6e327719c496c47eb0073b15ba",
+    "issuedAt": "2026-05-12T04:39:59.412Z",
+    "gitCommit": "b680fca85aac08ec59880197f8f6af2042da8b6b",
     "branch": "fix/1916-agent-logs-hive-resolution",
     "os": "macos",
     "releases": {
@@ -12,8 +12,8 @@
       "@claude-flow/memory": "3.0.0-alpha.15"
     },
     "summary": {
-      "totalFixes": 107,
-      "verified": 107,
+      "totalFixes": 108,
+      "verified": 108,
       "missing": 0
     },
     "fixes": [
@@ -133,7 +133,7 @@
         "id": "#1691",
         "desc": "Windows daemon fork()",
         "file": "v3/@claude-flow/cli/dist/src/commands/daemon.js",
-        "sha256": "8fe7b53ad914532474b77cf419b6e64ee60e12562062342e9cf9fd5eee8c8498",
+        "sha256": "6b600ec62ef9a3898fd3c606c23034a10a005c0330d0dac43b29f6d2abc2ec8e",
         "marker": "fork(cliPath",
         "markerVerified": true
       },
@@ -850,6 +850,14 @@
         "markerVerified": true
       },
       {
+        "id": "#1914",
+        "desc": "daemon start no longer SIGTERMs daemons belonging to OTHER workspaces (ADR-014 per-workspace scope). Forked daemon argv is stamped with `--workspace <root>` (kept last) and killStaleDaemons{Posix,Windows} filter on it via daemonCommandLineBelongsToWorkspace — exact trailing match, never a path-prefix match, so `/a/proj` start can't reap `/a/proj-other`'s daemon. Pre-#1914 daemons (no stamp) are left for `daemon stop` (PID file). Unit guard __tests__/daemon-workspace-scope.test.ts.",
+        "file": "v3/@claude-flow/cli/dist/src/commands/daemon.js",
+        "sha256": "6b600ec62ef9a3898fd3c606c23034a10a005c0330d0dac43b29f6d2abc2ec8e",
+        "marker": "daemonCommandLineBelongsToWorkspace",
+        "markerVerified": true
+      },
+      {
         "id": "#1916",
         "desc": "agent_logs MCP tool registered (the `ruflo agent logs <id>` CLI subcommand called a tool that didn't exist → `MCP tool not found: agent_logs`). Also agent_status/agent_list/agent_logs now resolve hive-mind-spawned workers via loadAllAgents() — hive-mind_spawn writes to `.claude-flow/agents.json`, a different file from `.claude-flow/agents/store.json`, so `agent status <hive-worker-id>` returned `not_found`. (Task-execution dispatch for hive workers — #1916 items 3/4 — is a tracked follow-up.) Unit guard __tests__/agent-logs-hive-resolution.test.ts.",
         "file": "v3/@claude-flow/cli/dist/src/mcp-tools/agent-tools.js",
@@ -859,7 +867,7 @@
       },
       {
         "id": "#1916-guard",
-        "desc": "CLI↔MCP tool coverage CI guard (scripts/audit-cli-mcp-tools.mjs) — fails if any `ruflo <cmd>` subcommand callMCPTool()s a name not registered in src/mcp-tools/*.ts. Monotone-decreasing baseline at verification/cli-mcp-tool-baseline.json (20 known-dangling commands carried; new dangling refs fail). Wired into v3-ci.yml `tool-descriptions-audit` job (already in witness-verify needs[]).",
+        "desc": "CLI↔MCP tool coverage CI guard (scripts/audit-cli-mcp-tools.mjs) — fails if any `ruflo <cmd>` subcommand callMCPTool()s a name not registered in src/mcp-tools/*.ts. Monotone-decreasing baseline at verification/cli-mcp-tool-baseline.json — now at 0 (was 20). Wired into v3-ci.yml `tool-descriptions-audit` job (already in witness-verify needs[]).",
         "file": "scripts/audit-cli-mcp-tools.mjs",
         "sha256": "39cff77e40a0891b80e07bf0356bc5344f84579f67c383ea5b6cab2115b43b73",
         "marker": "cli-mcp-tool-baseline.json",
@@ -877,10 +885,10 @@
   },
   "integrity": {
     "manifestHashAlgo": "sha256",
-    "manifestHash": "9bc4bfb91889e0e236e235b505c61c754d909d60c06e433cee134e83f3a33094",
+    "manifestHash": "867a536d3d605716484e79d49755eb9cd293694826d3b51e1190e90599107b61",
     "signatureAlgo": "ed25519",
-    "publicKey": "0b2ba238a7edd157a0d84990ee1d218c3c7d33a10258530141d35d99e4b6af0e",
-    "signature": "9cd2e43c8fcb0324d13586f8bc9cd7dced4a3ef0a92b997034abad3753a6c1605eef1bb9e874e06edf7a4f254e1e1ae2937b37680df887d60b5b41351c75a900",
+    "publicKey": "1518b52ec08a5034ffc55f506829ca8bc94972dee457749f365286d6b1e4ec1d",
+    "signature": "9b958742c22f51f70a76213971354476eedcf39ed4cbcb4fea4a9b3944bec47c20060f16282f11e706deeccbce91e8abd2163be43364e641d2e9af34b6953c0e",
     "seedDerivation": "sha256(gitCommit + ':ruflo-witness/v1')"
   }
 }
