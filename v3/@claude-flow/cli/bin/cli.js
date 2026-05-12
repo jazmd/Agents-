@@ -39,11 +39,38 @@ console.log = (...args) => {
 // Conditions:
 //   1. stdin is being piped AND no CLI arguments provided (auto-detect)
 //   2. stdin is being piped AND args are "mcp start" (explicit, e.g. npx claude-flow@alpha mcp start)
+//   3. EXCEPT — if the user explicitly passed --transport <non-stdio>
+//      (e.g. -t http), defer to the parser. Without this, every smoke
+//      test or non-TTY caller of `mcp start -t http` got force-routed
+//      into stdio mode and never hit the HTTP server (#1874 follow-up).
 const cliArgs = process.argv.slice(2);
 const isExplicitMCP = cliArgs.length >= 1 && cliArgs[0] === 'mcp' && (cliArgs.length === 1 || cliArgs[1] === 'start');
-const isMCPMode = !process.stdin.isTTY && (process.argv.length === 2 || isExplicitMCP);
+const explicitNonStdioTransport = cliArgs.some((a, i) => {
+  // -t <value> | --transport <value>
+  if ((a === '-t' || a === '--transport') && cliArgs[i + 1] && cliArgs[i + 1] !== 'stdio') return true;
+  // --transport=<value>
+  if (/^--transport=/.test(a) && !/^--transport=stdio$/.test(a)) return true;
+  return false;
+});
+const isMCPMode = !process.stdin.isTTY
+  && !explicitNonStdioTransport
+  && (process.argv.length === 2 || isExplicitMCP);
 
 if (isMCPMode) {
+  // In stdio MCP mode, stdout is reserved exclusively for JSON-RPC frames.
+  // Redirect diagnostic console output to stderr so tool-level console.log calls
+  // cannot corrupt the MCP stream and make clients close the transport.
+  console.log = (...args) => {
+    if (_isCosmeticAgentdbPatchNoise(String(args[0] ?? ''))) return;
+    console.error(...args);
+  };
+  console.info = (...args) => console.error(...args);
+  console.debug = (...args) => console.error(...args);
+
+  const writeProtocolMessage = (message) => {
+    process.stdout.write(`${JSON.stringify(message)}\n`);
+  };
+
   // Run MCP server mode
   const { listMCPTools, callMCPTool, hasTool } = await import('../dist/src/mcp-client.js');
 
@@ -68,14 +95,14 @@ if (isMCPMode) {
     if (buffer.length > MCP_MAX_BUFFER_BYTES) {
       // Drop the buffer + emit a protocol-level error so the client
       // sees the rejection rather than a silent OOM.
-      console.log(JSON.stringify({
+      writeProtocolMessage({
         jsonrpc: '2.0',
         id: null,
         error: {
           code: -32700,
           message: `Buffered stdin exceeds ${MCP_MAX_BUFFER_BYTES} bytes without newline; resetting`,
         },
-      }));
+      });
       buffer = '';
       return;
     }
@@ -88,25 +115,25 @@ if (isMCPMode) {
         try {
           message = JSON.parse(line);
         } catch {
-          console.log(JSON.stringify({
+          writeProtocolMessage({
             jsonrpc: '2.0',
             id: null,
             error: { code: -32700, message: 'Parse error' },
-          }));
+          });
           continue;
         }
         try {
           const response = await handleMessage(message);
           if (response) {
-            console.log(JSON.stringify(response));
+            writeProtocolMessage(response);
           }
         } catch (error) {
           // #1606: Return proper internal error instead of parse error
-          console.log(JSON.stringify({
+          writeProtocolMessage({
             jsonrpc: '2.0',
             id: message.id ?? null,
             error: { code: -32603, message: error instanceof Error ? error.message : 'Internal error' },
-          }));
+          });
         }
       }
     }
@@ -134,7 +161,7 @@ if (isMCPMode) {
           id: message.id,
           result: {
             protocolVersion: '2024-11-05',
-            serverInfo: { name: 'claude-flow', version: VERSION },
+            serverInfo: { name: 'ruflo', version: VERSION },
             capabilities: {
               tools: { listChanged: true },
               resources: { subscribe: true, listChanged: true },
