@@ -1,14 +1,14 @@
 {
   "manifest": {
     "schema": "ruflo-witness/v1",
-    "issuedAt": "2026-05-12T04:11:50.117Z",
-    "gitCommit": "b06600dbef145b3ee54a1ad4da81759487556ffb",
+    "issuedAt": "2026-05-12T04:23:22.360Z",
+    "gitCommit": "1de17a626d35fc6e327719c496c47eb0073b15ba",
     "branch": "fix/1916-agent-logs-hive-resolution",
     "os": "macos",
     "releases": {
-      "ruflo": "3.7.0-alpha.24",
-      "claude-flow": "3.7.0-alpha.24",
-      "@claude-flow/cli": "3.7.0-alpha.24",
+      "ruflo": "3.7.0-alpha.26",
+      "claude-flow": "3.7.0-alpha.26",
+      "@claude-flow/cli": "3.7.0-alpha.26",
       "@claude-flow/memory": "3.0.0-alpha.15"
     },
     "summary": {
@@ -117,7 +117,7 @@
         "id": "#1697",
         "desc": "rvf-wasm overrides",
         "file": "package.json",
-        "sha256": "7f7f570c531e9c40aab22518f3b092bef9b9e02a725a948eee8afa99aec01191",
+        "sha256": "14345e0180e5c4649b5a2169b094c8e05d97c54fe79902c8eef0ebf7c18715fb",
         "marker": "@ruvector/rvf-wasm",
         "markerVerified": true
       },
@@ -141,7 +141,7 @@
         "id": "#1721",
         "desc": "postinstall copies all dist/src/* siblings",
         "file": "v3/@claude-flow/cli/package.json",
-        "sha256": "6c0aa3c96140cf2f57e3986c5a9fa6925855fa23ab6270cb649298cc5b589d00",
+        "sha256": "862f40e5c7b45a0ce35bbe438add312cf7d155e527ee49bed62ee9b58d0cd526",
         "marker": "postinstall.cjs",
         "markerVerified": true
       },
@@ -461,7 +461,7 @@
         "id": "#1795",
         "desc": "umbrella package missing cli-core dep (ERR_MODULE_NOT_FOUND)",
         "file": "package.json",
-        "sha256": "7f7f570c531e9c40aab22518f3b092bef9b9e02a725a948eee8afa99aec01191",
+        "sha256": "14345e0180e5c4649b5a2169b094c8e05d97c54fe79902c8eef0ebf7c18715fb",
         "marker": "@claude-flow/cli-core",
         "markerVerified": true
       },
@@ -629,7 +629,7 @@
         "id": "#1825",
         "desc": "hotfix: workspace: protocol leak in cli optionalDependencies",
         "file": "v3/@claude-flow/cli/package.json",
-        "sha256": "6c0aa3c96140cf2f57e3986c5a9fa6925855fa23ab6270cb649298cc5b589d00",
+        "sha256": "862f40e5c7b45a0ce35bbe438add312cf7d155e527ee49bed62ee9b58d0cd526",
         "marker": "\"@claude-flow/memory\": \"^3.0.0-alpha.14\"",
         "markerVerified": true
       },
@@ -861,7 +861,7 @@
         "id": "#1916-guard",
         "desc": "CLI↔MCP tool coverage CI guard (scripts/audit-cli-mcp-tools.mjs) — fails if any `ruflo <cmd>` subcommand callMCPTool()s a name not registered in src/mcp-tools/*.ts. Monotone-decreasing baseline at verification/cli-mcp-tool-baseline.json (20 known-dangling commands carried; new dangling refs fail). Wired into v3-ci.yml `tool-descriptions-audit` job (already in witness-verify needs[]).",
         "file": "scripts/audit-cli-mcp-tools.mjs",
-        "sha256": "ef533df89d56184aad884b17bb0422b142a45d063f755e21260613cd3bc70118",
+        "sha256": "39cff77e40a0891b80e07bf0356bc5344f84579f67c383ea5b6cab2115b43b73",
         "marker": "cli-mcp-tool-baseline.json",
         "markerVerified": true
       },
@@ -877,10 +877,10 @@
   },
   "integrity": {
     "manifestHashAlgo": "sha256",
-    "manifestHash": "f456a467d96c1ddb5694facc3fc3dd6893f656651704eddc65a05eea678e4978",
+    "manifestHash": "9bc4bfb91889e0e236e235b505c61c754d909d60c06e433cee134e83f3a33094",
     "signatureAlgo": "ed25519",
-    "publicKey": "40219ff724950a45779e1fe283743498a17809213ccdda3514ad4bfe75e29ec0",
-    "signature": "01dc94975fc30a9e0a43b6a4529754d276ad8d3a0c49befab4cc3d66eb92f9ae8dcb8f44b4c2247ebdf9be6a41b4e1917d6a1fccdb4aa30853bfabde21b70c0b",
+    "publicKey": "0b2ba238a7edd157a0d84990ee1d218c3c7d33a10258530141d35d99e4b6af0e",
+    "signature": "9cd2e43c8fcb0324d13586f8bc9cd7dced4a3ef0a92b997034abad3753a6c1605eef1bb9e874e06edf7a4f254e1e1ae2937b37680df887d60b5b41351c75a900",
     "seedDerivation": "sha256(gitCommit + ':ruflo-witness/v1')"
   }
 }

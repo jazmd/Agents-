@@ -28,9 +28,8 @@ import { join } from 'node:path';
 
 const REPO_ROOT = process.cwd();
 const CLI_SRC = join(REPO_ROOT, 'v3', '@claude-flow', 'cli', 'src');
-const TOOLS_DIR = join(CLI_SRC, 'mcp-tools');
 const COMMANDS_DIR = join(CLI_SRC, 'commands');
-const EXTRA_TOOL_FILES = [join(CLI_SRC, 'ruvector', 'coverage-tools.ts')];
+const MCP_CLIENT = join(CLI_SRC, 'mcp-client.ts'); // single source of truth for what is registered
 const BASELINE_FILE = join(REPO_ROOT, 'verification', 'cli-mcp-tool-baseline.json');
 const JSON_OUT = process.argv.includes('--json');
 const UPDATE_BASELINE = process.argv.includes('--update-baseline');
@@ -43,12 +42,52 @@ function listTs(dir) {
   return readdirSync(dir).filter(f => f.endsWith('.ts') && !f.endsWith('.test.ts')).map(f => join(dir, f));
 }
 
+// --- which tool-source files are ACTUALLY registered ---
+// Mirror mcp-client.ts: find every `...<ident>(?())` spread inside its
+// `registerTools([ … ])` call, then resolve each <ident> to its
+// `import { … } from '<path>'` and scan that file. A file that defines tools
+// but is never imported into registerTools is NOT registered — so a CLI
+// callMCPTool() against it correctly counts as dangling (this caught the
+// `hooks_coverage-*` tools, which were defined in ruvector/coverage-tools.ts
+// but never wired in — #1916).
+function resolveImportPath(spec) {
+  // spec like './mcp-tools/agent-tools.js' or '../ruvector/coverage-tools.js'
+  let p = spec.replace(/^\.\//, '').replace(/^\.\.\//, '../');
+  // .js → .ts (source files)
+  p = p.replace(/\.js$/, '.ts');
+  return p.startsWith('../') ? join(CLI_SRC, p) : join(CLI_SRC, p);
+}
+function registeredToolSourceFiles() {
+  const src = readFileSync(MCP_CLIENT, 'utf-8');
+  const regBlock = (src.match(/registerTools\(\[([\s\S]*?)\]\);/) || [, ''])[1];
+  // collect spread identifiers (strip trailing () if it's `...getX()`)
+  const idents = new Set();
+  for (const m of regBlock.matchAll(/\.\.\.\s*([A-Za-z_$][\w$]*)\s*\(?\s*\)?/g)) idents.add(m[1]);
+  // map each ident to its import path
+  const files = new Set();
+  for (const id of idents) {
+    // `import { id } from '<path>'`  OR  `import { x, id, y } from '<path>'`
+    const re = new RegExp(`import\\s*\\{[^}]*\\b${id.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b[^}]*\\}\\s*from\\s*['"]([^'"]+)['"]`);
+    const im = src.match(re);
+    if (im) {
+      const f = resolveImportPath(im[1]);
+      if (existsSync(f)) files.add(f);
+    } else {
+      // `getX()` factory — the function may live in <x>-tools.ts; try a name guess
+      const guess = id.replace(/^get/, '').replace(/^([A-Z])/, c => c.toLowerCase()).replace(/([A-Z])/g, '-$1').toLowerCase();
+      const cand = join(CLI_SRC, 'mcp-tools', `${guess}.ts`);
+      if (existsSync(cand)) files.add(cand);
+    }
+  }
+  return [...files];
+}
+
 // --- registered tool names ---
 const registered = new Set();
-for (const file of [...listTs(TOOLS_DIR), ...EXTRA_TOOL_FILES.filter(existsSync)]) {
-  const src = readFileSync(file, 'utf-8');
+for (const file of registeredToolSourceFiles()) {
+  const fsrc = readFileSync(file, 'utf-8');
   let m; TOOL_DEF_RE.lastIndex = 0;
-  while ((m = TOOL_DEF_RE.exec(src))) registered.add(m[1]);
+  while ((m = TOOL_DEF_RE.exec(fsrc))) registered.add(m[1]);
 }
 
 // --- callMCPTool references in command files ---
