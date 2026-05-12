@@ -165,9 +165,15 @@
     },
     {
       "id": "#1916-guard",
-      "desc": "CLI\u2194MCP tool coverage CI guard (scripts/audit-cli-mcp-tools.mjs) \u2014 fails if any `ruflo <cmd>` subcommand callMCPTool()s a name not registered in src/mcp-tools/*.ts. Monotone-decreasing baseline at verification/cli-mcp-tool-baseline.json (20 known-dangling commands carried; new dangling refs fail). Wired into v3-ci.yml `tool-descriptions-audit` job (already in witness-verify needs[]).",
+      "desc": "CLI\u2194MCP tool coverage CI guard (scripts/audit-cli-mcp-tools.mjs) \u2014 fails if any `ruflo <cmd>` subcommand callMCPTool()s a name not registered in src/mcp-tools/*.ts. Monotone-decreasing baseline at verification/cli-mcp-tool-baseline.json \u2014 now at 0 (was 20). Wired into v3-ci.yml `tool-descriptions-audit` job (already in witness-verify needs[]).",
       "file": "scripts/audit-cli-mcp-tools.mjs",
       "marker": "cli-mcp-tool-baseline.json"
+    },
+    {
+      "id": "#1916-cli-tools",
+      "desc": "Registered the 16 MCP tools that CLI subcommands referenced but that were never wired into the registry (the `MCP tool not found` class surfaced by #1916-guard): task_retry, workflow_stop, workflow_validate, session_current/export/import, memory_detailed-stats/cleanup/compress/export/import, hive-mind_optimize-memory, hooks_teammate-idle, hooks_task-completed, mcp_start, mcp_stop \u2014 plus renamed the coverage tools `hooks/coverage-*` \u2192 `hooks_coverage-*` (now match the CLI's underscore calls) and pointed `swarm stop` at `swarm_shutdown`. cli-mcp-tool-baseline.json is now 0.",
+      "file": "v3/@claude-flow/cli/dist/src/mcp-tools/workflow-tools.js",
+      "marker": "workflow_validate"
     }
   ]
 }
