@@ -1,8 +1,8 @@
 {
   "manifest": {
     "schema": "ruflo-witness/v1",
-    "issuedAt": "2026-05-12T12:34:34.988Z",
-    "gitCommit": "f0ee0f9688532fef69c73f2ae2634fad92331c28",
+    "issuedAt": "2026-05-12T12:38:18.220Z",
+    "gitCommit": "19d2b2ed419f4747a22d1470d1d2b7ea4d3a76e3",
     "branch": "fix/1927-cost-tracker-windows-path",
     "os": "macos",
     "releases": {
@@ -925,10 +925,10 @@
   },
   "integrity": {
     "manifestHashAlgo": "sha256",
-    "manifestHash": "d428cca2dd1483ea1e7a5d20ac4b48a4cb9bc6c9b49659d9308a93ca34377a14",
+    "manifestHash": "953ab29da177f43cf7faec02711d0a679664ab79b2e4a131a79c37c8ed9c65c9",
     "signatureAlgo": "ed25519",
-    "publicKey": "72f97233f6e36a3a8c01f525ba38bc38be9d4a5380d9be1e5ccf82d6e8c60a9c",
-    "signature": "1d0b6cfde21aa077f141c15d05f1878582e12461f45656f4dee4bbecb4e36b98f10cf46ba2bff9a74facc2fd2a5d98c1aa307b325fdcce727e9d5e046580c10c",
+    "publicKey": "b748bd6b2491169c3a6b63bbc8483f978cceb3261b94b4fb53e842ad08721f8a",
+    "signature": "388b4a831d9a5df3dc09db994d7d4af857b8cea190782f0593644b1629e8964bdf3b1ad318a8c2433bacb0c964359c5b02ffb438465975b9a5ffd8bb32fa1609",
     "seedDerivation": "sha256(gitCommit + ':ruflo-witness/v1')"
   }
 }
