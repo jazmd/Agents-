@@ -28,12 +28,20 @@ pub struct Config {
 impl Config {
     /// Build a Config from the environment. Reads
     /// `ANTHROPIC_API_KEY` first, then `ANTHROPIC_KEY` as a friendly
-    /// fallback. Returns `Err` when neither is set so the caller can
-    /// degrade explicitly.
+    /// fallback. `ANTHROPIC_BASE_URL` overrides the API host when set
+    /// (matches the Anthropic SDKs and Claude Code's proxied envs).
+    /// Returns `Err` when no key is set so the caller can degrade
+    /// explicitly.
     pub fn from_env() -> Result<Self, ConfigError> {
         let api_key = resolve_api_key()?;
+        let base_url = std::env::var("ANTHROPIC_BASE_URL")
+            .ok()
+            .map(|v| v.trim_end_matches('/').to_string())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| Self::default().base_url);
         Ok(Self {
             api_key,
+            base_url,
             ..Self::default()
         })
     }

@@ -1,26 +1,35 @@
 //! Thin curl-based HTTP client for the Managed Agents endpoints.
 //!
-//! Each public function owns one of the four wire calls we need:
+//! Each public function owns one of the wire calls we need:
 //!
 //! - [`create_agent`]
 //! - [`create_environment`]
 //! - [`create_session`]
-//! - [`run_event`] — opens the SSE stream, sends the user event, and
-//!   returns the agent's concatenated `agent.message` text.
+//! - [`run_event`] — sends the user event and polls the events endpoint
+//!   until the turn finishes, returning the agent's concatenated
+//!   `agent.message` text.
+//!
+//! ## Why polling, not SSE
+//!
+//! The docs describe a `GET /v1/sessions/<id>/stream` SSE endpoint, but
+//! it returns `not_found_error` in the environments we've tested (the
+//! beta surface appears to gate it). `GET /v1/sessions/<id>/events`
+//! reliably returns the full event history, so [`run_event`] polls that
+//! instead. [`stream_argv`] is kept for when the SSE endpoint becomes
+//! generally available.
 //!
 //! The argv-building helpers are split out so unit tests can assert
 //! shape (URLs, header order, body) without spawning `curl`.
 
 use std::process::Stdio;
+use std::time::Duration;
 
 use serde_json::{json, Value};
 use thiserror::Error;
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::Command;
-use tokio::time::timeout;
+use tokio::time::{sleep, timeout, Instant};
 
 use crate::config::Config;
-use crate::sse::{SseEvent, SseParser};
 
 #[derive(Debug, Error)]
 pub enum ApiError {
@@ -127,7 +136,15 @@ pub fn stream_argv(cfg: &Config, session_id: &str) -> Vec<String> {
 /// Spawn curl with the given argv, await stdout, parse as JSON.
 async fn run_json(cfg: &Config, argv: Vec<String>) -> Result<Value, ApiError> {
     let mut cmd = Command::new(&cfg.curl_binary);
-    cmd.args(&argv).stdin(Stdio::null()).kill_on_drop(true);
+    cmd.args(&argv)
+        .stdin(Stdio::null())
+        // `wait_with_output` only captures piped streams; without these
+        // the child inherits the parent's stdout and `out.stdout` is
+        // empty, which previously surfaced as a spurious "EOF while
+        // parsing" JSON error on every call.
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
     let child = cmd.spawn().map_err(|e| ApiError::Spawn(e.to_string()))?;
     let fut = child.wait_with_output();
     let out = match timeout(cfg.timeout, fut).await {
@@ -205,66 +222,86 @@ pub fn user_event_body(text: &str) -> String {
     .to_string()
 }
 
-/// Full round-trip: open the stream, send `prompt` as a user.message,
-/// collect all `agent.message` text until `session.status_idle`,
-/// terminate the stream. Returns the concatenated agent text.
+/// argv for `GET /v1/sessions/<id>/events` (the full event history).
+pub fn list_events_argv(cfg: &Config, session_id: &str) -> Vec<String> {
+    let mut argv = common_headers(cfg);
+    argv.push(format!("{}/v1/sessions/{}/events", cfg.base_url, session_id));
+    argv
+}
+
+/// Fetch the session's event history; returns the `data` array (empty
+/// if absent).
+async fn list_events(cfg: &Config, session_id: &str) -> Result<Vec<Value>, ApiError> {
+    let v = run_json(cfg, list_events_argv(cfg, session_id)).await?;
+    Ok(v.get("data")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default())
+}
+
+fn event_type(e: &Value) -> Option<&str> {
+    e.get("type").and_then(Value::as_str)
+}
+
+/// Concatenate the `text` blocks of every `agent.message` event in
+/// `events`.
+fn collect_agent_text(events: &[Value]) -> String {
+    events
+        .iter()
+        .filter(|e| event_type(e) == Some("agent.message"))
+        .filter_map(|e| e.get("content").and_then(Value::as_array))
+        .flat_map(|blocks| blocks.iter())
+        .filter(|b| b.get("type").and_then(Value::as_str) == Some("text"))
+        .filter_map(|b| b.get("text").and_then(Value::as_str))
+        .collect()
+}
+
+/// Full round-trip via the events endpoint.
 ///
-/// Per the Managed Agents docs the stream MUST be opened before the
-/// event is sent — the API buffers events until a stream attaches.
+/// 1. Snapshot the current event count so we only pick up messages this
+///    turn produces.
+/// 2. `POST /v1/sessions/<id>/events` with `prompt` as a `user.message`.
+/// 3. Poll `GET /v1/sessions/<id>/events` (~1.5s cadence) until the
+///    events past our snapshot include a terminal `session.status_idle`.
+/// 4. Return the concatenated text of every `agent.message` in that
+///    window.
+///
+/// Bounded by `cfg.timeout`; returns `ApiError::Timeout` if the turn
+/// hasn't finished by then.
 pub async fn run_event(
     cfg: &Config,
     session_id: &str,
     prompt: &str,
 ) -> Result<String, ApiError> {
-    // 1. Spawn the SSE streamer so it attaches before we POST the event.
-    let mut stream_cmd = Command::new(&cfg.curl_binary);
-    stream_cmd
-        .args(stream_argv(cfg, session_id))
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
-    let mut stream_child = stream_cmd
-        .spawn()
-        .map_err(|e| ApiError::Spawn(e.to_string()))?;
-    let stdout = stream_child
-        .stdout
-        .take()
-        .ok_or_else(|| ApiError::Io("stream stdout missing".into()))?;
-    let mut reader = BufReader::new(stdout).lines();
+    let before = list_events(cfg, session_id).await?.len();
 
-    // 2. Send the user event. The API buffers it until the stream attaches.
     let send = run_json(cfg, send_event_argv(cfg, session_id, &user_event_body(prompt)));
-    let _ = match timeout(cfg.timeout, send).await {
+    match timeout(cfg.timeout, send).await {
         Err(_) => return Err(ApiError::Timeout),
-        Ok(r) => r?, // surface the API error if the event POST fails
-    };
-
-    // 3. Pump SSE until session.status_idle.
-    let mut parser = SseParser::new();
-    let mut accumulated = String::new();
-    let read_fut = async {
-        while let Ok(Some(line)) = reader.next_line().await {
-            parser.feed(&line);
-            parser.feed("\n");
-            for ev in parser.drain() {
-                match ev {
-                    SseEvent::AgentMessage { text } => accumulated.push_str(&text),
-                    SseEvent::SessionIdle => return Ok::<_, ApiError>(()),
-                    _ => {}
-                }
-            }
+        Ok(r) => {
+            r?;
         }
-        Ok(())
-    };
-    match timeout(cfg.timeout, read_fut).await {
-        Err(_) => return Err(ApiError::Timeout),
-        Ok(Err(e)) => return Err(e),
-        Ok(Ok(())) => {}
-    };
+    }
 
-    let _ = stream_child.kill().await;
-    Ok(accumulated)
+    let deadline = Instant::now() + cfg.timeout;
+    loop {
+        if Instant::now() >= deadline {
+            return Err(ApiError::Timeout);
+        }
+        sleep(Duration::from_millis(1500)).await;
+        let events = list_events(cfg, session_id).await?;
+        if events.len() <= before {
+            continue; // nothing new yet
+        }
+        let turn = &events[before..];
+        let done = turn
+            .iter()
+            .any(|e| event_type(e) == Some("session.status_idle"));
+        if !done {
+            continue;
+        }
+        return Ok(collect_agent_text(turn));
+    }
 }
 
 #[cfg(test)]
@@ -327,6 +364,52 @@ mod tests {
         assert_eq!(v["events"][0]["type"], "user.message");
         assert_eq!(v["events"][0]["content"][0]["type"], "text");
         assert_eq!(v["events"][0]["content"][0]["text"], "hello world");
+    }
+
+    #[test]
+    fn list_events_argv_is_a_get_on_the_events_subpath() {
+        let argv = list_events_argv(&cfg(), "sesn_abc");
+        assert!(argv
+            .iter()
+            .any(|a| a == "https://api.anthropic.com/v1/sessions/sesn_abc/events"));
+        // No POST, no body — it's a GET.
+        assert!(!argv.contains(&"-X".to_string()));
+        assert!(!argv.contains(&"-d".to_string()));
+    }
+
+    #[test]
+    fn collect_agent_text_concatenates_text_blocks_only() {
+        let events = vec![
+            json!({"type": "session.status_running"}),
+            json!({"type": "user.message", "content": [{"type": "text", "text": "ignore me"}]}),
+            json!({"type": "agent.thinking", "content": [{"type": "text", "text": "ignore thinking"}]}),
+            json!({"type": "agent.message", "content": [
+                {"type": "text", "text": "```json\n"},
+                {"type": "thinking", "thinking": "drop this"},
+                {"type": "text", "text": "{\"ok\":true}\n```"},
+            ]}),
+            json!({"type": "agent.message", "content": [{"type": "text", "text": " trailing"}]}),
+            json!({"type": "session.status_idle"}),
+        ];
+        let text = collect_agent_text(&events);
+        assert_eq!(text, "```json\n{\"ok\":true}\n``` trailing");
+    }
+
+    #[test]
+    fn collect_agent_text_empty_when_no_agent_messages() {
+        let events = vec![
+            json!({"type": "session.status_running"}),
+            json!({"type": "user.message", "content": [{"type": "text", "text": "x"}]}),
+            json!({"type": "session.status_idle"}),
+        ];
+        assert_eq!(collect_agent_text(&events), "");
+    }
+
+    #[test]
+    fn event_type_extracts_string_or_none() {
+        assert_eq!(event_type(&json!({"type": "agent.message"})), Some("agent.message"));
+        assert_eq!(event_type(&json!({"type": 42})), None);
+        assert_eq!(event_type(&json!({})), None);
     }
 
     #[test]

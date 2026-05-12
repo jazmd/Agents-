@@ -15,34 +15,43 @@ For each web-research call the researcher:
    caches both IDs.
 2. **Spins up a Session** — `POST /v1/sessions` with the cached agent
    and environment.
-3. **Opens the SSE stream** — `GET /v1/sessions/<id>/stream` (the
-   Managed Agents API buffers events until the stream attaches).
-4. **POSTs the user event** — `POST /v1/sessions/<id>/events` with a
+3. **POSTs the user event** — `POST /v1/sessions/<id>/events` with a
    schema-pinned `user.message` (prompts reused from
    `aperture-providers-claude::prompts`).
-5. **Drains the stream** — accumulates text from `agent.message`
-   events, terminates on `session.status_idle`.
+4. **Polls the events endpoint** — `GET /v1/sessions/<id>/events` every
+   ~1.5 s until a terminal `session.status_idle` appears past the turn's
+   starting event count.
+5. **Collects the agent's output** — concatenates the `text` blocks of
+   every `agent.message` event in that turn.
 6. **Parses the response as JSON** — tolerates code-fenced or
    prose-wrapped JSON via the same `parse_loose_json` helper as the
    CLI backend.
 7. **Caches the result** with a 1-hour TTL keyed by `(method, args)`.
+
+> **Why polling, not SSE?** The Managed Agents docs describe a
+> `GET /v1/sessions/<id>/stream` SSE endpoint, but it returns
+> `not_found_error` in the environments we've tested (the streaming
+> surface appears gated during the beta). `GET /v1/sessions/<id>/events`
+> reliably returns the full event history, so the crate polls that.
+> An SSE-stream parser (`sse::SseParser`) and `api::stream_argv` are
+> retained for when the streaming endpoint goes GA.
 
 All HTTP calls use `curl` via `tokio::process::Command` so the workspace
 stays free of a heavy `reqwest` / `hyper` / TLS dep tree.
 
 ## Auth
 
-`Config::from_env()` reads the API key from these environment variables,
-in order:
+`Config::from_env()` reads these environment variables:
 
 | Variable | Notes |
 |---|---|
 | `ANTHROPIC_API_KEY` | Anthropic's canonical name (matches all SDKs) |
 | `ANTHROPIC_KEY` | Accepted as a friendly alias |
+| `ANTHROPIC_BASE_URL` | Overrides the API host; defaults to `https://api.anthropic.com` |
 
-Both must be set as a Claude API key (`sk-ant-...`). When neither is set,
-`Config::from_env()` returns `ConfigError::MissingApiKey` and the host
-should either bail or wire the researcher only on opt-in.
+The key must be a Claude API key (`sk-ant-...`). When neither key var is
+set, `Config::from_env()` returns `ConfigError::MissingApiKey` and the
+host should either bail or wire the researcher only on opt-in.
 
 The crate never logs the key.
 
@@ -53,7 +62,6 @@ x-api-key: $ANTHROPIC_API_KEY
 anthropic-version: 2023-06-01
 anthropic-beta: managed-agents-2026-04-01
 content-type: application/json   (for POSTs)
-accept: text/event-stream         (for the stream GET)
 ```
 
 `anthropic-beta` is required per the Managed Agents docs while the API
