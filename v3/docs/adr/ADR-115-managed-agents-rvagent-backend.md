@@ -90,6 +90,25 @@ Roughly ~7 s wall-clock for a trivial bash task on Haiku. The container provisio
 
 This ADR records the *intent to build*; the plugin's internals (exact handle shape, stream-vs-poll, gallery storage, federation wiring) are a follow-up implementation PR.
 
+### Future: a third runtime — the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`)
+
+This ADR adds the *cloud* runtime (Managed Agents). There's a natural *third* runtime that completes the spectrum: the **[Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview)** (`@anthropic-ai/claude-agent-sdk` for TS, `claude-agent-sdk` for Python) — "Claude Code as a library": `query({prompt, options})` / `ClaudeSDKClient`, with built-in tools (Read/Write/Edit/Bash/Glob/Grep/WebSearch/WebFetch/Monitor/AskUserQuestion), hooks (`PreToolUse`/`PostToolUse`/`Stop`/`SessionStart`/…), subagents (`agents` option + the `Agent` tool), MCP servers (`mcpServers` option), permission modes (`permissionMode`/`allowedTools`), sessions (resume/fork), and it loads Claude Code's filesystem config (`.claude/skills/*/SKILL.md`, `.claude/commands/*.md`, `CLAUDE.md`, plugins). It bundles a native Claude Code binary. **Runs in your process, on your filesystem** — full host trust.
+
+So `ruflo-agent` would expose three runtimes behind one mental model:
+
+| Runtime | Package | Runs on | Trust | Best for |
+|---|---|---|---|---|
+| **WASM** (`rvagent`) | `@ruvector/rvagent-wasm` | local WASM sandbox | sandboxed (no host fs/net) | untrusted code; portable/replayable RVF containers; fast, free, offline |
+| **SDK** (`sdk_agent_*`, future) | `@anthropic-ai/claude-agent-sdk` | your process / your filesystem | full host trust | a real Claude agent loop (hooks, subagents, MCP, sessions, skills) on the local repo/services — the programmatic, in-process version of `claude -p` |
+| **Managed** (`managed_agent_*`, this ADR) | Managed Agents REST API | Anthropic cloud container | cloud-isolated | long-running/async; managed infra; no local setup; persistent server-side session |
+
+Why the SDK runtime is worth adding (a follow-up — likely its own ADR-116):
+- It **is** Claude Code's machinery, exposed as a library — and ruflo already loads `.claude/skills`, `.claude/commands`, `CLAUDE.md`, plugins, and shells out to `claude -p`. The SDK is the in-process version: full control over the message stream, hooks (ruflo's own hooks), subagents (ruflo's 16 roles), MCP servers, permission modes, sessions.
+- The "give the agent ruflo's 314 tools" combo is **trivial** here (unlike Managed Agents, which needs a publicly reachable URL): pass `mcpServers: { ruflo: { command: "npx", args: ["ruflo", "mcp", "start"] } }` — a *local* stdio MCP server, no deployment.
+- Anthropic positions it as "prototype with the Agent SDK locally → move to Managed Agents for production" — having both in `ruflo-agent` gives ruflo exactly that path.
+
+Costs/constraints (so it stays opt-in, plugin-level, off by default — `wasm_agent_*` remains the safe default): a real, heavy dependency (bundles a Claude Code binary as an optional dep); **full host trust, no sandbox** — the least-isolated of the three (a WASM agent can't touch your fs; an SDK agent can); needs `ANTHROPIC_API_KEY` (or Bedrock/Vertex/Azure creds). Branding rules (not "Claude Code").
+
 ## Consequences
 
 ### Positive
