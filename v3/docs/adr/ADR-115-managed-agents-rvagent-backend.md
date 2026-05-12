@@ -3,12 +3,12 @@
 **Status**: Proposed (2026-05-12)
 **Date**: 2026-05-12
 **Authors**: claude (drafted with rUv)
-**Related**: `ruflo-wasm` plugin / `wasm_agent_*` MCP tools (`@ruvector/rvagent-wasm`) · ADR-026 (3-tier model routing) · ADR-095 G2 / ADR-104 (pluggable `ConsensusTransport` / `FederationTransport`) · ADR-097 (federation peers) · ADR-112 (MCP tool discoverability) · [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview)
+**Related**: `ruflo-agent` plugin / `wasm_agent_*` MCP tools (`@ruvector/rvagent-wasm`) · ADR-026 (3-tier model routing) · ADR-095 G2 / ADR-104 (pluggable `ConsensusTransport` / `FederationTransport`) · ADR-097 (federation peers) · ADR-112 (MCP tool discoverability) · [Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/overview)
 **Supersedes**: nothing
 
 ## Context
 
-Ruflo's `rvagent` capability — the `ruflo-wasm` plugin, wrapping `@ruvector/rvagent-wasm` — is a *local, WASM-sandboxed* agent harness. Its MCP surface:
+Ruflo's `rvagent` capability — the `ruflo-agent` plugin, wrapping `@ruvector/rvagent-wasm` — is a *local, WASM-sandboxed* agent harness. Its MCP surface:
 
 | `rvagent` tool | What it does |
 |---|---|
@@ -82,7 +82,7 @@ Roughly ~7 s wall-clock for a trivial bash task on Haiku. The container provisio
 
 ### Constraints / boundaries
 
-- **Optional, off by default.** `runtime: "wasm"` stays the default; `runtime: "managed"` requires `ANTHROPIC_API_KEY` (or the GCP `anthropic-api-key` secret in CI/ops) and the beta header — degrade gracefully (`{ error: "managed runtime needs ANTHROPIC_API_KEY + managed-agents beta access" }`) when absent. No core package gains a hard dependency on `@anthropic-ai/sdk` for this — it's a plugin-level dep (`ruflo-wasm` / a new `ruflo-managed-agents`), lazily imported.
+- **Optional, off by default.** `runtime: "wasm"` stays the default; `runtime: "managed"` requires `ANTHROPIC_API_KEY` (or the GCP `anthropic-api-key` secret in CI/ops) and the beta header — degrade gracefully (`{ error: "managed runtime needs ANTHROPIC_API_KEY + managed-agents beta access" }`) when absent. No core package gains a hard dependency on `@anthropic-ai/sdk` for this — it's a plugin-level dep (`ruflo-agent` / a new `ruflo-managed-agents`), lazily imported.
 - **Cost & rate limits.** Managed Agents bill per session (LM tokens + container time) and are rate-limited per org (create: 300/min, read: 600/min) plus tier spend limits. The tool descriptions must say so (ADR-112), and `cost-tracking` should record Managed-Agent sessions the same way it records LM calls. `wasm_agent_prompt({runtime:"managed"})` should surface an estimated cost before a long run.
 - **Beta churn.** The API is beta (`managed-agents-2026-04-01`); `multiagent` and `define-outcomes` are research preview. Pin the beta header in one place; treat the latter two as feature-flagged.
 - **Branding.** Anthropic's branding guidelines forbid presenting a Managed-Agents integration as "Claude Code"/"Claude Cowork" — ruflo keeps its own branding; surface it as "ruflo agent (Anthropic Managed runtime)" not "Claude Code agent".
@@ -115,7 +115,7 @@ This ADR records the *intent to build*; the plugin's internals (exact handle sha
 ## Links
 
 - Claude Managed Agents — overview: https://platform.claude.com/docs/en/managed-agents/overview · quickstart: https://platform.claude.com/docs/en/managed-agents/quickstart · sessions API: https://platform.claude.com/docs/en/managed-agents/sessions · tools: https://platform.claude.com/docs/en/managed-agents/tools
-- `@ruvector/rvagent-wasm` (the `rvagent` backend) — dep of `@claude-flow/cli`; surfaced via the `ruflo-wasm` plugin's `wasm_agent_*` MCP tools
+- `@ruvector/rvagent-wasm` (the `rvagent` backend) — dep of `@claude-flow/cli`; surfaced via the `ruflo-agent` plugin's `wasm_agent_*` MCP tools
 - ADR-095 G2 / ADR-104 — pluggable `ConsensusTransport` / `FederationTransport` (the local-vs-cloud pattern this reuses)
 - ADR-097 — federation peers (a Managed Agent session ≈ a federated executor)
 - ADR-026 — 3-tier model routing (Managed Agent `model` selection should route through this)
