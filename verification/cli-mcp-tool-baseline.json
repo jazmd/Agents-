@@ -1,0 +1,27 @@
+{
+  "_comment": "Monotone-decreasing baseline of CLI subcommands that callMCPTool() a tool not registered in src/mcp-tools/*.ts (would fail with `MCP tool not found`). Fix one → re-run with --update-baseline to lock the new floor. NEVER increase.",
+  "danglingCount": 20,
+  "knownDangling": [
+    "hive-mind_optimize-memory",
+    "hooks_coverage-gaps",
+    "hooks_coverage-route",
+    "hooks_coverage-suggest",
+    "hooks_task-completed",
+    "hooks_teammate-idle",
+    "mcp_start",
+    "mcp_stop",
+    "memory_cleanup",
+    "memory_compress",
+    "memory_detailed-stats",
+    "memory_export",
+    "memory_import",
+    "session_current",
+    "session_export",
+    "session_import",
+    "swarm_stop",
+    "task_retry",
+    "workflow_stop",
+    "workflow_validate"
+  ],
+  "updatedAt": "2026-05-12T03:49:58.604Z"
+}

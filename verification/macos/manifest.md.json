@@ -1,19 +1,19 @@
 {
   "manifest": {
     "schema": "ruflo-witness/v1",
-    "issuedAt": "2026-05-11T14:55:59.302Z",
-    "gitCommit": "a03f6f6ed939659784dc1f35916351f06b74aa92",
-    "branch": "fix/1906-model-aliases",
+    "issuedAt": "2026-05-12T03:52:34.318Z",
+    "gitCommit": "511b2ac0704c4b9fbf3d023dbab7cc5193ae9ce3",
+    "branch": "fix/1916-agent-logs-hive-resolution",
     "os": "macos",
     "releases": {
-      "ruflo": "3.7.0-alpha.23",
-      "claude-flow": "3.7.0-alpha.23",
-      "@claude-flow/cli": "3.7.0-alpha.23",
+      "ruflo": "3.7.0-alpha.24",
+      "claude-flow": "3.7.0-alpha.24",
+      "@claude-flow/cli": "3.7.0-alpha.24",
       "@claude-flow/memory": "3.0.0-alpha.15"
     },
     "summary": {
-      "totalFixes": 104,
-      "verified": 104,
+      "totalFixes": 106,
+      "verified": 106,
       "missing": 0
     },
     "fixes": [
@@ -117,7 +117,7 @@
         "id": "#1697",
         "desc": "rvf-wasm overrides",
         "file": "package.json",
-        "sha256": "20718f418eaba94d70e2281f30c45a61bf8f687100ee89df847c8a145ed46b82",
+        "sha256": "7f7f570c531e9c40aab22518f3b092bef9b9e02a725a948eee8afa99aec01191",
         "marker": "@ruvector/rvf-wasm",
         "markerVerified": true
       },
@@ -141,7 +141,7 @@
         "id": "#1721",
         "desc": "postinstall copies all dist/src/* siblings",
         "file": "v3/@claude-flow/cli/package.json",
-        "sha256": "a3034ee03daf8f563b417f166a7d151879b83b8d6a7bb7d5ae837c82d61a1d5f",
+        "sha256": "6c0aa3c96140cf2f57e3986c5a9fa6925855fa23ab6270cb649298cc5b589d00",
         "marker": "postinstall.cjs",
         "markerVerified": true
       },
@@ -237,7 +237,7 @@
         "id": "CAP-MCP-agent-tools",
         "desc": "MCP tools (8): agent_execute, agent_health, agent_list, …",
         "file": "v3/@claude-flow/cli/dist/src/mcp-tools/agent-tools.js",
-        "sha256": "f68068c98d16ffe0e280613ad66839959ef7ca60f6fc570718b2f9d902af73a0",
+        "sha256": "a182a61809b5480e9eb4139ed8fa3b8e471201d338be4e086578b4e2e325302a",
         "marker": "agent_execute",
         "markerVerified": true
       },
@@ -461,7 +461,7 @@
         "id": "#1795",
         "desc": "umbrella package missing cli-core dep (ERR_MODULE_NOT_FOUND)",
         "file": "package.json",
-        "sha256": "20718f418eaba94d70e2281f30c45a61bf8f687100ee89df847c8a145ed46b82",
+        "sha256": "7f7f570c531e9c40aab22518f3b092bef9b9e02a725a948eee8afa99aec01191",
         "marker": "@claude-flow/cli-core",
         "markerVerified": true
       },
@@ -629,7 +629,7 @@
         "id": "#1825",
         "desc": "hotfix: workspace: protocol leak in cli optionalDependencies",
         "file": "v3/@claude-flow/cli/package.json",
-        "sha256": "a3034ee03daf8f563b417f166a7d151879b83b8d6a7bb7d5ae837c82d61a1d5f",
+        "sha256": "6c0aa3c96140cf2f57e3986c5a9fa6925855fa23ab6270cb649298cc5b589d00",
         "marker": "\"@claude-flow/memory\": \"^3.0.0-alpha.14\"",
         "markerVerified": true
       },
@@ -848,15 +848,31 @@
         "sha256": "2bc49c38b14d43a0329bf5d84913528851ef1c48ab32b8c8c1c40f83c062fc7f",
         "marker": "claude-sonnet-4-6",
         "markerVerified": true
+      },
+      {
+        "id": "#1916",
+        "desc": "agent_logs MCP tool registered (the `ruflo agent logs <id>` CLI subcommand called a tool that didn't exist → `MCP tool not found: agent_logs`). Also agent_status/agent_list/agent_logs now resolve hive-mind-spawned workers via loadAllAgents() — hive-mind_spawn writes to `.claude-flow/agents.json`, a different file from `.claude-flow/agents/store.json`, so `agent status <hive-worker-id>` returned `not_found`. (Task-execution dispatch for hive workers — #1916 items 3/4 — is a tracked follow-up.) Unit guard __tests__/agent-logs-hive-resolution.test.ts.",
+        "file": "v3/@claude-flow/cli/dist/src/mcp-tools/agent-tools.js",
+        "sha256": "a182a61809b5480e9eb4139ed8fa3b8e471201d338be4e086578b4e2e325302a",
+        "marker": "loadAllAgents",
+        "markerVerified": true
+      },
+      {
+        "id": "#1916-guard",
+        "desc": "CLI↔MCP tool coverage CI guard (scripts/audit-cli-mcp-tools.mjs) — fails if any `ruflo <cmd>` subcommand callMCPTool()s a name not registered in src/mcp-tools/*.ts. Monotone-decreasing baseline at verification/cli-mcp-tool-baseline.json (20 known-dangling commands carried; new dangling refs fail). Wired into v3-ci.yml `tool-descriptions-audit` job (already in witness-verify needs[]).",
+        "file": "scripts/audit-cli-mcp-tools.mjs",
+        "sha256": "ef533df89d56184aad884b17bb0422b142a45d063f755e21260613cd3bc70118",
+        "marker": "cli-mcp-tool-baseline.json",
+        "markerVerified": true
       }
     ]
   },
   "integrity": {
     "manifestHashAlgo": "sha256",
-    "manifestHash": "94245095c0e9d6f1af63cb9dc4e6e5e323c1a80587e39ca7a25c9485a66d36e9",
+    "manifestHash": "1c8ab7d1d8b4ea8981ca43658c9ce6ccbfd75bee439034f83272f1c99f8b2c5d",
     "signatureAlgo": "ed25519",
-    "publicKey": "a8ffd8705900919cebae426f9b297a9d124cc29b2178cb6e34a5e6f2366b9a84",
-    "signature": "2422c16436e6e3a9f71ce7ce1ac697fca1e8ebd7396dd3ad278526dc4d732d67fd11d26b4561c52eff5eec61aef03f926f47fea6dfe808ef41cdf93ecab8e503",
+    "publicKey": "066993064e375dd2f56e7c870bf367b46ef87cea8a998e8b4492eafd8cddfe03",
+    "signature": "0b78ec15459ee9f843cd00c642acd2ce7d8c24bbf9341f34fc81297975263439df2edd6722afd6a357f30c7cb64cdabba3543edff0a3af31388a7fcfbd74640d",
     "seedDerivation": "sha256(gitCommit + ':ruflo-witness/v1')"
   }
 }
