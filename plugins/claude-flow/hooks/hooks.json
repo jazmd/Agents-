@@ -1,0 +1,36 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx claude-flow@latest hooks pre-bash --command \"$CLAUDE_TOOL_INPUT_COMMAND\" 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx claude-flow@latest hooks post-bash --command \"$CLAUDE_TOOL_INPUT_COMMAND\" --success \"$CLAUDE_TOOL_SUCCESS\" 2>/dev/null || true"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx claude-flow@latest hooks session-end --generate-summary true 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
+}
