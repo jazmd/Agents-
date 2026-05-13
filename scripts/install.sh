@@ -4,10 +4,10 @@
 # https://github.com/ruvnet/ruflo
 #
 # Usage:
-#   curl -fsSL https://cdn.jsdelivr.net/gh/ruvnet/claude-flow@main/scripts/install.sh | bash
-#   curl -fsSL https://cdn.jsdelivr.net/gh/ruvnet/claude-flow@main/scripts/install.sh | bash -s -- --full
-#   curl -fsSL https://cdn.jsdelivr.net/gh/ruvnet/claude-flow@main/scripts/install.sh | bash -s -- --global
-#   curl -fsSL https://cdn.jsdelivr.net/gh/ruvnet/claude-flow@main/scripts/install.sh | bash -s -- --minimal
+#   curl -fsSL https://cdn.jsdelivr.net/gh/ruvnet/ruflo@main/scripts/install.sh | bash
+#   curl -fsSL https://cdn.jsdelivr.net/gh/ruvnet/ruflo@main/scripts/install.sh | bash -s -- --full
+#   curl -fsSL https://cdn.jsdelivr.net/gh/ruvnet/ruflo@main/scripts/install.sh | bash -s -- --global
+#   curl -fsSL https://cdn.jsdelivr.net/gh/ruvnet/ruflo@main/scripts/install.sh | bash -s -- --minimal
 #
 # Options (via arguments):
 #   --global              Global install (npm install -g)
@@ -284,8 +284,11 @@ show_quickstart() {
     echo ""
 
     if [ "$GLOBAL" = "1" ]; then
-        echo -e "  ${DIM}# Initialize project${NC}"
-        echo -e "  ${BOLD}ruflo init --wizard${NC}"
+        echo -e "  ${DIM}# Interactive setup wizard${NC}"
+        echo -e "  ${BOLD}ruflo init wizard${NC}"
+        echo ""
+        echo -e "  ${DIM}# Quick non-interactive init${NC}"
+        echo -e "  ${BOLD}ruflo init${NC}"
         echo ""
         echo -e "  ${DIM}# Run system diagnostics${NC}"
         echo -e "  ${BOLD}ruflo doctor${NC}"
@@ -293,8 +296,11 @@ show_quickstart() {
         echo -e "  ${DIM}# Add as MCP server to Claude Code${NC}"
         echo -e "  ${BOLD}claude mcp add ruflo -- ruflo mcp start${NC}"
     else
-        echo -e "  ${DIM}# Initialize project${NC}"
-        echo -e "  ${BOLD}npx ruflo@latest init --wizard${NC}"
+        echo -e "  ${DIM}# Interactive setup wizard${NC}"
+        echo -e "  ${BOLD}npx ruflo@latest init wizard${NC}"
+        echo ""
+        echo -e "  ${DIM}# Quick non-interactive init${NC}"
+        echo -e "  ${BOLD}npx ruflo@latest init${NC}"
         echo ""
         echo -e "  ${DIM}# Run system diagnostics${NC}"
         echo -e "  ${BOLD}npx ruflo@latest doctor${NC}"
@@ -366,9 +372,9 @@ run_init() {
     echo ""
 
     if [ "$GLOBAL" = "1" ]; then
-        ruflo init --yes 2>&1 || true
+        ruflo init 2>&1 || true
     else
-        npx ruflo@${VERSION} init --yes 2>&1 || true
+        npx ruflo@${VERSION} init 2>&1 || true
     fi
     echo ""
 }
