@@ -729,9 +729,14 @@ const statsCommand: Command = {
       // a fresh call still resolves quickly because we only need the
       // metadata, not a real embedding.
       try {
-        const { loadEmbeddingModel, getHNSWStatus } = await import('../memory/memory-initializer.js');
+        const { loadEmbeddingModel, getHNSWStatus, countVectorEntries } = await import('../memory/memory-initializer.js');
         const embedding = await loadEmbeddingModel({ verbose: false });
         const hnsw = getHNSWStatus();
+        // #1987: getHNSWStatus().entryCount reflects only the in-process
+        // singleton, which is always 0 in a fresh `memory stats` process.
+        // Pull the durable count from the SQLite store so the display matches
+        // what `memory list` and `memory search` actually see.
+        const persistedVectorCount = await countVectorEntries();
         // Map model name → semantic capability so users can spot the
         // hash-fallback case without reading docs.
         const semanticProviders = new Set([
@@ -768,8 +773,12 @@ const statsCommand: Command = {
             },
             {
               metric: 'HNSW Index',
-              value: hnsw.available && hnsw.initialized
-                ? output.success(`active (${hnsw.entryCount.toLocaleString()} entries)`)
+              // #1987: report the persisted vector-entry count (queried from
+              // SQLite each call) rather than the in-process singleton size.
+              // "active" means the store has indexable rows; the in-process
+              // index is built lazily on first search.
+              value: persistedVectorCount > 0
+                ? output.success(`active (${persistedVectorCount.toLocaleString()} entries)`)
                 : hnsw.available
                   ? output.warning('available but not initialized')
                   : output.dim('not active'),

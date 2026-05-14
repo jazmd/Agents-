@@ -664,6 +664,12 @@ export async function searchHNSWIndex(
 
 /**
  * Get HNSW index status
+ *
+ * #1987: `entryCount` here reflects ONLY the in-process `hnswIndex` singleton.
+ * A fresh CLI invocation never hydrates that singleton (it loads lazily on
+ * search), so this count is always 0 for `memory stats`. Callers that want
+ * the durable count of embedded rows should use `countVectorEntries()` and
+ * keep this function for the in-process index status alone.
  */
 export function getHNSWStatus(): {
   available: boolean;
@@ -688,6 +694,36 @@ export function getHNSWStatus(): {
     entryCount: hnswIndex?.entries.size ?? 0,
     dimensions: hnswIndex?.dimensions ?? 384
   };
+}
+
+/**
+ * #1987: Count persisted `memory_entries` rows that have an embedding,
+ * independent of the in-process HNSW singleton. Used by `memory stats` so a
+ * fresh CLI process reports the durable count, not the empty in-process
+ * cache. Returns 0 if the DB does not exist yet or the query fails — same
+ * shape as a never-populated index, which is the correct fallback for stats.
+ */
+export async function countVectorEntries(dbPath?: string): Promise<number> {
+  const path_ = dbPath || path.join(getMemoryRoot(), 'memory.db');
+  if (!fs.existsSync(path_)) return 0;
+
+  try {
+    const initSqlJs = (await import('sql.js')).default;
+    const SQL = await initSqlJs();
+    const fileBuffer = fs.readFileSync(path_);
+    const db = new SQL.Database(fileBuffer);
+    try {
+      const result = db.exec(
+        "SELECT COUNT(*) FROM memory_entries WHERE embedding IS NOT NULL AND embedding != ''"
+      );
+      const count = (result[0]?.values[0]?.[0] as number) ?? 0;
+      return typeof count === 'number' ? count : 0;
+    } finally {
+      db.close();
+    }
+  } catch {
+    return 0;
+  }
 }
 
 /**
