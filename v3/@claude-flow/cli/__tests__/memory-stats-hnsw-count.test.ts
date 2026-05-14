@@ -17,8 +17,6 @@ import {
   _resetMemoryRootCache,
   countVectorEntries,
   getMemoryRoot,
-  initializeMemoryDatabase,
-  storeEntry,
 } from '../src/memory/memory-initializer.js';
 
 const SAVED_ENV: Record<string, string | undefined> = {};
@@ -32,18 +30,42 @@ function restoreEnv() {
   }
 }
 
+// Minimal schema mirror of memory_entries — only the columns
+// countVectorEntries actually queries. Keeps the test independent of
+// future schema evolution while pinning the count contract.
+const MEMORY_ENTRIES_MIN_SCHEMA = `
+  CREATE TABLE memory_entries (
+    id TEXT PRIMARY KEY,
+    key TEXT NOT NULL,
+    namespace TEXT DEFAULT 'default',
+    content TEXT NOT NULL,
+    type TEXT DEFAULT 'semantic',
+    embedding TEXT,
+    embedding_dimensions INTEGER,
+    embedding_model TEXT,
+    created_at INTEGER NOT NULL DEFAULT 0,
+    updated_at INTEGER NOT NULL DEFAULT 0
+  );
+`;
+
+async function loadSqlJs() {
+  const { createRequire } = await import('node:module');
+  const req = createRequire(import.meta.url);
+  const initSqlJs = req('sql.js') as typeof import('sql.js').default;
+  return initSqlJs();
+}
+
 describe('#1987 memory stats HNSW count', () => {
   let workdir: string;
   let dbPath: string;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     saveEnv('CLAUDE_FLOW_MEMORY_PATH', 'CLAUDE_FLOW_ENCRYPT_AT_REST');
     delete process.env.CLAUDE_FLOW_ENCRYPT_AT_REST;
     workdir = mkdtempSync(join(tmpdir(), 'mem-stats-hnsw-'));
     process.env.CLAUDE_FLOW_MEMORY_PATH = workdir;
     _resetMemoryRootCache();
     dbPath = join(workdir, 'memory.db');
-    await initializeMemoryDatabase({ dbPath, force: true });
   });
 
   afterEach(() => {
@@ -52,42 +74,83 @@ describe('#1987 memory stats HNSW count', () => {
     restoreEnv();
   });
 
+  async function seedDb(rows: Array<{ id: string; key: string; embedding: string | null }>): Promise<void> {
+    const SQL = await loadSqlJs();
+    const db = new SQL.Database();
+    db.exec(MEMORY_ENTRIES_MIN_SCHEMA);
+    const now = Date.now();
+    for (const r of rows) {
+      db.run(
+        `INSERT INTO memory_entries (id, key, namespace, content, type, embedding, embedding_dimensions, embedding_model, created_at, updated_at)
+         VALUES (?, ?, 'ns', ?, 'semantic', ?, ?, ?, ?, ?)`,
+        [r.id, r.key, `content for ${r.key}`, r.embedding, r.embedding ? 384 : null, r.embedding ? 'test' : null, now, now]
+      );
+    }
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(dbPath, Buffer.from(db.export()));
+    db.close();
+  }
+
   it('resolves to the tmpdir via CLAUDE_FLOW_MEMORY_PATH', () => {
     expect(getMemoryRoot()).toBe(workdir);
   });
 
-  it('returns 0 from an empty DB', async () => {
-    const count = await countVectorEntries(dbPath);
-    expect(count).toBe(0);
-  });
-
   it('returns 0 when the DB file is missing', async () => {
-    const missing = join(workdir, 'does-not-exist.db');
-    const count = await countVectorEntries(missing);
-    expect(count).toBe(0);
+    expect(await countVectorEntries(dbPath)).toBe(0);
   });
 
-  it('counts entries that have an embedding after store', async () => {
-    const result = await storeEntry({
-      key: 'oauth-design',
-      value: 'OAuth2 with PKCE flow for the auth service',
-      namespace: 'test-ns',
-      dbPath,
-    });
-    expect(result.success).toBe(true);
-
-    const count = await countVectorEntries(dbPath);
-    // Pre-fix this assertion failed because `getHNSWStatus().entryCount`
-    // (the value the stats handler used) was always 0 in a fresh process.
-    expect(count).toBeGreaterThanOrEqual(1);
+  it('returns 0 from a DB with no embedded rows', async () => {
+    await seedDb([
+      { id: 'a', key: 'no-vec', embedding: null },
+      { id: 'b', key: 'also-no-vec', embedding: null },
+    ]);
+    expect(await countVectorEntries(dbPath)).toBe(0);
   });
 
-  it('counts multiple entries across namespaces', async () => {
-    await storeEntry({ key: 'a', value: 'first entry with text', namespace: 'ns1', dbPath });
-    await storeEntry({ key: 'b', value: 'second entry with text', namespace: 'ns1', dbPath });
-    await storeEntry({ key: 'c', value: 'third entry with text', namespace: 'ns2', dbPath });
+  it('returns the count of rows with a non-empty embedding', async () => {
+    const fakeEmbedding = JSON.stringify(new Array(384).fill(0).map(() => Math.random()));
+    await seedDb([
+      { id: 'a', key: 'has-vec-1', embedding: fakeEmbedding },
+      { id: 'b', key: 'has-vec-2', embedding: fakeEmbedding },
+      { id: 'c', key: 'has-vec-3', embedding: fakeEmbedding },
+      { id: 'd', key: 'no-vec', embedding: null },
+    ]);
+    // Pre-fix the stats command read this number from an empty in-process
+    // HNSW singleton and reported 0 every time. After the fix, it queries
+    // SQLite and returns the durable count — independent of process state.
+    expect(await countVectorEntries(dbPath)).toBe(3);
+  });
 
-    const count = await countVectorEntries(dbPath);
-    expect(count).toBeGreaterThanOrEqual(3);
+  it('treats empty-string embeddings as missing', async () => {
+    await seedDb([
+      { id: 'a', key: 'empty-str', embedding: '' },
+      { id: 'b', key: 'valid', embedding: JSON.stringify([0.1, 0.2]) },
+    ]);
+    expect(await countVectorEntries(dbPath)).toBe(1);
+  });
+
+  it('honors a custom dbPath argument over CLAUDE_FLOW_MEMORY_PATH', async () => {
+    // No file at the default path — only at a custom one.
+    const customDir = mkdtempSync(join(tmpdir(), 'mem-stats-custom-'));
+    try {
+      const customDb = join(customDir, 'memory.db');
+      const SQL = await loadSqlJs();
+      const db = new SQL.Database();
+      db.exec(MEMORY_ENTRIES_MIN_SCHEMA);
+      db.run(
+        `INSERT INTO memory_entries (id, key, content, embedding, created_at, updated_at)
+         VALUES ('a', 'k', 'c', ?, 0, 0)`,
+        [JSON.stringify([1, 2, 3])]
+      );
+      const { writeFileSync } = await import('node:fs');
+      writeFileSync(customDb, Buffer.from(db.export()));
+      db.close();
+
+      expect(await countVectorEntries(customDb)).toBe(1);
+      // Default path is still empty.
+      expect(await countVectorEntries(dbPath)).toBe(0);
+    } finally {
+      rmSync(customDir, { recursive: true, force: true });
+    }
   });
 });
