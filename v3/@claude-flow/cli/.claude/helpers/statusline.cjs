@@ -38,11 +38,19 @@ let RUFLO_VERSION = '3.6';
 try {
   const home = os.homedir();
   const cwd = process.cwd();
+  const npmGlobalWin = path.join(process.env.APPDATA || path.join(home, 'AppData', 'Roaming'), 'npm', 'node_modules');
   const pkgPaths = [
     path.join(home, '.claude', 'plugins', 'marketplaces', 'ruflo', 'package.json'),
     path.join(cwd, 'node_modules', '@claude-flow', 'cli', 'package.json'),
     path.join(cwd, 'node_modules', 'ruflo', 'package.json'),
     path.join(cwd, 'v3', '@claude-flow', 'cli', 'package.json'),
+    // Global npm installs (including npm link) — Windows and Unix
+    path.join(npmGlobalWin, '@claude-flow', 'cli', 'package.json'),
+    path.join(npmGlobalWin, 'ruflo', 'package.json'),
+    '/usr/local/lib/node_modules/@claude-flow/cli/package.json',
+    '/usr/local/lib/node_modules/ruflo/package.json',
+    path.join(home, '.npm-global', 'lib', 'node_modules', '@claude-flow', 'cli', 'package.json'),
+    path.join(home, '.npm-global', 'lib', 'node_modules', 'ruflo', 'package.json'),
   ];
   for (const p of pkgPaths) {
     if (!fs.existsSync(p)) continue;

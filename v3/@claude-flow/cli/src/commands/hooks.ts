@@ -4294,8 +4294,34 @@ const statuslineCommand: Command = {
       return '[' + '●'.repeat(filled) + '○'.repeat(empty) + ']';
     };
 
+    // Read installed version (same probe order as statusline.cjs helpers)
+    let rufloVersion = '3';
+    try {
+      const home = process.env.HOME || process.env.USERPROFILE || '';
+      const appdata = process.env.APPDATA || join(home, 'AppData', 'Roaming');
+      const cwd = process.cwd();
+      const versionPaths = [
+        join(home, '.claude', 'plugins', 'marketplaces', 'ruflo', 'package.json'),
+        join(cwd, 'node_modules', '@claude-flow', 'cli', 'package.json'),
+        join(cwd, 'node_modules', 'ruflo', 'package.json'),
+        join(cwd, 'v3', '@claude-flow', 'cli', 'package.json'),
+        join(appdata, 'npm', 'node_modules', '@claude-flow', 'cli', 'package.json'),
+        join(appdata, 'npm', 'node_modules', 'ruflo', 'package.json'),
+        '/usr/local/lib/node_modules/@claude-flow/cli/package.json',
+        '/usr/local/lib/node_modules/ruflo/package.json',
+        join(home, '.npm-global', 'lib', 'node_modules', '@claude-flow', 'cli', 'package.json'),
+      ];
+      for (const p of versionPaths) {
+        if (!existsSync(p)) continue;
+        try {
+          const pkg = JSON.parse(readFileSync(p, 'utf-8'));
+          if (pkg?.version) { rufloVersion = pkg.version; break; }
+        } catch { /* try next */ }
+      }
+    } catch { /* fall through */ }
+
     // Generate lines
-    let header = `${c.bold}${c.brightPurple}▊ RuFlo V3 ${c.reset}`;
+    let header = `${c.bold}${c.brightPurple}▊ RuFlo V${rufloVersion} ${c.reset}`;
     header += `${swarm.coordinationActive ? c.brightCyan : c.dim}● ${c.brightCyan}${user.name}${c.reset}`;
     if (user.gitBranch) {
       header += `  ${c.dim}│${c.reset}  ${c.brightBlue}⎇ ${user.gitBranch}${c.reset}`;
@@ -4403,19 +4429,54 @@ const statuslineCommand: Command = {
       } catch { /* ignore */ }
     }
 
-    // Get test stats
+    // Get test stats — supports single-repo and multi-repo (workspace.yaml)
     const testStats = { testFiles: 0, testCases: 0 };
-    const testPaths = ['tests', '__tests__', 'test', 'spec'];
-    for (const testPath of testPaths) {
-      const fullPath = path.join(process.cwd(), testPath);
-      if (fs.existsSync(fullPath)) {
+    const TEST_FILE_RE = /\.(test|spec)\.(ts|js|tsx|jsx)$/;
+    const EXCLUDE_RE = /node_modules|dist|build|coverage|\.next/;
+
+    function countTestsInDir(baseDir: string): number {
+      let count = 0;
+      const scanDirs = ['src', 'tests', '__tests__', 'test', 'spec', '.'];
+      const visited = new Set<string>();
+      for (const sub of scanDirs) {
+        const fullPath = sub === '.' ? baseDir : path.join(baseDir, sub);
+        if (!fs.existsSync(fullPath) || visited.has(fullPath)) continue;
+        visited.add(fullPath);
         try {
           const files = fs.readdirSync(fullPath, { recursive: true }) as string[];
-          testStats.testFiles = files.filter((f: string) => /\.(test|spec)\.(ts|js|tsx|jsx)$/.test(f)).length;
-          testStats.testCases = testStats.testFiles * 28; // Estimate
+          count += files.filter((f: string) => TEST_FILE_RE.test(f) && !EXCLUDE_RE.test(f)).length;
         } catch { /* ignore */ }
       }
+      return count;
     }
+
+    // Check for multi-repo workspace.yaml
+    const wsYamlPath = ['workspace.yaml', 'workspace.yml']
+      .map(n => path.join(process.cwd(), n))
+      .find(p => fs.existsSync(p));
+
+    if (wsYamlPath) {
+      try {
+        // Dynamically import yaml (available as dep) to parse workspace
+        const { parse: parseYaml } = await import('yaml');
+        const ws = parseYaml(fs.readFileSync(wsYamlPath, 'utf-8')) as Record<string, unknown>;
+        const repos = (ws?.ruflo as Record<string, unknown>)?.tests as { repos?: Array<{ path: string }> } | undefined;
+        const repoList = repos?.repos ?? (ws?.repos as Array<{ path: string }> | undefined) ?? [];
+        for (const repo of repoList) {
+          const repoPath = path.resolve(process.cwd(), repo.path);
+          if (fs.existsSync(repoPath)) {
+            testStats.testFiles += countTestsInDir(repoPath);
+          }
+        }
+      } catch { /* fall through to single-repo scan */ }
+    }
+
+    // Single-repo fallback (or supplement if workspace scan found nothing)
+    if (testStats.testFiles === 0) {
+      testStats.testFiles = countTestsInDir(process.cwd());
+    }
+
+    testStats.testCases = testStats.testFiles * 4; // conservative estimate per file
 
     // Get MCP stats
     const mcpStats = { enabled: 0, total: 0 };

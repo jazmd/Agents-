@@ -346,7 +346,7 @@ function mergeSettingsForUpgrade(existing: Record<string, unknown>): Record<stri
   if (existingStatusLine) {
     merged.statusLine = {
       type: 'command',
-      command: existingStatusLine.command || `node -e "var c=require('child_process'),p=require('path'),r;try{r=c.execSync('git rev-parse --show-toplevel',{encoding:'utf8'}).trim()}catch(e){r=process.cwd()}var s=p.join(r,'.claude/helpers/statusline.cjs');process.argv.splice(1,0,s);require(s)"`,
+      command: existingStatusLine.command || 'ruflo hooks statusline --full 2>/dev/null',
       // Remove invalid fields: refreshMs, enabled (not supported by Claude Code)
     };
   }

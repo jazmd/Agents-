@@ -223,14 +223,9 @@ function generateStatusLineConfig(_options: InitOptions): object {
   // Same project-local / $HOME fallback as `hookCmd()` (see #1943): the
   // earlier `${CLAUDE_PROJECT_DIR:-.}` form broke statusline for any
   // global-install user. Probe project-local first, fall back to $HOME.
-  const script = '.claude/helpers/statusline.cjs';
-  // eslint-disable-next-line no-template-curly-in-string
-  const projVar = '${CLAUDE_PROJECT_DIR:-.}';
-  // eslint-disable-next-line no-template-curly-in-string
-  const homeVar = '${HOME}';
   return {
     type: 'command',
-    command: `sh -c 'D="${projVar}"; [ -f "$D/${script}" ] || D="${homeVar}"; exec node "$D/${script}"'`,
+    command: 'ruflo hooks statusline --full 2>/dev/null',
   };
 }
 

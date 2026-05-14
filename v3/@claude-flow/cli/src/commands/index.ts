@@ -54,6 +54,8 @@ const commandLoaders: Record<string, CommandLoader> = {
   doctor: () => import('./doctor.js'),
   // Verification (ADR-095, signed witness manifest)
   verify: () => import('./verify.js'),
+  // Multi-repo test runner
+  test: () => import('./test.js'),
   // Analysis Commands
   analyze: () => import('./analyze.js'),
   // Q-Learning Routing Commands
@@ -176,6 +178,7 @@ export async function getClaimsCommand() { return loadCommand('claims'); }
 export async function getEmbeddingsCommand() { return loadCommand('embeddings'); }
 export async function getCompletionsCommand() { return loadCommand('completions'); }
 export async function getAnalyzeCommand() { return loadCommand('analyze'); }
+export async function getTestCommand() { return loadCommand('test'); }
 export async function getRouteCommand() { return loadCommand('route'); }
 export async function getProgressCommand() { return loadCommand('progress'); }
 export async function getIssuesCommand() { return loadCommand('issues'); }
@@ -238,7 +241,7 @@ export async function getCommandsByCategory(): Promise<Record<string, Command[]>
     analyzeCmd, routeCmd, progressCmd, providersCmd,
     pluginsCmd, deploymentCmd, claimsCmd, issuesCmd,
     updateCmd, processCmd, guidanceCmd, applianceCmd,
-    cleanupCmd, autopilotCmd,
+    cleanupCmd, autopilotCmd, testCmd,
   ] = await Promise.all([
     loadCommand('daemon'), loadCommand('doctor'), loadCommand('embeddings'), loadCommand('neural'),
     loadCommand('performance'), loadCommand('security'), loadCommand('ruvector'), loadCommand('hive-mind'),
@@ -246,7 +249,7 @@ export async function getCommandsByCategory(): Promise<Record<string, Command[]>
     loadCommand('analyze'), loadCommand('route'), loadCommand('progress'), loadCommand('providers'),
     loadCommand('plugins'), loadCommand('deployment'), loadCommand('claims'), loadCommand('issues'),
     loadCommand('update'), loadCommand('process'), loadCommand('guidance'), loadCommand('appliance'),
-    loadCommand('cleanup'), loadCommand('autopilot'),
+    loadCommand('cleanup'), loadCommand('autopilot'), loadCommand('test'),
   ]);
 
   return {
@@ -261,7 +264,7 @@ export async function getCommandsByCategory(): Promise<Record<string, Command[]>
     ].filter(Boolean) as Command[],
     utility: [
       configCmd, doctorCmd, daemonCmd, completionsCmd,
-      migrateCmd, workflowCmd,
+      migrateCmd, workflowCmd, testCmd,
     ].filter(Boolean) as Command[],
     analysis: [
       analyzeCmd, routeCmd, progressCmd,
