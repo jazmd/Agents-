@@ -1,0 +1,69 @@
+[  1/69] ⚠️  HTTP 200  |  text/html;charset=utf-8  |  https://www.iso.org/standard/62085.html
+[  2/69] ⚠️  HTTP 200  |  text/html;charset=utf-8  |  https://www.iso.org/standard/60857.html
+[  3/69] ⚠️  HTTP 200  |  text/html;charset=utf-8  |  https://www.iso.org/standard/63787.html
+[  4/69] ⚠️  HTTP 200  |  text/html;charset=utf-8  |  https://www.iso.org/standard/72191.html
+[  5/69] ⚠️  HTTP 200  |  text/html;charset=utf-8  |  https://www.iso.org/standard/61021.html
+[  6/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://webstore.iec.ch/en/publication/1855
+[  7/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://webstore.iec.ch/en/publication/6795
+[  8/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://webstore.iec.ch/en/publication/6783
+[  9/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://iris.paho.org/handle/10665.2/28585
+[ 10/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://iris.paho.org/bitstream/handle/10665.2/28584/guia_disenos_estructur
+[ 11/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://iris.paho.org/handle/10665.2/51462
+[ 12/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://iris.paho.org/handle/10665.2/40791
+[ 13/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://iris.paho.org/handle/10665.2/56534
+[ 14/69] ⚠️ [anti-bot]  HTTP 403  |  sin tipo  |  https://publications.iadb.org/publications/spanish/document/Diseno-y-constr
+[ 15/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://iris.paho.org
+[ 16/69] ❌  HTTP None  |  sin tipo  |  https://www.jurisprudencia.gob.sv/DocumentosBoveda/D/2/1990-1999/1996/10/89
+[ 17/69] ✅  HTTP 200  |  application/pdf  |  https://iisee.kenken.go.jp/worldlist/17_El_Salvador/El_Salvador_Norma_Tecni
+[ 18/69] ⚠️ [anti-bot]  HTTP 403  |  sin tipo  |  https://www.ambiente.gob.sv/el-salvador-avanza-en-la-actualizacion-de-la-no
+[ 19/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://www.concrete.org/store/productdetail.aspx?ItemID=31819&Language=Eng
+[ 20/69] ⚠️ [anti-bot]  HTTP 403  |  sin tipo  |  https://asp.salud.gob.sv/regulacion/pdf/ley/codigo_de_salud.pdf
+[ 21/69] ✅  HTTP 200  |  application/pdf  |  https://cssp.gob.sv/wp-content/uploads/2016/05/Ley-del-Sistema-Nacional-Int
+[ 22/69] ⚠️ [anti-bot]  HTTP 403  |  sin tipo  |  https://asp.salud.gob.sv/regulacion/pdf/reglamento/reglamento_general_de_ho
+[ 23/69] ⚠️ [anti-bot]  HTTP 403  |  sin tipo  |  https://asp.salud.gob.sv/regulacion/pdf/lineamientos/lineamientos_tecnicos_
+[ 24/69] ⚠️ [anti-bot]  HTTP 403  |  sin tipo  |  https://asp.salud.gob.sv/regulacion/reglamentos.asp
+[ 25/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://www.mtps.gob.sv/download/decreto-no-888-ley-de-equiparacion-de-opor
+[ 26/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://conaipd.gob.sv/download/norma-tecnica-salvadorena-accesibilidad-al-
+[ 27/69] ⚠️ [anti-bot]  HTTP 403  |  sin tipo  |  https://www.transparencia.gob.sv/institutions/conaipd/documents/49466/downl
+[ 28/69] ⚠️ [anti-bot]  HTTP 403  |  sin tipo  |  https://asp.salud.gob.sv/regulacion/pdf/norma/norma_atencion_integral_perso
+[ 29/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://www.siget.gob.sv/gerencias/electricidad/normativas-de-electricidad/
+[ 30/69] ✅  HTTP 200  |  application/pdf  |  https://www.sc.gob.sv/wp-content/uploads/normativas/Reglamento%20de%20la%20
+[ 31/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://www.nfpa.org/product/nfpa-70-national-electrical-code/p0070code
+[ 32/69] ✅  HTTP 200  |  application/pdf  |  https://www.anda.gob.sv/wp-content/uploads/2023/08/Normas-Tecnicas-ANDA.pdf
+[ 33/69] ✅  HTTP 200  |  application/pdf  |  https://www.anda.gob.sv/wp-content/uploads/2022/02/ley-de-anda.pdf
+[ 34/69] ✅  HTTP 200  |  application/pdf  |  https://www.anda.gob.sv/wp-content/uploads/2020/10/Normativa_Factibilidades
+[ 35/69] ✅  HTTP 200  |  application/pdf  |  https://faolex.fao.org/docs/pdf/els3014.pdf
+[ 36/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://osartec.gob.sv/download/24_d_o_rts_13-02-01_14_agua_agua_de_consumo
+[ 37/69] ⚠️ [anti-bot]  HTTP 403  |  sin tipo  |  https://www.asa.gob.sv/ley-del-agua/
+[ 38/69] ✅  HTTP 200  |  application/pdf  |  https://elsalvador.eregulations.org/media/ley%20de%20medio%20ambiente.pdf
+[ 39/69] ⚠️ [anti-bot]  HTTP 403  |  sin tipo  |  https://www.ambiente.gob.sv/servicios/permisoambiental/
+[ 40/69] ✅  HTTP 200  |  application/pdf  |  https://elsalvador.eregulations.org/media/FORMULARIO%20AMBIENTAL_MARN_1.pdf
+[ 41/69] ✅  HTTP 200  |  application/pdf  |  https://elsalvador.eregulations.org/media/LEY%20DEL%20CUERPO%20DE%20BOMBERO
+[ 42/69] ✅  HTTP 200  |  application/pdf  |  https://www.jurisprudencia.gob.sv/DocumentosBoveda/D/2/2020-2029/2025/11/10
+[ 43/69] ✅  HTTP 200  |  application/pdf  |  https://www.jurisprudencia.gob.sv/DocumentosBoveda/D/2/2020-2029/2025/11/10
+[ 44/69] ✅  HTTP 200  |  application/pdf  |  https://tramites.bomberos.gob.sv/requisitos.pdf
+[ 45/69] ✅  HTTP 200  |  application/pdf  |  https://opamss.org.sv/wp-content/uploads/2026/03/LDOTAMSS_REGLAM_MARZO_2026
+[ 46/69] ✅  HTTP 200  |  application/pdf  |  https://elsalvador.eregulations.org/media/reglamento%20a%20la%20ley%20de%20
+[ 47/69] ⚠️ [anti-bot]  HTTP 403  |  sin tipo  |  https://www.bibliocad.com/en/library/standard-for-design-and-construction-o
+[ 48/69] ❌  HTTP None  |  sin tipo  |  https://www.salud.gob.sv/archivos/pdf/UACI-UGP/licitaciones-publicas-nacion
+[ 49/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://www.nfpa.org/product/nfpa-101-life-safety-code/p0101code
+[ 50/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://www.nfpa.org/product/nfpa-13-standard-for-the-installation-of-sprin
+[ 51/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://www.nfpa.org/product/nfpa-14-standard/p0014code
+[ 52/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://www.nfpa.org/product/nfpa-72-national-fire-alarm-and-signaling-code
+[ 53/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://www.nfpa.org/product/nfpa-10-standard/p0010code
+[ 54/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://www.nfpa.org/product/nfpa-110-standard/p0110code
+[ 55/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://www.nfpa.org/product/nfpa-99-health-care-facilities-code/p0099code
+[ 56/69] ✅  HTTP 200  |  application/pdf  |  http://www.redicces.org.sv/jspui/bitstream/10972/1944/1/1.%20Sistema%20de%2
+[ 57/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://iris.paho.org/bitstream/handle/10665.2/51462/9789275320197Formulari
+[ 58/69] ❌  HTTP None  |  sin tipo  |  https://conaipd.gob.sv/wp-content/uploads/2021/04/Norma-T%C3%A9cnica-Salvad
+[ 59/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://iris.paho.org/bitstream/handle/10665.2/28585/guia_disenos_arquitect
+[ 60/69] ⚠️ [anti-bot]  HTTP 403  |  sin tipo  |  https://www.oas.org/dil/esp/Ley_de_Equiparaci%C3%B3n_de_Oportunidades_para_
+[ 61/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://www.jurisprudencia.gob.sv
+[ 62/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://osartec.gob.sv
+[ 63/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://www.siget.gob.sv
+[ 64/69] ⚠️ [anti-bot]  HTTP 403  |  sin tipo  |  https://www.anda.gob.sv
+[ 65/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://conaipd.gob.sv
+[ 66/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://opamss.org.sv
+[ 67/69] ⚠️ [anti-bot]  HTTP 403  |  sin tipo  |  https://www.ambiente.gob.sv
+[ 68/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://tramites.bomberos.gob.sv
+[ 69/69] ⚠️  HTTP 200  |  text/html; charset=utf-8  |  https://iisee.kenken.go.jp

@@ -1,0 +1,80 @@
+version: "1.0.0"
+nombre: "Equipo Normativas"
+descripcion: "Sistema multi-agente para identificación y validación de normativas de edificación"
+
+agentes:
+  coordinador:
+    nombre: "Agente Coordinador"
+    skill: "normativas-coordinator"
+    orden: 1
+
+  geoanalista:
+    nombre: "Agente GeoAnalista"
+    skill: "normativas-geoanalyst"
+    orden: 2
+
+  buscador:
+    nombre: "Agente Buscador"
+    skill: "normativas-searcher"
+    orden: 3
+    ejecucion: "paralela por nivel jurisdiccional"
+
+  validador:
+    nombre: "Agente Validador"
+    skill: "normativas-validator"
+    orden: 4
+
+  documentador:
+    nombre: "Agente Documentador"
+    skill: "normativas-documenter"
+    orden: 5
+
+configuracion:
+  timeout_url_segundos: 15
+  max_reintentos: 3
+  idiomas_busqueda:
+    - español
+    - english
+    - français
+    - deutsch
+    - italiano
+    - português
+
+  sectores_soportados:
+    - Residencial
+    - Comercial
+    - Oficinas
+    - Industrial
+    - Sanitario
+    - Educativo
+    - Hotelero
+    - Deportivo
+    - Cultural
+    - Religioso
+    - Mixto
+    - Logístico
+    - Agroindustrial
+
+  categorias_normativas:
+    - Estructural y sismorresistente
+    - Protección contra incendios
+    - Accesibilidad universal
+    - Eficiencia energética
+    - Aislamiento acústico
+    - Instalaciones eléctricas de baja tensión
+    - Fontanería y saneamiento
+    - Climatización y calidad del aire interior
+    - Sostenibilidad y medio ambiente
+    - Seguridad y salud en construcción
+    - Telecomunicaciones
+    - Ascensores y transporte vertical
+    - Gas
+    - Residuos
+    - Específica del sector
+
+salida:
+  directorio: "normativas/output"
+  formato: "markdown"
+  incluir_metadata_yaml: true
+  incluir_control_calidad: true
+  incluir_toc: true
