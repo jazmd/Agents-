@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: normativas-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    envVars:
+      - key: PORT
+        value: 3001
+      - key: CORS_ORIGIN
+        sync: false
+      - key: CLAUDE_CMD
+        value: claude
+      - key: ANTHROPIC_API_KEY
+        sync: false
+    healthCheckPath: /api/health
