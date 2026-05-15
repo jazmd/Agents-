@@ -797,6 +797,7 @@ export async function bridgeListEntries(options: {
     id: string;
     key: string;
     namespace: string;
+    value: string;
     size: number;
     accessCount: number;
     createdAt: string;
@@ -846,6 +847,7 @@ export async function bridgeListEntries(options: {
           id: String(row.id).substring(0, 20),
           key: row.key || String(row.id).substring(0, 15),
           namespace: row.namespace || 'default',
+          value: row.content ?? '',
           size: (row.content || '').length,
           accessCount: row.access_count ?? 0,
           createdAt: row.created_at || new Date().toISOString(),
