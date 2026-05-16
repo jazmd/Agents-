@@ -14,6 +14,7 @@ Cache-aware /loop workers and CronCreate background automation. Substrate plugin
 - **Loop Workers**: Recurring tasks via `/loop` with ScheduleWakeup (delay <270s for prompt cache hits)
 - **CronCreate**: Background cron jobs for audit, optimization, and monitoring
 - **12 Background Workers**: ultralearn, optimize, consolidate, predict, audit, map, preload, deepdive, document, refactor, benchmark, testgaps
+- **Custom workers (v0.3.0)**: register consumer-defined recurring tasks from a YAML manifest. See [Custom workers](#custom-workers) below
 - **Daemon Management**: Start, stop, status, trigger, and enable workers
 - **ADR-091 Integration**: Native Claude Code capabilities preferred over daemon polling
 
@@ -65,6 +66,34 @@ npx @claude-flow/cli@latest hooks worker dispatch --trigger document --scope api
 mcp tool call hooks_worker-dispatch --json -- '{"trigger": "document", "scope": "api"}'
 ```
 
+## Custom workers
+
+The 12 built-in triggers above are dispatched via `mcp__claude-flow__hooks_worker-dispatch` and serve cross-plugin cases. A consumer plugin or downstream project sometimes needs to schedule its own recurring task that doesn't fit those triggers — for example, AgentVille's L4 deterministic anomaly tick.
+
+For those cases, v0.3.0 introduces a **custom-worker manifest** (YAML) plus the `register-custom-workers` skill that reads the manifest and registers each worker via `CronCreate`. The 12 built-ins are unchanged; custom workers run alongside them in a separate registration path.
+
+Minimal manifest:
+
+```yaml
+version: 1
+workers:
+  - name: agentville-l4
+    schedule: '*/15 * * * *'
+    command: ['pnpm', 'auto-ops:l4-tick', '--', '--project-root', '.']
+    cwd: '/var/lib/agentville'
+    env:
+      AGENTVILLE_GLAB_REPO: 'org/repo'
+    timeout_seconds: 60
+```
+
+Register from a Claude Code session:
+
+```text
+Skill: ruflo-loop-workers:register-custom-workers .ruflo/custom-workers.yaml
+```
+
+Schema reference: [`docs/custom-worker-manifest.md`](./docs/custom-worker-manifest.md). Design rationale: [`ADR-0002`](./docs/adrs/0002-custom-worker-manifest.md).
+
 ## Cache-aware /loop integration
 
 This plugin pairs with [ruflo-autopilot ADR-0001](../ruflo-autopilot/docs/adrs/0001-autopilot-contract.md) which **owns the 270s cache-aware ScheduleWakeup heartbeat contract**. Recommended fallback heartbeat is **270 seconds** — under the 5-minute prompt-cache TTL so the next wake-up reads conversation context cached. Going past 300s pays a cache-miss; rounding to 5 minutes is the worst-of-both case.
@@ -87,6 +116,7 @@ bash plugins/ruflo-loop-workers/scripts/smoke.sh
 ## Architecture Decisions
 
 - [`ADR-0001` — ruflo-loop-workers plugin contract (12-worker trigger map, autopilot 270s cross-reference, smoke as contract)](./docs/adrs/0001-loop-workers-contract.md)
+- [`ADR-0002` — custom-worker manifest schema and registration skill (v0.3.0)](./docs/adrs/0002-custom-worker-manifest.md)
 
 ## Related Plugins
 

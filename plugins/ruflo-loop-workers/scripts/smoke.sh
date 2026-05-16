@@ -7,11 +7,11 @@ step() { printf "→ %s ... " "$1"; }
 ok()   { printf "PASS\n"; PASS=$((PASS+1)); }
 bad()  { printf "FAIL: %s\n" "$1"; FAIL=$((FAIL+1)); }
 
-step "1. plugin.json declares 0.2.0 with new keywords"
+step "1. plugin.json declares 0.3.0 with new keywords"
 v=$(grep -E '"version"' "$ROOT/.claude-plugin/plugin.json" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-if [[ "$v" != "0.2.0" ]]; then bad "expected 0.2.0, got '$v'"; else
+if [[ "$v" != "0.3.0" ]]; then bad "expected 0.3.0, got '$v'"; else
   miss=""
-  for k in mcp background-workers cache-aware schedule-wakeup; do
+  for k in mcp background-workers cache-aware schedule-wakeup custom-workers; do
     grep -q "\"$k\"" "$ROOT/.claude-plugin/plugin.json" || miss="$miss $k"
   done
   [[ -z "$miss" ]] && ok || bad "missing keywords:$miss"
@@ -79,10 +79,10 @@ grep -q "ruflo-docs" "$F" || miss="$miss docs-attribution"
 grep -q "ruflo-testgen" "$F" || miss="$miss testgen-attribution"
 [[ -z "$miss" ]] && ok || bad "$miss"
 
-step "11. ADR-0001 exists with status Proposed"
+step "11. ADR-0001 exists with status Proposed or Accepted"
 ADR="$ROOT/docs/adrs/0001-loop-workers-contract.md"
-[[ -f "$ADR" ]] && grep -qE "^status:[[:space:]]*Proposed" "$ADR" \
-  && ok || bad "ADR missing or status != Proposed"
+[[ -f "$ADR" ]] && grep -qE "^status:[[:space:]]*(Proposed|Accepted)" "$ADR" \
+  && ok || bad "ADR missing or status not in {Proposed,Accepted}"
 
 step "12. no wildcard tool grants in skills"
 bad_skills=""
@@ -90,6 +90,42 @@ for f in "$ROOT"/skills/*/SKILL.md; do
   grep -q '^allowed-tools:[[:space:]]*\*' "$f" && bad_skills="$bad_skills $(basename $(dirname "$f"))"
 done
 [[ -z "$bad_skills" ]] && ok || bad "wildcard:$bad_skills"
+
+step "13. register-custom-workers skill present with valid frontmatter"
+F="$ROOT/skills/register-custom-workers/SKILL.md"
+miss=""
+[[ -f "$F" ]] || miss=" missing-file"
+if [[ -z "$miss" ]]; then
+  for k in 'name:' 'description:' 'allowed-tools:'; do
+    grep -q "^$k" "$F" || miss="$miss no-$k"
+  done
+  grep -q '^allowed-tools:.*CronCreate' "$F" || miss="$miss no-CronCreate"
+fi
+[[ -z "$miss" ]] && ok || bad "$miss"
+
+step "14. custom-worker manifest schema doc present"
+F="$ROOT/docs/custom-worker-manifest.md"
+miss=""
+[[ -f "$F" ]] || miss=" missing-file"
+if [[ -z "$miss" ]]; then
+  for s in 'version' 'name' 'schedule' 'command' 'cwd' 'env' 'timeout_seconds' 'token_budget'; do
+    grep -q "$s" "$F" || miss="$miss no-$s"
+  done
+fi
+[[ -z "$miss" ]] && ok || bad "$miss"
+
+step "15. ADR-0002 exists with status Proposed"
+ADR="$ROOT/docs/adrs/0002-custom-worker-manifest.md"
+[[ -f "$ADR" ]] && grep -qE "^status:[[:space:]]*Proposed" "$ADR" \
+  && ok || bad "ADR-0002 missing or status != Proposed"
+
+step "16. README references the custom-workers schema and skill"
+F="$ROOT/README.md"
+miss=""
+grep -q "custom-worker-manifest" "$F" || miss="$miss no-schema-link"
+grep -q "register-custom-workers" "$F" || miss="$miss no-skill-link"
+grep -q "Custom workers" "$F" || miss="$miss no-section"
+[[ -z "$miss" ]] && ok || bad "$miss"
 
 printf "\n%s passed, %s failed\n" "$PASS" "$FAIL"
 [[ $FAIL -eq 0 ]] || exit 1
