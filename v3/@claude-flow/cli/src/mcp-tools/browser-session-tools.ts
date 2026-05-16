@@ -112,8 +112,23 @@ export const browserSessionTools: MCPTool[] = [
       const dir = (input.rvf_dir as string | undefined) ?? (await ensureSessionsDir());
       const rvfPath = path.join(dir, `${sessionId}.rvf`);
 
-      // 1. RVF allocate
-      const rvf = await shell('npx', ['-y', RUVECTOR_PIN, 'rvf', 'create', rvfPath, '--kind', 'browser-session'], { timeout: 60000 });
+      // 1. RVF allocate.
+      // Issue #2015: ruvector@0.2.25's `rvf create` accepts only
+      // `-d/--dimension <n>` (required) and `-m/--metric <metric>`.
+      // The wrapper previously passed `--kind browser-session` and
+      // omitted `--dimension`, so commander hit the required-option
+      // check first and the wrapper returned `rvf create failed` for
+      // every call. The second round of the fix strips the bogus
+      // `--kind` flag — when round 1 only added `--dimension`, the
+      // next call surfaced `error: unknown option '--kind'`.
+      //
+      // 384 matches the MiniLM-L6 default used elsewhere in the
+      // toolchain (ONNX embedder + AgentDB vector indexes).
+      const rvf = await shell(
+        'npx',
+        ['-y', RUVECTOR_PIN, 'rvf', 'create', rvfPath, '--dimension', '384'],
+        { timeout: 60000 },
+      );
       if (!rvf.success) return fail('rvf create failed', { detail: rvf.error, stderr: rvf.stderr, sessionId, rvfPath });
 
       // 2. trajectory-begin
