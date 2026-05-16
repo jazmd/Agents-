@@ -1,6 +1,6 @@
 {
   "name": "claude-flow",
-  "version": "3.7.0-alpha.27",
+  "version": "3.7.0-alpha.40",
   "description": "Ruflo - Enterprise AI agent orchestration for Claude Code. Deploy 60+ specialized agents in coordinated swarms with self-learning, fault-tolerant consensus, vector memory, and MCP integration",
   "main": "dist/index.js",
   "type": "module",
@@ -89,7 +89,10 @@
     "make-fetch-happen": ">=15.0.0",
     "express-rate-limit": ">=8.4.1",
     "protobufjs": ">=7.5.5",
-    "uuid": ">=14.0.0"
+    "uuid": ">=14.0.0",
+    "@opentelemetry/core": "1.25.1",
+    "@opentelemetry/resources": "1.25.1",
+    "@opentelemetry/sdk-trace-base": "1.25.1"
   },
   "devDependencies": {
     "@openai/codex": "^0.98.0",

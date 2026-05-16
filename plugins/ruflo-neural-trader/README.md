@@ -10,9 +10,39 @@ Heavy jobs — multi-year walk-forward backtests, large Monte-Carlo runs, parame
 
 ## Prerequisites
 
+> ✅ **`neural-trader@^2.8.11`** (shipped 2026-05-14; see [post-mortem gist](https://gist.github.com/ruvnet/a1aca90a5c299d89fa92e905dab11041) and [announcement #1981](https://github.com/ruvnet/ruflo/issues/1981)).
+> Resolves four compounding bugs that made the package unusable since v2.5.0:
+> 1. Install-hook fork-bomb (#1974 — 120 GB RAM on Apple Silicon) — fixed in 2.7.2 ([neural-trader#109](https://github.com/ruvnet/neural-trader/pull/109)).
+> 2. `require('neural-trader')` always threw `Cannot find module './src/cli/lib/napi-loader-shared'` — missing files restored in 2.7.5 ([neural-trader#111](https://github.com/ruvnet/neural-trader/pull/111)).
+> 3. `cargo build` aborted on `aarch64-apple-darwin` (`fasthash-sys` x86-only SIMD) — placeholder hash replaced with stdlib `DefaultHasher` in 2.7.5.
+> 4. npm tarball claimed 5 platform binaries, shipped 1 — `darwin-arm64` + `darwin-x64` added in 2.7.6.
+>
+> The 2.8.x line additionally adds a flag-style CLI dispatcher (`--backtest`, `--signal scan`, `--risk assess`, `--portfolio optimize`, `--regime`, `--train`, `--predict`, `--strategy-create`) running real math (SMA crossover / RSI mean-reversion / pairs z-score / adaptive regime-switching / multi-indicator RSI+MACD+Bollinger) against real Yahoo Finance data via `--live`. Supports `--walk-forward`, `--monte-carlo`, `--symbols A,B,C`, `--benchmark SPY`, `--optimize --param "name:min:max:step"`. The runtime smoke ([scripts/runtime-smoke.sh](scripts/runtime-smoke.sh)) covers 20 documented entry points end-to-end (basic commands + Kelly + walk-forward + Monte Carlo + optimize + multi-symbol + pairs + adaptive + multi-indicator).
+
 ```bash
-npm install neural-trader
+# Recommended — keeps --ignore-scripts as defense in depth. The install
+# hook is safe in 2.7.2+, but --ignore-scripts protects against any
+# future install-script regression on this or transitive packages.
+npm install --ignore-scripts neural-trader@^2.8.11
 ```
+
+| Platform | Native binding in 2.8.11 |
+|----------|--------------------------|
+| `linux-x64-gnu` | ✅ |
+| `darwin-arm64` (Apple Silicon) | ✅ first shipped in 2.7.5 |
+| `darwin-x64` (Intel Macs) | ✅ first shipped in 2.7.6 |
+| `linux-arm64-gnu` | ⏳ JS surface works, native calls throw at runtime |
+| `win32-x64-msvc` | ⏳ JS surface works, native calls throw at runtime |
+
+> 🚨 **If you must use an older version** (`neural-trader@2.7.1` or below — same fork-bomb risk on every non-linux-x64 host) always pass `--ignore-scripts` to skip the malicious install hook. The `linux-x64` binary is hardcoded inline in the tarball, so on `linux-x64` the package still works after `--ignore-scripts`. On other platforms `--ignore-scripts` at least won't fork-bomb your machine.
+>
+> ```bash
+> # Only needed for neural-trader <= 2.7.1 — DO NOT run plain `npm install
+> # neural-trader@<=2.7.1` on macOS / Windows / linux-arm64.
+> npm install --ignore-scripts neural-trader@<=2.7.1
+> ```
+
+The `audit-neural-trader-safety.mjs` CI guard in this repo still enforces `--ignore-scripts` on every documented invocation — defense in depth in case anyone pins to an older version in a lockfile.
 
 ## Installation
 
