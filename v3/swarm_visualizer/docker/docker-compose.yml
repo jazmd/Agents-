@@ -1,0 +1,23 @@
+services:
+  visualizer-backend:
+    build:
+      context: ../../..
+      dockerfile: v3/swarm_visualizer/docker/backend.Dockerfile
+    ports:
+      - "8787:8787"
+    volumes:
+      - ../../../:/app
+
+  visualizer-frontend:
+    build:
+      context: ../../..
+      dockerfile: v3/swarm_visualizer/docker/frontend.Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - VITE_VISUALIZER_HTTP_URL=http://localhost:8787
+      - VITE_VISUALIZER_WS_URL=ws://localhost:8787/ws/visualizer
+    volumes:
+      - ../../../:/app
+    depends_on:
+      - visualizer-backend
