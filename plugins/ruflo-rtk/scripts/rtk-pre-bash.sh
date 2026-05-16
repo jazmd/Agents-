@@ -63,6 +63,8 @@ case $EXIT_CODE in
       '.tool_input.command = $cmd | {
         "hookSpecificOutput": {
           "hookEventName": "PreToolUse",
+          "permissionDecision": "allow",
+          "permissionDecisionReason": "RTK auto-rewrite (user installed)",
           "updatedInput": .tool_input
         }
       }' <<<"$INPUT"
