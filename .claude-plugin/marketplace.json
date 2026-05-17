@@ -7,6 +7,11 @@
   },
   "plugins": [
     {
+      "name": "claude-flow",
+      "source": "./plugins/claude-flow",
+      "description": "Multi-agent swarm coordination, memory management, SPARC methodology, and intelligent hooks for Claude Code. Provides 60+ skills, 100+ commands, and 80+ specialized agents."
+    },
+    {
       "name": "ruflo-core",
       "source": "./plugins/ruflo-core",
       "description": "Core Ruflo MCP tools, commands, and Claude Code orchestration patterns"

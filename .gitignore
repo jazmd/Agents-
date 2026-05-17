@@ -88,6 +88,7 @@ api-project/
 bin/claude-flow-*
 build/
 claude-flow
+!plugins/claude-flow
 claude-flow-mcp-wrapper
 claude-flow.config.json
 claude-flow.db
@@ -147,6 +148,7 @@ claude-flow.config.json
 *.sqlite-journal
 *.sqlite-wal
 claude-flow
+!plugins/claude-flow
 # Removed Windows wrapper files per user request
 hive-mind-prompt-*.txt
 
