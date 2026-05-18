@@ -4,6 +4,7 @@ const STATUS_ICONS = {
   pending: 'pending-icon',
   running: 'running-icon',
   completed: 'completed-icon',
+  skipped: 'skipped-icon',
   error: 'error-icon',
 };
 
@@ -28,6 +29,7 @@ export default function AgentTimeline({ agents }) {
                   {agent.status === 'pending' && 'En espera'}
                   {agent.status === 'running' && 'Trabajando...'}
                   {agent.status === 'completed' && 'Completado'}
+                  {agent.status === 'skipped' && 'No ejecutado'}
                   {agent.status === 'error' && 'Error'}
                 </div>
               </div>

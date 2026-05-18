@@ -64,6 +64,13 @@ export function useWebSocket() {
         addMessage('question', data.question);
         break;
 
+      case 'agent_skipped':
+        setAgents(prev => prev.map(a =>
+          a.id === data.agentId ? { ...a, status: 'skipped' } : a
+        ));
+        addMessage('agent', `⚠️ ${data.agentName} no fue ejecutado`, data.agentId);
+        break;
+
       case 'agent_log':
         break;
 
@@ -72,9 +79,14 @@ export function useWebSocket() {
         if (data.outputFile) {
           addMessage('system', `Informe generado: ${data.outputFile}`);
         }
-        addMessage('system', data.status === 'completed'
-          ? 'Busqueda completada con exito.'
-          : 'La busqueda termino con errores.');
+        if (data.status === 'completed') {
+          addMessage('system', 'Busqueda completada con exito.');
+        } else if (data.status === 'partial') {
+          const skipped = data.skippedAgents?.join(', ') || 'algunos agentes';
+          addMessage('system', `Busqueda incompleta: ${skipped} no llegaron a ejecutarse. El proceso termino antes de completar todos los pasos.`);
+        } else {
+          addMessage('system', 'La busqueda termino con errores.');
+        }
         break;
 
       case 'error':

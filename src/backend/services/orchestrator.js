@@ -186,18 +186,34 @@ Comienza ahora.`;
     try { fs.unlinkSync(promptFile); } catch {}
     if (session.status === 'cancelled') return;
 
-    session.status = code === 0 ? 'completed' : 'error';
+    const pendingAgents = session.agents.filter(a => a.status === 'pending');
+    const runningAgents = session.agents.filter(a => a.status === 'running');
 
-    for (const a of session.agents) {
-      if (a.status === 'running') a.status = code === 0 ? 'completed' : 'error';
+    for (const a of runningAgents) {
+      a.status = code === 0 ? 'completed' : 'error';
+    }
+    for (const a of pendingAgents) {
+      a.status = 'skipped';
+      send({ type: 'agent_skipped', agentId: a.id, agentName: a.name, icon: a.icon });
     }
 
+    const allCompleted = session.agents.every(a => a.status === 'completed');
     const fileExists = fs.existsSync(outputFile);
+
+    if (code !== 0) {
+      session.status = 'error';
+    } else if (!allCompleted || !fileExists) {
+      session.status = 'partial';
+    } else {
+      session.status = 'completed';
+    }
+
     send({
       type: 'session_end',
       sessionId,
       status: session.status,
       outputFile: fileExists ? outputFile : null,
+      skippedAgents: pendingAgents.map(a => a.name),
     });
   });
 }

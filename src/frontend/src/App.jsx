@@ -33,7 +33,7 @@ export default function App() {
           <div className="workspace">
             <aside className="sidebar">
               <AgentTimeline agents={agents} />
-              {status === 'completed' && (
+              {(status === 'completed' || status === 'partial' || status === 'error') && (
                 <button className="btn btn-new" onClick={() => { setStarted(false); }}>
                   Nueva busqueda
                 </button>

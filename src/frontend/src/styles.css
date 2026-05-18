@@ -320,6 +320,11 @@ body {
   background: var(--green);
 }
 
+.skipped .timeline-dot {
+  border-color: var(--yellow, #f59e0b);
+  background: var(--yellow, #f59e0b);
+}
+
 .error .timeline-dot {
   border-color: var(--red);
   background: var(--red);
