@@ -475,6 +475,9 @@ const allCommand: Command = {
 // Main Benchmark Command
 // ============================================================================
 
+// ADR-121 Phase 25 — `benchmark verify` for the chained witness ledger.
+import { benchmarkVerifyCommand } from './benchmark-verify.js';
+
 export const benchmarkCommand: Command = {
   name: 'benchmark',
   description: 'Performance benchmarking for self-learning and neural systems',
@@ -483,12 +486,14 @@ export const benchmarkCommand: Command = {
     neuralCommand,
     memoryCommand,
     allCommand,
+    benchmarkVerifyCommand,
   ],
   examples: [
     { command: 'claude-flow benchmark pretrain', description: 'Benchmark pre-training system' },
     { command: 'claude-flow benchmark neural', description: 'Benchmark neural operations' },
     { command: 'claude-flow benchmark memory', description: 'Benchmark memory operations' },
     { command: 'claude-flow benchmark all', description: 'Run all benchmarks' },
+    { command: 'claude-flow benchmark verify ./bench-witness/ledger.json', description: 'Cryptographically verify a published ledger (Phase 25)' },
   ],
   action: async (_ctx: CommandContext): Promise<CommandResult> => {
     output.writeln();

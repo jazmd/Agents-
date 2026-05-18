@@ -667,6 +667,60 @@ jobs:
           name: rag-router-ablation-witness
           path: bench-witness/rag-router-ablation-*.json
 
+  rag-cli-verify:
+    # ADR-121 Phase 25 — `ruflo benchmark verify` CLI subcommand smoke.
+    # Drives the consumer-facing verification command against the
+    # live ledger + a single witness manifest. Pass criterion: ledger
+    # verifies at threshold 1, fails at threshold 2 (most entries
+    # single-signer), single witness verifies, tampered witness
+    # rejected, missing-path + bad-threshold rejected. Witness-signed
+    # capability report uploaded as CI artifact.
+    name: ruflo benchmark verify CLI smoke + witness (#2036, ADR-121 Phase 25)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build embeddings + CLI
+        run: |
+          cd v3/@claude-flow/embeddings
+          npm install --no-audit --no-fund --legacy-peer-deps
+          npx tsc -p tsconfig.json
+          cd ../cli
+          npm install --no-audit --no-fund --legacy-peer-deps
+          npx tsc --build --force tsconfig.json
+
+      - name: Smoke — benchmark verify CLI contract
+        shell: bash
+        run: node scripts/smoke-cli-benchmark-verify.mjs
+
+      - name: Capability benchmark (witness-signed)
+        shell: bash
+        run: node scripts/benchmark-rag-cli-verify.mjs
+
+      - name: Verify capability witness (independent process)
+        shell: bash
+        run: |
+          FILE=$(ls -t bench-witness/rag-cli-verify-capability-*.json | head -1)
+          node --input-type=module -e "
+            import fs from 'node:fs';
+            const { verify } = await import('./v3/@claude-flow/embeddings/dist/witness.js');
+            const m = JSON.parse(fs.readFileSync('$FILE', 'utf8'));
+            if (!verify(m.witness)) { console.error('VERIFY FAILED'); process.exit(1); }
+            console.log('CLI verify capability witness verifies OK:', m.witness.contentHash);
+          "
+
+      - name: Upload witness as CI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rag-cli-verify-capability-witness
+          path: bench-witness/rag-cli-verify-capability-*.json
+
   rag-multisig-attestation:
     # ADR-121 Phase 24 — Multi-signer ledger entries (M-of-N threshold).
     # Demonstrates the M-of-N attestation pattern for adversarial
