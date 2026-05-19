@@ -65,14 +65,16 @@ There are **two different install paths** with very different surface areas. Pic
 ### Path A — Claude Code Plugins (lite, slash commands only)
 
 ```bash
-# Add the marketplace
-/plugin marketplace add ruvnet/ruflo
+> Note: Claude Code cannot install RuFlo plugins directly from the raw `ruvnet/ruflo` GitHub repository.
+> Claude Code expects either a valid published marketplace manifest or a local checkout of the repository.
 
-# Install core + any plugins you need
-/plugin install ruflo-core@ruflo
-/plugin install ruflo-swarm@ruflo
-/plugin install ruflo-autopilot@ruflo
-/plugin install ruflo-federation@ruflo
+```bash
+# Clone RuFlo locally
+git clone https://github.com/ruvnet/ruflo.git
+cd ruflo
+
+# Then install RuFlo plugins from a supported local or published source
+```
 ```
 
 This adds slash commands and agent definitions only. The Ruflo MCP server is NOT registered, so `memory_store`, `swarm_init`, `agent_spawn`, etc. won't be callable from Claude. For the full loop, use Path B below.
