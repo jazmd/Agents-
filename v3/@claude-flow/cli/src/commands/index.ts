@@ -52,6 +52,8 @@ const commandLoaders: Record<string, CommandLoader> = {
   // P0 Commands
   completions: () => import('./completions.js'),
   doctor: () => import('./doctor.js'),
+  // Verification (ADR-095, signed witness manifest)
+  verify: () => import('./verify.js'),
   // Analysis Commands
   analyze: () => import('./analyze.js'),
   // Q-Learning Routing Commands
@@ -316,6 +318,16 @@ export async function getCommandAsync(name: string): Promise<Command | undefined
  */
 export function hasCommand(name: string): boolean {
   return loadedCommands.has(name) || commandRegistry.has(name) || name in commandLoaders;
+}
+
+/**
+ * Get the names of all lazy-loadable commands (the commandLoaders keys).
+ * Used by the CLI constructor to register these names with the parser so
+ * the two-pass argument walker can recognize them as commands before their
+ * modules have been imported. Fix for #1596.
+ */
+export function getLazyCommandNames(): string[] {
+  return Object.keys(commandLoaders);
 }
 
 /**
