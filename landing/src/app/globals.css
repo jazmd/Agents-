@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+body {
+  background: theme('colors.paper.DEFAULT');
+  color: theme('colors.ink.DEFAULT');
+  font-feature-settings: 'ss01', 'cv11';
+}
+
+::selection {
+  background: theme('colors.ink.DEFAULT');
+  color: theme('colors.paper.pure');
+}
+
+@layer utilities {
+  .hairline {
+    background-image: linear-gradient(to right, theme('colors.ink.line'), theme('colors.ink.line'));
+    background-size: 100% 1px;
+    background-repeat: no-repeat;
+    background-position: bottom;
+  }
+  .grid-lines {
+    background-image:
+      linear-gradient(to right, theme('colors.ink.line') 1px, transparent 1px);
+    background-size: calc(100% / 12) 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
