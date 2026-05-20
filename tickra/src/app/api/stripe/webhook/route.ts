@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server';
 import type Stripe from 'stripe';
 import { stripe, planFromPriceId } from '@/lib/stripe';
 import { createSupabaseServiceClient } from '@/lib/supabase/server';
+import { sendSubscriptionConfirmedEmail } from '@/lib/email/send';
+import { isLocale } from '@/lib/i18n/config';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -39,23 +41,43 @@ export async function POST(req: Request) {
       const customerId = typeof session.customer === 'string' ? session.customer : session.customer?.id;
       if (!userId) break;
 
+      let plan: 'pro' | 'lifetime' | null = null;
       if (session.mode === 'payment') {
         await upsertSubscription(userId, {
           plan: 'lifetime',
           stripe_customer_id: customerId,
           status: 'active',
         });
+        plan = 'lifetime';
       } else if (session.mode === 'subscription' && typeof session.subscription === 'string') {
         const sub = await stripe().subscriptions.retrieve(session.subscription);
         const priceId = sub.items.data[0]?.price.id;
+        const resolved = planFromPriceId(priceId);
         await upsertSubscription(userId, {
-          plan: planFromPriceId(priceId),
+          plan: resolved,
           stripe_customer_id: customerId,
           stripe_subscription_id: sub.id,
           status: sub.status,
           current_period_end: new Date(sub.current_period_end * 1000).toISOString(),
           cancel_at_period_end: sub.cancel_at_period_end,
         });
+        if (resolved === 'pro' || resolved === 'lifetime') plan = resolved;
+      }
+
+      // Best-effort confirmation email.
+      const email = session.customer_details?.email || session.customer_email || null;
+      if (email && plan) {
+        const { data: profile } = await admin
+          .from('profiles')
+          .select('locale')
+          .eq('id', userId)
+          .single();
+        const locale = isLocale(profile?.locale) ? profile.locale : 'en';
+        try {
+          await sendSubscriptionConfirmedEmail({ to: email, locale, plan });
+        } catch {
+          // swallow — webhook must always 200
+        }
       }
       break;
     }

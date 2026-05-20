@@ -3,6 +3,8 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { sendWelcomeEmail } from '@/lib/email/send';
+import { isLocale } from '@/lib/i18n/config';
 
 function siteUrl() {
   return process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
@@ -51,6 +53,15 @@ export async function signUpWithPassword(formData: FormData) {
 
   if (error) {
     redirect(`/${locale}/signup?error=${encodeURIComponent(error.message)}`);
+  }
+
+  // Best-effort welcome email — never blocks the signup flow.
+  if (isLocale(locale)) {
+    try {
+      await sendWelcomeEmail({ to: email, locale, fullName });
+    } catch {
+      // silent — email is non-critical to signup
+    }
   }
 
   redirect(`/${locale}/signup?check=email`);
