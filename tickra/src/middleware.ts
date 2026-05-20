@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { defaultLocale, isLocale, locales, LOCALE_COOKIE } from '@/lib/i18n/config';
+import { updateSession } from '@/lib/supabase/middleware';
 
 const PUBLIC_FILE = /\.(.*)$/;
+const PROTECTED_PATHS = ['dashboard'];
 
 function pickLocale(req: NextRequest): string {
   const cookie = req.cookies.get(LOCALE_COOKIE)?.value;
@@ -16,7 +18,7 @@ function pickLocale(req: NextRequest): string {
   return preferred ?? defaultLocale;
 }
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   if (
@@ -31,12 +33,29 @@ export function middleware(req: NextRequest) {
     (l) => pathname === `/${l}` || pathname.startsWith(`/${l}/`),
   );
 
-  if (hasLocale) return NextResponse.next();
+  if (!hasLocale) {
+    const locale = pickLocale(req);
+    const url = req.nextUrl.clone();
+    url.pathname = `/${locale}${pathname === '/' ? '' : pathname}`;
+    return NextResponse.redirect(url);
+  }
 
-  const locale = pickLocale(req);
-  const url = req.nextUrl.clone();
-  url.pathname = `/${locale}${pathname === '/' ? '' : pathname}`;
-  return NextResponse.redirect(url);
+  const response = await updateSession(req);
+
+  const segments = pathname.split('/').filter(Boolean);
+  const segmentAfterLocale = segments[1];
+  if (segmentAfterLocale && PROTECTED_PATHS.includes(segmentAfterLocale)) {
+    const hasSession = req.cookies.getAll().some((c) => c.name.startsWith('sb-') && c.name.endsWith('-auth-token'));
+    if (!hasSession) {
+      const locale = segments[0];
+      const url = req.nextUrl.clone();
+      url.pathname = `/${locale}/signin`;
+      url.searchParams.set('next', pathname);
+      return NextResponse.redirect(url);
+    }
+  }
+
+  return response;
 }
 
 export const config = {

@@ -4,17 +4,28 @@ import { Button } from '@/components/ui/Button';
 import { LocaleSwitcher } from './LocaleSwitcher';
 import { ThemeToggle } from './ThemeToggle';
 import { MobileMenu } from './MobileMenu';
+import { UserMenu } from './UserMenu';
+import { createSupabaseServerClient } from '@/lib/supabase/server';
 import type { Dictionary } from '@/lib/i18n/dictionaries';
 import type { Locale } from '@/lib/i18n/config';
 
 type Props = { dict: Dictionary; locale: Locale };
 
-export function Navbar({ dict, locale }: Props) {
+export async function Navbar({ dict, locale }: Props) {
   const links = [
     { href: `/${locale}#method`, label: dict.nav.method },
     { href: `/${locale}#curriculum`, label: dict.nav.curriculum },
     { href: `/${locale}/pricing`, label: dict.nav.pricing },
   ];
+
+  let userEmail: string | null = null;
+  try {
+    const supabase = createSupabaseServerClient();
+    const { data } = await supabase.auth.getUser();
+    userEmail = data.user?.email ?? null;
+  } catch {
+    userEmail = null;
+  }
 
   return (
     <header className="sticky top-0 z-40 border-b border-line/80 bg-canvas/80 backdrop-blur-md">
@@ -43,17 +54,26 @@ export function Navbar({ dict, locale }: Props) {
           <div className="hidden md:block">
             <ThemeToggle labelLight={dict.theme.light} labelDark={dict.theme.dark} />
           </div>
-          <Link
-            href={`/${locale}/signin`}
-            className="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
-          >
-            {dict.nav.signIn}
-          </Link>
-          <div className="hidden md:block">
-            <Button href={`/${locale}/onboarding`}>{dict.nav.getStarted}</Button>
-          </div>
 
-          <MobileMenu dict={dict} locale={locale} links={links} />
+          {userEmail ? (
+            <div className="hidden md:block">
+              <UserMenu locale={locale} email={userEmail} />
+            </div>
+          ) : (
+            <>
+              <Link
+                href={`/${locale}/signin`}
+                className="hidden text-sm text-muted transition-colors hover:text-ink md:inline"
+              >
+                {dict.nav.signIn}
+              </Link>
+              <div className="hidden md:block">
+                <Button href={`/${locale}/onboarding`}>{dict.nav.getStarted}</Button>
+              </div>
+            </>
+          )}
+
+          <MobileMenu dict={dict} locale={locale} links={links} signedIn={!!userEmail} />
         </div>
       </Container>
     </header>

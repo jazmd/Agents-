@@ -14,9 +14,10 @@ type Props = {
   dict: Dictionary;
   locale: Locale;
   links: { href: string; label: string }[];
+  signedIn?: boolean;
 };
 
-export function MobileMenu({ dict, locale, links }: Props) {
+export function MobileMenu({ dict, locale, links, signedIn }: Props) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -93,20 +94,42 @@ export function MobileMenu({ dict, locale, links }: Props) {
               </div>
 
               <div className="mt-10 flex flex-col gap-3">
-                <Link
-                  href={`/${locale}/onboarding`}
-                  onClick={() => setOpen(false)}
-                  className="inline-flex h-12 items-center justify-center rounded-full bg-ink px-6 text-[15px] font-medium tracking-tight text-canvas"
-                >
-                  {dict.nav.getStarted}
-                </Link>
-                <Link
-                  href={`/${locale}/signin`}
-                  onClick={() => setOpen(false)}
-                  className="inline-flex h-12 items-center justify-center rounded-full border border-line px-6 text-[15px] font-medium tracking-tight text-ink"
-                >
-                  {dict.nav.signIn}
-                </Link>
+                {signedIn ? (
+                  <>
+                    <Link
+                      href={`/${locale}/dashboard`}
+                      onClick={() => setOpen(false)}
+                      className="inline-flex h-12 items-center justify-center rounded-full bg-ink px-6 text-[15px] font-medium tracking-tight text-canvas"
+                    >
+                      Open dashboard
+                    </Link>
+                    <form action={`/api/signout?locale=${locale}`} method="post">
+                      <button
+                        type="submit"
+                        className="inline-flex h-12 w-full items-center justify-center rounded-full border border-line px-6 text-[15px] font-medium tracking-tight text-ink"
+                      >
+                        Sign out
+                      </button>
+                    </form>
+                  </>
+                ) : (
+                  <>
+                    <Link
+                      href={`/${locale}/onboarding`}
+                      onClick={() => setOpen(false)}
+                      className="inline-flex h-12 items-center justify-center rounded-full bg-ink px-6 text-[15px] font-medium tracking-tight text-canvas"
+                    >
+                      {dict.nav.getStarted}
+                    </Link>
+                    <Link
+                      href={`/${locale}/signin`}
+                      onClick={() => setOpen(false)}
+                      className="inline-flex h-12 items-center justify-center rounded-full border border-line px-6 text-[15px] font-medium tracking-tight text-ink"
+                    >
+                      {dict.nav.signIn}
+                    </Link>
+                  </>
+                )}
               </div>
             </nav>
           </motion.div>
