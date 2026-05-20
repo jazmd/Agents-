@@ -331,6 +331,110 @@ const en = {
       secondary: 'See pricing',
     },
   },
+  signIn: {
+    eyebrow: 'Sign in',
+    title: 'Welcome back.',
+    subtitle: 'Your streak is waiting on the other side.',
+    emailLabel: 'Email',
+    emailPlaceholder: 'you@example.com',
+    passwordLabel: 'Password',
+    forgotten: 'Forgot password?',
+    cta: 'Sign in',
+    or: 'Or continue with',
+    google: 'Continue with Google',
+    apple: 'Continue with Apple',
+    newHere: 'New to Tickra?',
+    create: 'Take the placement test',
+    notice:
+      'No password required for the test. We only ask for an email when you save your progress.',
+  },
+  notFound: {
+    eyebrow: 'Error 404',
+    title: 'This page is off the chart.',
+    body: 'The link you followed does not exist, was moved, or was never published. Walk back to the curriculum.',
+    primary: 'Back to home',
+    secondary: 'Open the dashboard',
+  },
+  legal: {
+    backToHome: 'Back to home',
+    terms: {
+      eyebrow: 'Terms of Service',
+      title: 'The rules of engagement.',
+      updated: 'Last updated · April 2026',
+      sections: [
+        {
+          heading: 'Educational purpose',
+          body: 'Tickra is an educational platform. Nothing on the site is investment, financial, tax, or legal advice. Decisions you make with your capital remain entirely yours.',
+        },
+        {
+          heading: 'Account and access',
+          body: 'You may create one account per person. Sharing access, scraping lessons, or reselling content is grounds for immediate termination without refund.',
+        },
+        {
+          heading: 'Subscriptions and refunds',
+          body: 'Pro renews monthly until cancelled. Lifetime is a one‑time payment, covered by a 14‑day money‑back guarantee from the date of purchase. After 14 days, lifetime purchases are non‑refundable.',
+        },
+        {
+          heading: 'Acceptable use',
+          body: 'You agree not to use Tickra to deceive other learners, distribute malware, or interact with the platform in any way that could degrade service for others.',
+        },
+        {
+          heading: 'Termination',
+          body: 'You may close your account at any time from settings. We may suspend accounts that violate these terms, with a written notice when feasible.',
+        },
+      ],
+    },
+    privacy: {
+      eyebrow: 'Privacy',
+      title: 'What we keep, what we never collect.',
+      updated: 'Last updated · April 2026',
+      sections: [
+        {
+          heading: 'What we collect',
+          body: 'Account email, hashed password, lesson progress, streak history, and anonymous usage telemetry. That is the entire list.',
+        },
+        {
+          heading: 'What we never collect',
+          body: 'No bank credentials, no brokerage credentials, no trade history outside what you voluntarily journal inside Tickra. We are not a broker.',
+        },
+        {
+          heading: 'Cookies',
+          body: 'Two cookies: the locale preference (tickra-locale) and the theme preference (tickra-theme). No third‑party tracking cookies. We use a privacy‑respecting analytics provider with IP anonymisation.',
+        },
+        {
+          heading: 'Your rights',
+          body: 'Under GDPR you can request a full export of your data or a permanent deletion at any time from privacy@tickra.com. We honour requests within 30 days.',
+        },
+      ],
+    },
+    risk: {
+      eyebrow: 'Risk disclosure',
+      title: 'Read this before you ever click Buy.',
+      updated: 'Last updated · April 2026',
+      sections: [
+        {
+          heading: 'Trading is a losing game by default',
+          body: 'The majority of retail traders lose money. Tickra teaches the craft of reading markets; it cannot remove the inherent risk of putting capital at risk.',
+        },
+        {
+          heading: 'Past performance, future returns',
+          body: 'Anything you learn on Tickra has worked, somewhere, sometimes, for someone. None of it is a guarantee of future returns in your hands, on your account, in this market.',
+        },
+        {
+          heading: 'Leverage amplifies both sides',
+          body: 'Many of the instruments discussed on Tickra are leveraged. Leverage scales gains and losses by the same factor — including beyond your initial deposit on some products.',
+        },
+        {
+          heading: 'Trade with capital you can lose',
+          body: 'Never trade with money required for rent, food, debt repayment, or your reserve fund. Decide your loss tolerance in cold blood, before the chart moves.',
+        },
+        {
+          heading: 'Seek professional advice when needed',
+          body: 'Tickra does not replace a licensed financial advisor. If your situation requires personalised guidance, consult one before acting.',
+        },
+      ],
+    },
+  },
   theme: { light: 'Switch to light theme', dark: 'Switch to dark theme' },
   locale: { switch: 'Change language' },
 } as const;

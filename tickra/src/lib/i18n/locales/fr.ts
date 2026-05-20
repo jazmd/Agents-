@@ -331,6 +331,110 @@ const fr = {
       secondary: 'Voir les tarifs',
     },
   },
+  signIn: {
+    eyebrow: 'Connexion',
+    title: 'Content de vous revoir.',
+    subtitle: 'Votre streak vous attend de l’autre côté.',
+    emailLabel: 'Email',
+    emailPlaceholder: 'vous@exemple.com',
+    passwordLabel: 'Mot de passe',
+    forgotten: 'Mot de passe oublié ?',
+    cta: 'Se connecter',
+    or: 'Ou continuer avec',
+    google: 'Continuer avec Google',
+    apple: 'Continuer avec Apple',
+    newHere: 'Nouveau sur Tickra ?',
+    create: 'Passer le test de niveau',
+    notice:
+      'Aucun mot de passe requis pour le test. Nous ne demandons un email que lorsque vous enregistrez votre progression.',
+  },
+  notFound: {
+    eyebrow: 'Erreur 404',
+    title: 'Cette page est hors du graphique.',
+    body: 'Le lien que vous avez suivi n’existe pas, a été déplacé ou n’a jamais été publié. Retournez au parcours.',
+    primary: 'Retour à l’accueil',
+    secondary: 'Ouvrir le tableau de bord',
+  },
+  legal: {
+    backToHome: 'Retour à l’accueil',
+    terms: {
+      eyebrow: 'Conditions d’utilisation',
+      title: 'Les règles du jeu.',
+      updated: 'Dernière mise à jour · avril 2026',
+      sections: [
+        {
+          heading: 'Vocation pédagogique',
+          body: "Tickra est une plateforme éducative. Rien sur ce site ne constitue un conseil en investissement, financier, fiscal ou juridique. Les décisions prises avec votre capital restent entièrement les vôtres.",
+        },
+        {
+          heading: 'Compte et accès',
+          body: "Un seul compte par personne. Partager les accès, scraper les leçons ou revendre du contenu entraîne la résiliation immédiate sans remboursement.",
+        },
+        {
+          heading: 'Abonnements et remboursements',
+          body: "Pro est renouvelé mensuellement jusqu'à annulation. L'offre À vie est un paiement unique, couvert par une garantie satisfait ou remboursé de 14 jours à compter de l'achat. Au‑delà, l'achat À vie n'est plus remboursable.",
+        },
+        {
+          heading: 'Usage acceptable',
+          body: 'Vous vous engagez à ne pas utiliser Tickra pour tromper d’autres apprenants, diffuser des logiciels malveillants, ni dégrader le service pour autrui.',
+        },
+        {
+          heading: 'Résiliation',
+          body: 'Vous pouvez fermer votre compte à tout moment depuis les réglages. Nous pouvons suspendre les comptes contrevenant à ces conditions, avec un préavis écrit lorsque possible.',
+        },
+      ],
+    },
+    privacy: {
+      eyebrow: 'Confidentialité',
+      title: 'Ce que nous gardons, ce que nous ne collectons jamais.',
+      updated: 'Dernière mise à jour · avril 2026',
+      sections: [
+        {
+          heading: 'Ce que nous collectons',
+          body: "L'email de compte, le mot de passe haché, la progression dans les leçons, l'historique des streaks et des télémétries d'usage anonymes. C'est la liste complète.",
+        },
+        {
+          heading: 'Ce que nous ne collectons jamais',
+          body: 'Aucune information bancaire, aucun identifiant de courtier, aucun historique de trades hors de ce que vous journalisez volontairement dans Tickra. Nous ne sommes pas un courtier.',
+        },
+        {
+          heading: 'Cookies',
+          body: "Deux cookies : la préférence de langue (tickra-locale) et la préférence de thème (tickra-theme). Aucun cookie de tracking tiers. Notre analytics anonymise les IP.",
+        },
+        {
+          heading: 'Vos droits',
+          body: "Conformément au RGPD, vous pouvez demander un export complet ou une suppression définitive de vos données à tout moment via privacy@tickra.com. Nous répondons sous 30 jours.",
+        },
+      ],
+    },
+    risk: {
+      eyebrow: 'Avertissement risque',
+      title: "Lisez ceci avant tout passage d'ordre.",
+      updated: 'Dernière mise à jour · avril 2026',
+      sections: [
+        {
+          heading: 'Le trading est par défaut un jeu perdant',
+          body: "La majorité des traders particuliers perdent de l'argent. Tickra enseigne l'art de lire les marchés ; il ne peut pas supprimer le risque inhérent à l'engagement de capital.",
+        },
+        {
+          heading: 'Performances passées, rendements futurs',
+          body: "Tout ce que vous apprenez sur Tickra a fonctionné, quelque part, à un moment, pour quelqu'un. Aucune de ces approches ne garantit des rendements futurs entre vos mains, sur votre compte, sur ce marché.",
+        },
+        {
+          heading: "L'effet de levier amplifie les deux côtés",
+          body: "Beaucoup des instruments évoqués sur Tickra sont à effet de levier. Le levier multiplie les gains et les pertes du même facteur — au‑delà du dépôt initial sur certains produits.",
+        },
+        {
+          heading: "Engagez du capital que vous pouvez perdre",
+          body: "Ne tradez jamais avec de l'argent destiné au loyer, à l'alimentation, au remboursement de dettes ou à votre fonds de réserve. Décidez votre tolérance à la perte à froid, avant que le graphique ne bouge.",
+        },
+        {
+          heading: 'Consultez un professionnel si besoin',
+          body: "Tickra ne remplace pas un conseiller financier agréé. Si votre situation nécessite un accompagnement personnalisé, consultez‑en un avant d'agir.",
+        },
+      ],
+    },
+  },
   theme: { light: 'Passer en thème clair', dark: 'Passer en thème sombre' },
   locale: { switch: 'Changer de langue' },
 } as const;
