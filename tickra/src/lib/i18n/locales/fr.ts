@@ -331,6 +331,148 @@ const fr = {
       secondary: 'Voir les tarifs',
     },
   },
+  about: {
+    eyebrow: 'À propos',
+    title: 'Nous construisons le cursus que nous aurions voulu avoir.',
+    body: "Tickra a été fondée en 2025 par une petite équipe d'anciens traders pour compte propre et d'éditeurs. Nous étions fatigués de deux choses : les gourous qui vendent de la certitude, et les plateformes qui vendent des heures. Nous voulions un cours qui se lit comme un manuel d'école des métiers — court, honnête, construit autour de ce que vous faites vraiment.",
+    principles: {
+      title: 'Cinq principes que nous ne briserons pas.',
+      items: [
+        {
+          heading: 'Jamais de signaux',
+          body: 'Nous ne publierons jamais ni entrées, ni sorties, ni recommandations. Apprendre à décider est tout le métier.',
+        },
+        {
+          heading: 'Le risque avant les figures',
+          body: 'Chaque piste commence par la taille de position et le placement du stop. Les figures viennent ensuite.',
+        },
+        {
+          heading: 'Uniquement des vrais graphiques',
+          body: "Aucun exemple synthétique. Chaque exercice tourne sur une séance historique qui a réellement eu lieu.",
+        },
+        {
+          heading: 'Lent quand il faut',
+          body: 'Certaines leçons durent cinq minutes. D’autres prennent trois séances. Nous ne meublons pas et nous ne précipitons pas.',
+        },
+        {
+          heading: 'Honnêtes sur les pertes',
+          body: 'Tickra enseigne un métier qui statistiquement fait perdre de l’argent à la plupart des gens. Nous le disons sur chaque plan.',
+        },
+      ],
+    },
+    team: {
+      title: 'Un studio, pas un marketplace.',
+      body: "Tickra, c'est six personnes : deux rédacteurs, deux designers, deux ingénieurs. Nous recrutons lentement, nous livrons lentement, et nous pensons que les petites équipes font la meilleure pédagogie.",
+    },
+  },
+  editorial: {
+    eyebrow: 'Éditorial',
+    title: 'Notes de terrain sur un métier.',
+    body: "Des essais courts de nos rédacteurs et d'une poignée de praticiens en qui nous avons confiance. Pas de newsletter, pas de tunnel — juste de l'écriture soignée sur la lecture des marchés.",
+    posts: [
+      {
+        kicker: 'Méthode · 7 min',
+        title: 'Pourquoi nous enseignons la bougie avant l’indicateur.',
+        excerpt:
+          'Les indicateurs compressent le prix en un nombre. La bougie est déjà une compression. Nous défendons l’idée qu’il faut apprendre à lire l’objet compressé avant d’ajouter une couche.',
+        date: '14 avril 2026',
+      },
+      {
+        kicker: 'Risque · 9 min',
+        title: 'La règle des 1 % n’est pas une règle. C’est un calibrage de départ.',
+        excerpt:
+          'La plupart des traders particuliers traitent « risquer 1 % par trade » comme une parole d’évangile. Nous défendons l’idée que c’est un défaut utile pour débuter et une contrainte créative pour les autres.',
+        date: '28 mars 2026',
+      },
+      {
+        kicker: 'Psychologie · 11 min',
+        title: 'Du coût d’une série de gains.',
+        excerpt:
+          "Cinq gains de suite produisent un état qui dégrade statistiquement la sixième décision. Voici ce que font les desks pro pour le neutraliser.",
+        date: '9 mars 2026',
+      },
+      {
+        kicker: 'Interview · 22 min',
+        title: 'Conversation avec une trader FX discrétionnaire.',
+        excerpt:
+          "Vingt‑deux minutes avec quelqu'un qui trade la même paire, de la même manière, depuis neuf ans. Surtout sur ce qu'elle ne fait pas.",
+        date: '21 février 2026',
+      },
+    ],
+  },
+  contact: {
+    eyebrow: 'Contact',
+    title: 'Écrivez‑nous un vrai message.',
+    body: 'Nous lisons tout. Nous répondons sous deux jours ouvrés à la plupart des messages. Pas de bot, pas de file de tickets, pas de réponses automatiques.',
+    form: {
+      name: 'Nom',
+      namePlaceholder: 'Votre nom',
+      email: 'Email',
+      emailPlaceholder: 'vous@exemple.com',
+      topic: 'Sujet',
+      topics: ['Question générale', 'Facturation ou compte', 'Presse', 'Partenariat'],
+      message: 'Message',
+      messagePlaceholder: 'Dites‑nous ce qui vous occupe.',
+      cta: 'Envoyer le message',
+      notice: 'En envoyant, vous acceptez notre politique de confidentialité. Nous ne partageons jamais votre email.',
+    },
+    directs: {
+      title: 'Ou écrivez directement.',
+      items: [
+        { label: 'Général', value: 'hello@tickra.com' },
+        { label: 'Presse', value: 'press@tickra.com' },
+        { label: 'Confidentialité', value: 'privacy@tickra.com' },
+        { label: 'Studio', value: '16 rue du Faubourg, 75010 Paris' },
+      ],
+    },
+  },
+  changelog: {
+    eyebrow: 'Journal des versions',
+    title: 'Tout ce qui a été livré.',
+    body: 'Nous publions une note chaque fois que nous changeons quelque chose qu’un apprenant peut remarquer. Versionnage en semver ; le changelog est écrit à la main.',
+    versions: [
+      {
+        version: '0.7.0',
+        date: '12 mai 2026',
+        title: 'Journal de décisions.',
+        items: [
+          'Chaque exercice capture désormais votre raisonnement écrit avant que le mouvement du graphique ne soit révélé.',
+          'Ajout d’une vue journal dans le dashboard avec un revealer de patterns mensuels.',
+          'Amélioration du switch light/dark dans l’embed TradingView.',
+        ],
+      },
+      {
+        version: '0.6.0',
+        date: '28 avril 2026',
+        title: 'Lancement bilingue.',
+        items: [
+          "Traduction française complète sur la landing, l'app et les leçons.",
+          'Le sélecteur de langue mémorise votre préférence pour les visites futures.',
+          'Les images OG et les métadonnées SEO sont générées par locale.',
+        ],
+      },
+      {
+        version: '0.5.0',
+        date: '6 avril 2026',
+        title: 'Piste Gestion du Risque.',
+        items: [
+          'Sortie de la piste Gestion du Risque (douze leçons).',
+          'Ajout d’un calculateur de taille de position intégré aux leçons concernées.',
+          'Nouveau format de point de contrôle avec trois niveaux de difficulté par question.',
+        ],
+      },
+      {
+        version: '0.4.0',
+        date: '18 mars 2026',
+        title: 'Refonte des streaks.',
+        items: [
+          'Les streaks récompensent la régularité, pas le surmenage — limités à un jour de crédit par jour.',
+          'Ajout d’un jeton de freeze pour pardonner un jour manqué par semaine.',
+          'Le record de streak est affiché à côté du streak actuel.',
+        ],
+      },
+    ],
+  },
   signIn: {
     eyebrow: 'Connexion',
     title: 'Content de vous revoir.',

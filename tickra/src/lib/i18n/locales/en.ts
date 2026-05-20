@@ -435,6 +435,148 @@ const en = {
       ],
     },
   },
+  about: {
+    eyebrow: 'About',
+    title: 'We are building the curriculum we wish we had.',
+    body: 'Tickra was founded in 2025 by a small team of former proprietary traders and editors. We were tired of two things: gurus selling certainty, and platforms selling hours. We wanted a course that reads like a craft school manual — short, honest, and built around what you actually do.',
+    principles: {
+      title: 'Five principles we will not break.',
+      items: [
+        {
+          heading: 'No signals, ever',
+          body: 'We will never publish entries, exits, or recommendations. Learning to decide is the entire job.',
+        },
+        {
+          heading: 'Risk before patterns',
+          body: 'Every track starts with position sizing and stop placement. Patterns come second.',
+        },
+        {
+          heading: 'Real charts only',
+          body: 'No synthetic examples. Every drill runs on a historical session that actually happened.',
+        },
+        {
+          heading: 'Slow when it has to be',
+          body: 'Some lessons are five minutes. Some take three sessions. We will not pad and we will not rush.',
+        },
+        {
+          heading: 'Honest about losses',
+          body: 'Tickra teaches a craft that statistically loses money for most people. We say so on every plan.',
+        },
+      ],
+    },
+    team: {
+      title: 'A studio, not a marketplace.',
+      body: 'Tickra is six people: two writers, two designers, two engineers. We hire slowly, we ship slowly, and we believe small teams make better education.',
+    },
+  },
+  editorial: {
+    eyebrow: 'Editorial',
+    title: 'Field notes on a craft.',
+    body: 'Short essays from our editors and a handful of practitioners we trust. No newsletters, no funnels — just careful writing about reading markets.',
+    posts: [
+      {
+        kicker: 'Method · 7 min',
+        title: 'Why we teach the candle before the indicator.',
+        excerpt:
+          'Indicators compress price into a number. The candle is already a compression. We argue you should learn to read the compressed object before stacking another layer on top.',
+        date: 'April 14, 2026',
+      },
+      {
+        kicker: 'Risk · 9 min',
+        title: 'The 1% rule is not a rule. It is a starting calibration.',
+        excerpt:
+          'Most retail traders treat “risk 1% per trade” as gospel. We argue it is a useful default for beginners and a creative liability for everyone else.',
+        date: 'March 28, 2026',
+      },
+      {
+        kicker: 'Psychology · 11 min',
+        title: 'On the cost of a winning streak.',
+        excerpt:
+          'Five wins in a row produces a state that statistically degrades the sixth decision. Here is what professional desks do to neutralise it.',
+        date: 'March 9, 2026',
+      },
+      {
+        kicker: 'Interview · 22 min',
+        title: 'A conversation with a discretionary FX trader.',
+        excerpt:
+          'Twenty‑two minutes with someone who has traded the same pair, the same way, for nine years. Mostly about what she does not do.',
+        date: 'February 21, 2026',
+      },
+    ],
+  },
+  contact: {
+    eyebrow: 'Contact',
+    title: 'Write us a real message.',
+    body: 'We read everything. We answer most things within two business days. We do not have a support bot, a ticket queue, or canned responses.',
+    form: {
+      name: 'Name',
+      namePlaceholder: 'Your name',
+      email: 'Email',
+      emailPlaceholder: 'you@example.com',
+      topic: 'Topic',
+      topics: ['General question', 'Billing or account', 'Press', 'Partnership'],
+      message: 'Message',
+      messagePlaceholder: 'Tell us what is on your mind.',
+      cta: 'Send message',
+      notice: 'By submitting you agree to our privacy policy. We never share your email.',
+    },
+    directs: {
+      title: 'Or write directly.',
+      items: [
+        { label: 'General', value: 'hello@tickra.com' },
+        { label: 'Press', value: 'press@tickra.com' },
+        { label: 'Privacy', value: 'privacy@tickra.com' },
+        { label: 'Studio', value: '16 rue du Faubourg, 75010 Paris' },
+      ],
+    },
+  },
+  changelog: {
+    eyebrow: 'Changelog',
+    title: 'Everything that shipped.',
+    body: 'We publish a public note every time we change something a learner can notice. Versioning follows semver; the changelog is hand‑written.',
+    versions: [
+      {
+        version: '0.7.0',
+        date: 'May 12, 2026',
+        title: 'Decision journal.',
+        items: [
+          'Every drill now captures your written reasoning before the chart move is revealed.',
+          'Added a journal view in the dashboard with a monthly pattern surfacer.',
+          'Improved TradingView embed switching between light and dark themes.',
+        ],
+      },
+      {
+        version: '0.6.0',
+        date: 'April 28, 2026',
+        title: 'Bilingual launch.',
+        items: [
+          'Full French translation across landing, app, and lessons.',
+          'Locale picker remembers your preference for future visits.',
+          'OG images and SEO metadata now generated per locale.',
+        ],
+      },
+      {
+        version: '0.5.0',
+        date: 'April 6, 2026',
+        title: 'Risk Management track.',
+        items: [
+          'Released the twelve‑lesson Risk Management track.',
+          'Added a position size calculator embedded in every relevant lesson.',
+          'New checkpoint format with three difficulty tiers per question.',
+        ],
+      },
+      {
+        version: '0.4.0',
+        date: 'March 18, 2026',
+        title: 'Streak rework.',
+        items: [
+          'Streaks now reward consistency, not grinding — capped at one day of credit per day.',
+          'Added a freeze token to forgive one missed day per week.',
+          'Best‑streak record now displayed alongside the current streak.',
+        ],
+      },
+    ],
+  },
   theme: { light: 'Switch to light theme', dark: 'Switch to dark theme' },
   locale: { switch: 'Change language' },
 } as const;
