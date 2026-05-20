@@ -17,38 +17,38 @@ export async function GET(request: Request) {
     const admin = createSupabaseServiceClient();
     const now = new Date().toISOString();
 
-    // Free users (plan = 'free') get 3 lives back.
-    const { count: freeCount } = await admin
-      .from('user_state')
-      .update({ lives: FREE_LIVES, lives_refilled_at: now }, { count: 'exact' })
-      .lt('lives', FREE_LIVES)
-      .in(
-        'user_id',
-        // sub-select is not native; instead we run two updates joined by
-        // a small RPC. For simplicity we update everyone below 3 here and
-        // separately bump pro/lifetime users up to UNLIMITED below.
-        (
-          await admin.from('subscriptions').select('user_id').eq('plan', 'free')
-        ).data?.map((r) => r.user_id) ?? [],
-      );
+    const [{ data: freeRows }, { data: paidRows }] = await Promise.all([
+      admin.from('subscriptions').select('user_id').eq('plan', 'free'),
+      admin.from('subscriptions').select('user_id').in('plan', ['pro', 'lifetime']),
+    ]);
 
-    const { count: proCount } = await admin
-      .from('user_state')
-      .update({ lives: UNLIMITED, lives_refilled_at: now }, { count: 'exact' })
-      .in(
-        'user_id',
-        (
-          await admin
-            .from('subscriptions')
-            .select('user_id')
-            .in('plan', ['pro', 'lifetime'])
-        ).data?.map((r) => r.user_id) ?? [],
-      );
+    const freeIds = (freeRows ?? []).map((r) => r.user_id);
+    const paidIds = (paidRows ?? []).map((r) => r.user_id);
+
+    let refilledFree = 0;
+    let refilledPaid = 0;
+
+    if (freeIds.length > 0) {
+      const { count } = await admin
+        .from('user_state')
+        .update({ lives: FREE_LIVES, lives_refilled_at: now }, { count: 'exact' })
+        .lt('lives', FREE_LIVES)
+        .in('user_id', freeIds);
+      refilledFree = count ?? 0;
+    }
+
+    if (paidIds.length > 0) {
+      const { count } = await admin
+        .from('user_state')
+        .update({ lives: UNLIMITED, lives_refilled_at: now }, { count: 'exact' })
+        .in('user_id', paidIds);
+      refilledPaid = count ?? 0;
+    }
 
     return NextResponse.json({
       ok: true,
-      refilled_free: freeCount ?? 0,
-      refilled_pro: proCount ?? 0,
+      refilled_free: refilledFree,
+      refilled_paid: refilledPaid,
       at: now,
     });
   } catch (err) {

@@ -46,7 +46,7 @@ export function Quiz({ dict, locale }: Props) {
     ratio < 0.35 ? 'novice' : ratio < 0.75 ? 'intermediate' : 'advanced';
   const result = t.result[level];
 
-  const [persistPending, startPersist] = useTransition();
+  const [, startPersist] = useTransition();
   const [persisted, setPersisted] = useState(false);
 
   useEffect(() => {

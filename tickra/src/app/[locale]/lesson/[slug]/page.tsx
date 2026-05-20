@@ -78,7 +78,7 @@ export default async function LessonPage({
             return (
               <section key={i} className={tone}>
                 <Container as="div" className="py-16 md:py-24">
-                  <BlockRenderer block={block} locale={locale} dict={dict} slug={lesson.slug} index={i} />
+                  <BlockRenderer block={block} locale={locale} dict={dict} slug={lesson.slug} />
                 </Container>
               </section>
             );
@@ -92,7 +92,7 @@ export default async function LessonPage({
               .map((block, i) => (
                 <section key={i} className="border-b border-line">
                   <Container as="div" className="py-16 md:py-24">
-                    <BlockRenderer block={block} locale={locale} dict={dict} slug={lesson.slug} index={i} />
+                    <BlockRenderer block={block} locale={locale} dict={dict} slug={lesson.slug} />
                   </Container>
                 </section>
               ))}

@@ -11,10 +11,9 @@ type Props = {
   locale: Locale;
   dict: Dictionary;
   slug: string;
-  index: number;
 };
 
-export function BlockRenderer({ block, locale, dict, slug, index }: Props) {
+export function BlockRenderer({ block, locale, dict, slug }: Props) {
   switch (block.kind) {
     case 'lede':
       return (
@@ -106,4 +105,3 @@ export function BlockRenderer({ block, locale, dict, slug, index }: Props) {
 }
 
 BlockRenderer.displayName = 'BlockRenderer';
-export const _Unused = (index: number) => index;

@@ -1,4 +1,4 @@
-import type { Lesson, Block, Locale, TrackId } from './types';
+import type { Lesson, TrackId } from './types';
 
 // ---------------------------------------------------------------------------
 // 12 lessons across 5 tracks. The first three are free.
@@ -422,8 +422,4 @@ export function lessonBySlug(slug: string): Lesson | null {
 
 export function lessonsByTrack(track: TrackId): Lesson[] {
   return LESSONS.filter((l) => l.track === track).sort((a, b) => a.order - b.order);
-}
-
-export function lessonText(value: Record<Locale, string>, locale: Locale): string {
-  return value[locale];
 }
