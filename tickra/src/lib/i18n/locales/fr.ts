@@ -204,6 +204,133 @@ const fr = {
       "Le trading comporte un risque substantiel de perte. Tickra est une plateforme éducative ; rien sur ce site ne constitue un conseil en investissement.",
     copyright: '© 2026 Tickra. Tous droits réservés.',
   },
+  onboarding: {
+    eyebrow: 'Test de niveau',
+    title: 'Six questions, puis un départ sur mesure.',
+    subtitle: "Répondez honnêtement. Il n'y a pas de note, seulement une ligne de départ.",
+    progress: 'Question {current} sur {total}',
+    cta: { next: 'Suivant', back: 'Retour', finish: 'Voir mon niveau' },
+    result: {
+      novice: {
+        label: 'Apprenti',
+        body: 'Vous partez de la bougie elle‑même — parfait. Tickra ouvre par un primer de quatre leçons sur ce qu’un graphique représente réellement.',
+        recommended: 'Leçon 01 · Ce qu’une bougie dit',
+      },
+      intermediate: {
+        label: 'Opérateur',
+        body: 'Vous maîtrisez le vocabulaire. Tickra passe le primer et vous démarre sur la structure, les supports et la taille de position.',
+        recommended: 'Leçon 17 · Supports, résistances, structure',
+      },
+      advanced: {
+        label: 'Stratège',
+        body: 'Vous êtes au‑delà des bases. Tickra vous oriente directement vers l’analyse multi‑temporelle et l’allocation du capital.',
+        recommended: 'Leçon 64 · Contexte multi‑temporel',
+      },
+    },
+    questions: [
+      {
+        q: 'Avez‑vous déjà passé un vrai trade avec votre propre argent ?',
+        choices: [
+          { label: 'Jamais', weight: 0 },
+          { label: 'Quelques fois', weight: 1 },
+          { label: 'Régulièrement depuis plus d’un an', weight: 2 },
+        ],
+      },
+      {
+        q: 'Une bougie japonaise verte signifie que le prix a clôturé…',
+        choices: [
+          { label: 'Plus haut qu’à l’ouverture', weight: 2 },
+          { label: 'Plus bas qu’à l’ouverture', weight: 0 },
+          { label: 'Je ne suis pas sûr', weight: 0 },
+        ],
+      },
+      {
+        q: 'Un stop‑loss sert à…',
+        choices: [
+          { label: 'Plafonner la perte maximale sur un trade', weight: 2 },
+          { label: 'Garantir un objectif de profit', weight: 0 },
+          { label: 'J’en ai entendu parler mais jamais utilisé', weight: 1 },
+        ],
+      },
+      {
+        q: 'Si vous risquez 1 % par trade, après 10 pertes consécutives le compte baisse d’environ…',
+        choices: [
+          { label: '10 %', weight: 1 },
+          { label: '9,6 %', weight: 2 },
+          { label: '1 %', weight: 0 },
+        ],
+      },
+      {
+        q: 'Une figure d’avalement haussier (bullish engulfing) est…',
+        choices: [
+          { label: 'Deux bougies, la seconde couvrant entièrement le corps de la première', weight: 2 },
+          { label: 'Une grande bougie verte unique', weight: 0 },
+          { label: 'Un niveau horizontal sur le graphique', weight: 0 },
+        ],
+      },
+      {
+        q: "Avant d'entrer dans un trade, la première chose que vous décidez est…",
+        choices: [
+          { label: 'La perte maximale que vous acceptez sur ce trade', weight: 2 },
+          { label: 'L’objectif de profit', weight: 1 },
+          { label: 'La taille de la position', weight: 1 },
+        ],
+      },
+    ],
+  },
+  dashboard: {
+    eyebrow: 'Aujourd’hui',
+    greeting: 'Content de vous revoir.',
+    subtitle: 'Dix minutes aujourd’hui maintiennent le streak en vie.',
+    streak: { label: 'Série actuelle', unit: 'jours', best: 'Record · {n}' },
+    xp: { label: 'Expérience', toNext: '{n} XP pour {level}' },
+    level: 'Niveau {n}',
+    lives: { label: 'Vies', empty: 'Plus de vies — rechargez ou attendez demain.' },
+    next: {
+      label: 'Leçon du jour',
+      cta: 'Reprendre la leçon',
+      duration: '8 min · Piste 02',
+    },
+    map: {
+      title: 'Votre parcours',
+      legend: { done: 'Terminées', current: 'En cours', locked: 'Verrouillées' },
+    },
+    activity: {
+      title: 'Sept derniers jours',
+      caption: 'Minutes pratiquées',
+    },
+  },
+  lesson: {
+    breadcrumb: 'Parcours / Piste 01 · Fondations',
+    eyebrow: 'Leçon 04 · 12 minutes',
+    title: 'Lire une bougie japonaise.',
+    intro:
+      "Une bougie est une histoire compressée : ouverture, clôture, plus haut atteint, plus bas atteint. Lisez quatre nombres et vous lisez ce qu'ont été 60 minutes de comportement de foule. Cette leçon entraîne ce muscle.",
+    anatomy: {
+      title: 'Anatomie d’une bougie',
+      caption: 'Une séance haussière : clôture au‑dessus de l’ouverture. Le corps montre l’amplitude tradée ; les mèches montrent les extrêmes rejetés.',
+      labels: { high: 'Plus haut', low: 'Plus bas', open: 'Ouverture', close: 'Clôture', body: 'Corps', wick: 'Mèche' },
+    },
+    practice: {
+      title: 'Pratique sur graphique réel',
+      body: 'Ci‑dessous, le même EUR/USD que celui que regardent les desks pro. Utilisez les outils de dessin TradingView — ce sont ceux que vous utiliserez dans toutes les futures leçons.',
+    },
+    quiz: {
+      title: 'Point de contrôle',
+      question: 'Sur une bougie haussière, le haut du corps est le…',
+      choices: ['Prix d’ouverture', 'Prix de clôture', 'Prix le plus haut', 'Prix le plus bas'],
+      correct: 1,
+      success: 'Correct — sur une bougie haussière, la clôture est toujours au‑dessus de l’ouverture. La mèche continue jusqu’au plus haut.',
+      retry: 'Pas tout à fait. Relisez l’anatomie et réessayez.',
+    },
+    paywall: {
+      eyebrow: 'Leçon Pro',
+      title: 'Continuez avec la leçon complète.',
+      body: 'Les neuf exercices restants, le replay du chart et la revue du point de contrôle font partie de Tickra Pro.',
+      primary: 'Débloquer avec Pro',
+      secondary: 'Voir les tarifs',
+    },
+  },
   theme: { light: 'Passer en thème clair', dark: 'Passer en thème sombre' },
   locale: { switch: 'Changer de langue' },
 } as const;

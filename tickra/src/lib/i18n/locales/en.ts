@@ -204,6 +204,133 @@ const en = {
       'Trading involves substantial risk of loss. Tickra is an educational platform; nothing on this site constitutes investment advice.',
     copyright: '© 2026 Tickra. All rights reserved.',
   },
+  onboarding: {
+    eyebrow: 'Placement test',
+    title: 'Six questions, then a tailored start.',
+    subtitle: 'Answer honestly. There is no grade, only a starting line.',
+    progress: 'Question {current} of {total}',
+    cta: { next: 'Next', back: 'Back', finish: 'See my level' },
+    result: {
+      novice: {
+        label: 'Apprentice',
+        body: 'You are starting from the candle itself — perfect. Tickra opens with a four‑lesson primer on what charts actually represent.',
+        recommended: 'Lesson 01 · What a candle says',
+      },
+      intermediate: {
+        label: 'Operator',
+        body: 'You know the vocabulary. Tickra will skip the primer and start you on structure, support, and risk sizing.',
+        recommended: 'Lesson 17 · Support, resistance, structure',
+      },
+      advanced: {
+        label: 'Strategist',
+        body: 'You are past the basics. Tickra routes you straight to multi‑timeframe analysis and capital allocation.',
+        recommended: 'Lesson 64 · Multi‑timeframe context',
+      },
+    },
+    questions: [
+      {
+        q: 'Have you ever placed a real trade with your own money?',
+        choices: [
+          { label: 'Never', weight: 0 },
+          { label: 'A few times', weight: 1 },
+          { label: 'Regularly for over a year', weight: 2 },
+        ],
+      },
+      {
+        q: 'A green Japanese candle means the price closed…',
+        choices: [
+          { label: 'Higher than it opened', weight: 2 },
+          { label: 'Lower than it opened', weight: 0 },
+          { label: 'I’m not sure', weight: 0 },
+        ],
+      },
+      {
+        q: 'A stop‑loss is used to…',
+        choices: [
+          { label: 'Cap how much you can lose on a trade', weight: 2 },
+          { label: 'Guarantee a profit target', weight: 0 },
+          { label: 'I’ve heard of it but never used one', weight: 1 },
+        ],
+      },
+      {
+        q: 'If you risk 1% per trade, after 10 consecutive losses your account is down roughly…',
+        choices: [
+          { label: '10%', weight: 1 },
+          { label: '9.6%', weight: 2 },
+          { label: '1%', weight: 0 },
+        ],
+      },
+      {
+        q: 'A bullish engulfing pattern is…',
+        choices: [
+          { label: 'Two candles where the second fully covers the first’s body', weight: 2 },
+          { label: 'A single tall green candle', weight: 0 },
+          { label: 'A horizontal level on the chart', weight: 0 },
+        ],
+      },
+      {
+        q: 'Before entering a trade, the first thing you decide is…',
+        choices: [
+          { label: 'The maximum loss you accept on this trade', weight: 2 },
+          { label: 'The profit target', weight: 1 },
+          { label: 'The size of the position', weight: 1 },
+        ],
+      },
+    ],
+  },
+  dashboard: {
+    eyebrow: 'Today',
+    greeting: 'Welcome back.',
+    subtitle: 'Ten minutes today keeps the streak alive.',
+    streak: { label: 'Current streak', unit: 'days', best: 'Best · {n}' },
+    xp: { label: 'Experience', toNext: '{n} XP to {level}' },
+    level: 'Level {n}',
+    lives: { label: 'Lives', empty: 'Out of lives — refill or wait until tomorrow.' },
+    next: {
+      label: 'Today’s lesson',
+      cta: 'Resume lesson',
+      duration: '8 min · Track 02',
+    },
+    map: {
+      title: 'Your path',
+      legend: { done: 'Completed', current: 'In progress', locked: 'Locked' },
+    },
+    activity: {
+      title: 'Past seven days',
+      caption: 'Minutes practised',
+    },
+  },
+  lesson: {
+    breadcrumb: 'Curriculum / Track 01 · Foundations',
+    eyebrow: 'Lesson 04 · 12 minutes',
+    title: 'Reading a Japanese candle.',
+    intro:
+      'A single candle is a compressed story: open, close, the highest price reached, the lowest one. Read four numbers and you read what 60 minutes of crowd behaviour looked like. This lesson trains the muscle.',
+    anatomy: {
+      title: 'Anatomy of a candle',
+      caption: 'A bullish session: close above open. The body shows the trading range; wicks show rejected extremes.',
+      labels: { high: 'High', low: 'Low', open: 'Open', close: 'Close', body: 'Body', wick: 'Wick' },
+    },
+    practice: {
+      title: 'Practice on a live chart',
+      body: 'Below, the same EUR/USD chart professional desks watch. Use TradingView’s drawing tools — they are the ones you will use in every future lesson.',
+    },
+    quiz: {
+      title: 'Checkpoint',
+      question: 'On a bullish candle, the body’s top is the…',
+      choices: ['Open price', 'Close price', 'Highest price', 'Lowest price'],
+      correct: 1,
+      success: 'Correct — bullish closes are always above the open. The wick continues to the high.',
+      retry: 'Not quite. Re‑read the anatomy and try again.',
+    },
+    paywall: {
+      eyebrow: 'Pro lesson',
+      title: 'Continue with the full lesson.',
+      body: 'The remaining nine drills, the chart playback, and the checkpoint review are part of Tickra Pro.',
+      primary: 'Unlock with Pro',
+      secondary: 'See pricing',
+    },
+  },
   theme: { light: 'Switch to light theme', dark: 'Switch to dark theme' },
   locale: { switch: 'Change language' },
 } as const;
