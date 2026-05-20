@@ -14,7 +14,7 @@ type Props = { dict: Dictionary; locale: Locale };
 export async function Navbar({ dict, locale }: Props) {
   const links = [
     { href: `/${locale}#method`, label: dict.nav.method },
-    { href: `/${locale}#curriculum`, label: dict.nav.curriculum },
+    { href: `/${locale}/curriculum`, label: dict.nav.curriculum },
     { href: `/${locale}/pricing`, label: dict.nav.pricing },
   ];
 

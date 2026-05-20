@@ -599,6 +599,18 @@ const fr = {
       body: 'Nous avons envoyé un lien de confirmation. Ouvrez‑le depuis cet appareil pour finaliser votre compte.',
     },
   },
+  curriculum: {
+    eyebrow: 'Parcours',
+    title: 'Tout le chemin, cartographié.',
+    body: 'Onze pistes de maîtrise, 127 leçons, ici. Les trois premières sont gratuites. Pro et À vie débloquent tout ; votre test de niveau décide d’où l’on vous dépose.',
+    trackLabel: 'Piste',
+    lessonsLabel: 'leçons',
+    minutesLabel: 'min',
+    locked: 'Verrouillé',
+    free: 'Gratuit',
+    pro: 'Pro',
+    openLesson: 'Ouvrir la leçon',
+  },
   settings: {
     eyebrow: 'Compte',
     title: 'Vos réglages.',

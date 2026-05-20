@@ -599,6 +599,18 @@ const en = {
       body: 'We sent a confirmation link. Open it from this device to finish setting up your account.',
     },
   },
+  curriculum: {
+    eyebrow: 'Curriculum',
+    title: 'The full path, mapped.',
+    body: 'Eleven mastery tracks, 127 lessons, all here. The first three are free. Pro and Lifetime unlock everything; your placement test decides where to drop you in.',
+    trackLabel: 'Track',
+    lessonsLabel: 'lessons',
+    minutesLabel: 'min',
+    locked: 'Locked',
+    free: 'Free',
+    pro: 'Pro',
+    openLesson: 'Open lesson',
+  },
   settings: {
     eyebrow: 'Account',
     title: 'Your settings.',
