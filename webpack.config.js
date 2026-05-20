@@ -6,7 +6,7 @@ const __dirname = path.dirname(__filename);
 
 export default {
   mode: 'production',
-  entry: './bin/ruflo.js',
+  entry: './bin/cli.js',
   output: {
     filename: 'ruflo.bundle.js',
     path: path.resolve(__dirname, 'dist'),
