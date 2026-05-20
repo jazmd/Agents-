@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { defaultLocale, isLocale, locales, LOCALE_COOKIE } from './src/lib/i18n/config';
+import { defaultLocale, isLocale, locales, LOCALE_COOKIE } from '@/lib/i18n/config';
 
 const PUBLIC_FILE = /\.(.*)$/;
 
@@ -40,5 +40,5 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next|api|.*\\..*).*)'],
+  matcher: ['/((?!_next/static|_next/image|api|favicon.ico|.*\\..*).*)'],
 };
