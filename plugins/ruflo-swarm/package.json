@@ -1,0 +1,11 @@
+{
+  "name": "ruflo-swarm",
+  "version": "0.1.0-alpha.1",
+  "description": "Agent teams, swarm coordination, Monitor streams, and worktree isolation",
+  "type": "module",
+  "license": "MIT",
+  "claude-flow": {
+    "agents": ["agents/architect.md", "agents/coordinator.md"],
+    "commands": ["commands/swarm.md", "commands/watch.md"]
+  }
+}

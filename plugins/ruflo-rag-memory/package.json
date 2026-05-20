@@ -1,0 +1,11 @@
+{
+  "name": "ruflo-rag-memory",
+  "version": "0.1.0-alpha.1",
+  "description": "RuVector memory with HNSW search, AgentDB, and semantic retrieval",
+  "type": "module",
+  "license": "MIT",
+  "claude-flow": {
+    "agents": ["agents/memory-specialist.md"],
+    "commands": ["commands/recall.md", "commands/ruflo-memory.md"]
+  }
+}

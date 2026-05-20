@@ -1,0 +1,11 @@
+{
+  "name": "ruflo-core",
+  "version": "0.1.0-alpha.1",
+  "description": "Core Ruflo MCP tools, commands, and Claude Code orchestration patterns",
+  "type": "module",
+  "license": "MIT",
+  "claude-flow": {
+    "agents": ["agents/coder.md", "agents/researcher.md", "agents/reviewer.md", "agents/witness-curator.md"],
+    "commands": ["commands/ruflo-status.md", "commands/witness.md"]
+  }
+}
