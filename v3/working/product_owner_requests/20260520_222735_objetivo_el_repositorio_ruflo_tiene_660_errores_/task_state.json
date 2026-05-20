@@ -1,8 +1,8 @@
 {
   "task-01-discovery": {
-    "status": "retryable_failure",
+    "status": "human_intervention_required",
     "attempt": 3,
-    "updated_at": "2026-05-20T22:30:53.748057+00:00",
+    "updated_at": "2026-05-20T22:30:53.954498+00:00",
     "last_failure_signature": {
       "category": "preexisting_repo_failure",
       "implicated_paths": [

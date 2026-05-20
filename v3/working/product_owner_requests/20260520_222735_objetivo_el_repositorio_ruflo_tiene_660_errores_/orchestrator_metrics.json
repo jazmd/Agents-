@@ -2,8 +2,8 @@
   "request_id": "20260520_222735_objetivo_el_repositorio_ruflo_tiene_660_errores_",
   "request_dir_path": "/home/jsanchhi/sovereign_fabric/working/ruflo_repo/v3/working/product_owner_requests/20260520_222735_objetivo_el_repositorio_ruflo_tiene_660_errores_",
   "started_at": "2026-05-20T22:27:35.159936+00:00",
-  "phase_started_at": "2026-05-20T22:30:53.747019+00:00",
-  "current_phase": "scope_review",
+  "phase_started_at": "2026-05-20T22:30:53.953532+00:00",
+  "current_phase": "human_intervention_required",
   "phase_durations_seconds": {
     "request_created": 0.0,
     "planning": 72.0,
@@ -36,7 +36,7 @@
     "validation_cache_hits": 0,
     "planner_local_runs": 0
   },
-  "last_state_update_at": "2026-05-20T22:30:53.747019+00:00",
+  "last_state_update_at": "2026-05-20T22:30:53.953532+00:00",
   "planning_mode": "agent",
   "execution_lane": "high_risk",
   "semantic_surfaces": [
