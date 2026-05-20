@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { LogOut, User } from 'lucide-react';
+import { LogOut, Settings } from 'lucide-react';
 import type { Locale } from '@/lib/i18n/config';
 
 type Props = {
@@ -25,6 +25,13 @@ export function UserMenu({ locale, email }: Props) {
         <span className="hidden truncate font-mono text-[11px] uppercase tracking-[0.18em] sm:inline-block sm:max-w-[140px]">
           {email}
         </span>
+      </Link>
+      <Link
+        href={`/${locale}/settings`}
+        aria-label="Open settings"
+        className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-line text-ink transition-colors hover:bg-ink hover:text-canvas"
+      >
+        <Settings aria-hidden className="h-4 w-4" strokeWidth={1.6} />
       </Link>
       <button
         type="submit"

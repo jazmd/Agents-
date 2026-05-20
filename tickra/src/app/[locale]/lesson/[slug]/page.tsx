@@ -123,6 +123,8 @@ export default async function LessonPage({
                   correct={t.quiz.correct}
                   successMessage={t.quiz.success}
                   retryMessage={t.quiz.retry}
+                  locale={params.locale as 'en' | 'fr'}
+                  slug={params.slug}
                 />
               </Container>
             </section>

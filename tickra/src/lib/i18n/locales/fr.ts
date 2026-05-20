@@ -599,6 +599,37 @@ const fr = {
       body: 'Nous avons envoyé un lien de confirmation. Ouvrez‑le depuis cet appareil pour finaliser votre compte.',
     },
   },
+  settings: {
+    eyebrow: 'Compte',
+    title: 'Vos réglages.',
+    sections: {
+      profile: {
+        title: 'Profil',
+        body: 'Comment Tickra s’adresse à vous, et la langue dans laquelle nous livrons les leçons.',
+        fullName: 'Nom complet',
+        email: 'Email',
+        locale: 'Langue préférée',
+        save: 'Enregistrer',
+        saved: 'Profil mis à jour.',
+      },
+      subscription: {
+        title: 'Abonnement',
+        body: 'Plan actuel, statut de renouvellement, et portail de facturation.',
+        plan: 'Plan actuel',
+        status: 'Statut',
+        renewal: 'Renouvellement le',
+        cancelled: 'Annulation le',
+        manage: 'Gérer la facturation',
+        upgrade: 'Passer Pro',
+        cancelNote: 'Votre abonnement se terminera à la fin de la période.',
+      },
+      danger: {
+        title: 'Déconnexion',
+        body: 'Fermer cette session sur cet appareil.',
+        signOut: 'Se déconnecter',
+      },
+    },
+  },
   theme: { light: 'Passer en thème clair', dark: 'Passer en thème sombre' },
   locale: { switch: 'Changer de langue' },
 } as const;

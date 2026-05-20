@@ -1,10 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useTransition } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Check, X } from 'lucide-react';
+import { Check, X, Sparkles } from 'lucide-react';
 import { easeOutExpo } from '@/lib/motion';
 import { cn } from '@/lib/cn';
+import { completeLesson, loseLife } from '@/app/[locale]/lesson/actions';
+import type { Locale } from '@/lib/i18n/config';
 
 type Props = {
   title: string;
@@ -13,22 +15,55 @@ type Props = {
   correct: number;
   successMessage: string;
   retryMessage: string;
+  locale: Locale;
+  slug: string;
 };
 
-export function LessonQuiz({ title, question, choices, correct, successMessage, retryMessage }: Props) {
+export function LessonQuiz({
+  title,
+  question,
+  choices,
+  correct,
+  successMessage,
+  retryMessage,
+  locale,
+  slug,
+}: Props) {
   const [selected, setSelected] = useState<number | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [reward, setReward] = useState<{ xp: number; streak: number; level: number } | null>(null);
 
   const isCorrect = selected === correct;
 
   function submit() {
     if (selected === null) return;
     setSubmitted(true);
+
+    if (selected === correct) {
+      const fd = new FormData();
+      fd.set('slug', slug);
+      fd.set('locale', locale);
+      fd.set('score', '100');
+      fd.set('minutes', '8');
+      startTransition(async () => {
+        const res = await completeLesson(fd);
+        if (res && (res as { ok: boolean }).ok) {
+          const r = res as { ok: true; xpAwarded: number; streak: number; level: number };
+          setReward({ xp: r.xpAwarded, streak: r.streak, level: r.level });
+        }
+      });
+    } else {
+      startTransition(async () => {
+        await loseLife();
+      });
+    }
   }
 
   function reset() {
     setSelected(null);
     setSubmitted(false);
+    setReward(null);
   }
 
   return (
@@ -73,19 +108,29 @@ export function LessonQuiz({ title, question, choices, correct, successMessage, 
       <div className="mt-8 flex flex-wrap items-center justify-between gap-4">
         <AnimatePresence mode="wait">
           {submitted ? (
-            <motion.p
+            <motion.div
               key={isCorrect ? 'ok' : 'no'}
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.35, ease: easeOutExpo }}
-              className={cn(
-                'max-w-xl text-[14.5px] leading-relaxed',
-                isCorrect ? 'text-ink' : 'text-muted',
-              )}
+              className="max-w-xl"
             >
-              {isCorrect ? successMessage : retryMessage}
-            </motion.p>
+              <p
+                className={cn(
+                  'text-[14.5px] leading-relaxed',
+                  isCorrect ? 'text-ink' : 'text-muted',
+                )}
+              >
+                {isCorrect ? successMessage : retryMessage}
+              </p>
+              {reward ? (
+                <p className="mt-3 inline-flex items-center gap-2 rounded-full border border-ink bg-canvas px-3 py-1 font-mono text-[11px] uppercase tracking-[0.18em] text-ink">
+                  <Sparkles aria-hidden className="h-3.5 w-3.5" strokeWidth={1.75} />
+                  +{reward.xp} XP · streak {reward.streak} · level {reward.level}
+                </p>
+              ) : null}
+            </motion.div>
           ) : (
             <span key="hint" className="text-[13px] text-subtle">
               {selected === null ? '—' : ''}
@@ -97,7 +142,7 @@ export function LessonQuiz({ title, question, choices, correct, successMessage, 
           <button
             type="button"
             onClick={submit}
-            disabled={selected === null}
+            disabled={selected === null || pending}
             className="inline-flex h-11 items-center gap-2 rounded-full bg-ink px-5 text-sm font-medium tracking-tight text-canvas transition-opacity hover:bg-ink/90 disabled:cursor-not-allowed disabled:opacity-30"
           >
             Submit

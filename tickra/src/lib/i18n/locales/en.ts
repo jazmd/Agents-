@@ -599,6 +599,37 @@ const en = {
       body: 'We sent a confirmation link. Open it from this device to finish setting up your account.',
     },
   },
+  settings: {
+    eyebrow: 'Account',
+    title: 'Your settings.',
+    sections: {
+      profile: {
+        title: 'Profile',
+        body: 'How Tickra addresses you, and the language we deliver lessons in.',
+        fullName: 'Full name',
+        email: 'Email',
+        locale: 'Preferred language',
+        save: 'Save changes',
+        saved: 'Profile updated.',
+      },
+      subscription: {
+        title: 'Subscription',
+        body: 'Current plan, renewal status, and billing portal.',
+        plan: 'Current plan',
+        status: 'Status',
+        renewal: 'Renews on',
+        cancelled: 'Cancels on',
+        manage: 'Manage billing',
+        upgrade: 'Upgrade to Pro',
+        cancelNote: 'Your subscription will end at the period close.',
+      },
+      danger: {
+        title: 'Sign out',
+        body: 'End this session on this device.',
+        signOut: 'Sign out',
+      },
+    },
+  },
   theme: { light: 'Switch to light theme', dark: 'Switch to dark theme' },
   locale: { switch: 'Change language' },
 } as const;
