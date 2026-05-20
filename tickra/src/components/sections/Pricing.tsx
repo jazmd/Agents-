@@ -3,12 +3,19 @@
 import { motion } from 'framer-motion';
 import { Check } from 'lucide-react';
 import { Container } from '@/components/ui/Container';
-import { Button } from '@/components/ui/Button';
 import { SectionHeader } from '@/components/ui/SectionHeader';
+import { CheckoutCta } from '@/components/billing/CheckoutCta';
 import { fadeUp } from '@/lib/motion';
 import { cn } from '@/lib/cn';
 import type { Dictionary } from '@/lib/i18n/dictionaries';
 import type { Locale } from '@/lib/i18n/config';
+import type { CheckoutPlan } from '@/lib/stripe';
+
+const PLAN_MAP: Record<string, CheckoutPlan | null> = {
+  free: null,
+  pro: 'pro_monthly',
+  lifetime: 'lifetime',
+};
 
 export function Pricing({ dict, locale }: { dict: Dictionary; locale: Locale }) {
   const t = dict.pricing;
@@ -22,6 +29,7 @@ export function Pricing({ dict, locale }: { dict: Dictionary; locale: Locale }) 
         <div className="mt-20 grid grid-cols-1 gap-3 lg:grid-cols-3">
           {t.plans.map((plan, i) => {
             const highlighted = 'highlighted' in plan && plan.highlighted;
+            const checkoutPlan = PLAN_MAP[plan.id] ?? null;
             return (
               <motion.article
                 key={plan.id}
@@ -45,12 +53,7 @@ export function Pricing({ dict, locale }: { dict: Dictionary; locale: Locale }) 
 
                 <header>
                   <h3 className="font-display text-2xl font-medium tracking-tight">{plan.name}</h3>
-                  <p
-                    className={cn(
-                      'mt-2 text-[14px]',
-                      highlighted ? 'text-canvas/70' : 'text-muted',
-                    )}
-                  >
+                  <p className={cn('mt-2 text-[14px]', highlighted ? 'text-canvas/70' : 'text-muted')}>
                     {plan.tagline}
                   </p>
                 </header>
@@ -79,10 +82,7 @@ export function Pricing({ dict, locale }: { dict: Dictionary; locale: Locale }) 
                     <li key={f} className="flex items-start gap-3">
                       <Check
                         aria-hidden
-                        className={cn(
-                          'mt-0.5 h-4 w-4 flex-shrink-0',
-                          highlighted ? 'text-canvas' : 'text-ink',
-                        )}
+                        className={cn('mt-0.5 h-4 w-4 flex-shrink-0', highlighted ? 'text-canvas' : 'text-ink')}
                         strokeWidth={1.75}
                       />
                       <span className={highlighted ? 'text-canvas/90' : 'text-muted'}>{f}</span>
@@ -91,17 +91,13 @@ export function Pricing({ dict, locale }: { dict: Dictionary; locale: Locale }) 
                 </ul>
 
                 <div className="mt-10 pt-2">
-                  <Button
-                    href={`/${locale}/onboarding?plan=${plan.id}`}
-                    variant={highlighted ? 'ghost' : 'primary'}
-                    className={cn(
-                      'w-full',
-                      highlighted &&
-                        'border-canvas/30 text-canvas hover:border-canvas hover:bg-canvas hover:text-ink',
-                    )}
-                  >
-                    {plan.cta}
-                  </Button>
+                  <CheckoutCta
+                    locale={locale}
+                    plan={checkoutPlan}
+                    fallbackHref={`/${locale}/onboarding?plan=${plan.id}`}
+                    highlighted={highlighted}
+                    label={plan.cta}
+                  />
                 </div>
               </motion.article>
             );
