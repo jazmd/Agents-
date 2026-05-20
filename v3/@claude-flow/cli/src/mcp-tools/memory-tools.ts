@@ -97,6 +97,34 @@ function sanitizeMemoryKey(key: string): string {
   return safe.length > MAX_KEY_LENGTH ? safe.slice(0, MAX_KEY_LENGTH) : safe;
 }
 
+// #1937 — minimal glob → RegExp helper for memory_import_claude exclusion
+// patterns. Anchored. Supports the three operators the issue's voice-fidelity
+// workflow needs:
+//   `**` — any chars including path separators
+//   `*`  — any chars except path separators
+//   `?`  — exactly one char except a path separator
+// Everything else is regex-escaped. Used to match absolute file paths.
+function globToRegex(pattern: string): RegExp {
+  // Tokenize so we can replace `**` before `*` without overlap.
+  let out = '';
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i];
+    if (c === '*' && pattern[i + 1] === '*') {
+      out += '.*';
+      i++;
+    } else if (c === '*') {
+      out += '[^/\\\\]*';
+    } else if (c === '?') {
+      out += '[^/\\\\]';
+    } else if (/[.+^$|(){}\[\]\\]/.test(c)) {
+      out += '\\' + c;
+    } else {
+      out += c;
+    }
+  }
+  return new RegExp('^' + out + '$');
+}
+
 // #1883 — resolve the Claude-Code project memory directory for the *current*
 // project. Claude Code hashes the project path differently per host OS, and
 // our previous logic only POSIX-slash-replaced cwd, which breaks for:
@@ -135,6 +163,16 @@ function resolveProjectMemoryDir(claudeProjectsDir: string, projectPathOverride?
 
     // Candidate 4: spaces replaced with dashes (Claude Code's space rule)
     candidates.add(source.replace(/\//g, '-').replace(/ /g, '-'));
+
+    // Candidate 5 (#1939): native Win32 path on a Win32 Claude Code install.
+    // `C:\Users\tobia\OneDrive\Desktop\Claude Stuff` →
+    // `C--Users-tobia-OneDrive-Desktop-Claude-Stuff`. Claude Code's on-disk
+    // slug replaces drive-colon AND backslashes AND whitespace with `-`.
+    // The earlier candidates only handled forward slashes, so a Win32+Win32
+    // setup never matched.
+    if (/^[A-Za-z]:[\\/]/.test(source)) {
+      candidates.add(source.replace(/[:\\/]/g, '-').replace(/\s+/g, '-'));
+    }
   }
 
   for (const projectHash of candidates) {
@@ -744,7 +782,7 @@ export const memoryTools: MCPTool[] = [
 
   {
     name: 'memory_import_claude',
-    description: 'Import Claude Code auto-memory files into AgentDB with ONNX vector embeddings. Reads ~/.claude/projects/*/memory/*.md files, parses YAML frontmatter, splits into sections, and stores with 384-dim embeddings for semantic search. Use allProjects=true to import from ALL Claude projects. Pass projectPath to override cwd-based detection (#1883 — required when Ruflo runs in WSL but Claude Code is on Windows). Use when native Read/Write is wrong because you need (a) cross-session retrieval by semantic similarity (vector embeddings) not by file path, (b) namespacing across projects without managing directory layout, or (c) the .swarm/memory.db audit trail. For one-shot file I/O, native Read/Write is fine.',
+    description: 'Import Claude Code auto-memory files into AgentDB with ONNX vector embeddings. Reads ~/.claude/projects/*/memory/*.md files, parses YAML frontmatter, splits into sections, and stores with 384-dim embeddings for semantic search. Use allProjects=true to import from ALL Claude projects. Pass projectPath to override cwd-based detection (#1883 — required when Ruflo runs in WSL but Claude Code is on Windows). Pass excludeFilePatterns (glob list) or excludeFiles (absolute path list) to skip voice-load-bearing, PII, or persona-restricted files (#1937). Use when native Read/Write is wrong because you need (a) cross-session retrieval by semantic similarity (vector embeddings) not by file path, (b) namespacing across projects without managing directory layout, or (c) the .swarm/memory.db audit trail. For one-shot file I/O, native Read/Write is fine.',
     category: 'memory',
     inputSchema: {
       type: 'object',
@@ -752,6 +790,16 @@ export const memoryTools: MCPTool[] = [
         allProjects: { type: 'boolean', description: 'Import from all Claude projects (default: current project only)' },
         namespace: { type: 'string', description: 'Target namespace (default: "claude-memories")' },
         projectPath: { type: 'string', description: '#1883 — explicit project path to hash, used when cwd does not match Claude Code\'s view (e.g. WSL bridge to Windows host). Pass the canonical project root as Claude Code sees it.' },
+        excludeFilePatterns: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '#1937 — glob patterns matched against the absolute file path. Files matching ANY pattern are skipped. Supports `*` (any chars within a path segment), `**` (any chars including separators), and `?` (single char). Examples: `**/voice-*.md`, `**/persona-*.md`. Combine with excludeFiles for explicit paths.',
+        },
+        excludeFiles: {
+          type: 'array',
+          items: { type: 'string' },
+          description: '#1937 — absolute file paths to skip verbatim. Faster than a pattern when the list is known ahead of time (operator captured baselines). Combine with excludeFilePatterns.',
+        },
       },
     },
     handler: async (input) => {
@@ -764,8 +812,19 @@ export const memoryTools: MCPTool[] = [
       const projectPathOverride = input.projectPath as string | undefined;
       const claudeProjectsDir = join(homedir(), '.claude', 'projects');
 
+      // #1937 — voice-fidelity / persona-restricted exclusion.
+      const excludeFilePatterns = Array.isArray(input.excludeFilePatterns) ? input.excludeFilePatterns as string[] : [];
+      const excludeFilesList = Array.isArray(input.excludeFiles) ? new Set(input.excludeFiles as string[]) : new Set<string>();
+      const excludeRegexes = excludeFilePatterns.map(globToRegex);
+      const isExcluded = (absPath: string): boolean => {
+        if (excludeFilesList.has(absPath)) return true;
+        return excludeRegexes.some(re => re.test(absPath));
+      };
+
       // Find memory files
       const memoryFiles: Array<{ path: string; project: string; file: string }> = [];
+
+      let excludedByPattern = 0;
 
       if (allProjects) {
         // Scan all projects
@@ -776,7 +835,9 @@ export const memoryTools: MCPTool[] = [
               const memDir = join(claudeProjectsDir, project.name, 'memory');
               if (!existsSync(memDir)) continue;
               for (const file of readdirSync(memDir).filter((f: string) => f.endsWith('.md'))) {
-                memoryFiles.push({ path: join(memDir, file), project: project.name, file });
+                const absPath = join(memDir, file);
+                if (isExcluded(absPath)) { excludedByPattern++; continue; }
+                memoryFiles.push({ path: absPath, project: project.name, file });
               }
             }
           } catch { /* scan error */ }
@@ -788,7 +849,9 @@ export const memoryTools: MCPTool[] = [
         if (resolved) {
           try {
             for (const file of readdirSync(resolved.memDir).filter((f: string) => f.endsWith('.md'))) {
-              memoryFiles.push({ path: join(resolved.memDir, file), project: resolved.projectHash, file });
+              const absPath = join(resolved.memDir, file);
+              if (isExcluded(absPath)) { excludedByPattern++; continue; }
+              memoryFiles.push({ path: absPath, project: resolved.projectHash, file });
             }
           } catch { /* scan error */ }
         }
@@ -868,6 +931,7 @@ export const memoryTools: MCPTool[] = [
         imported,
         skipped,
         duplicatesSkipped,
+        excludedByPattern,
         files: memoryFiles.length,
         projects: projects.size,
         namespace: ns,
@@ -901,14 +965,32 @@ export const memoryTools: MCPTool[] = [
       }
 
       // AgentDB status
+      // #1940: previously used `allEntries.entries.length` for the totals,
+      // but `listEntries({})` returns the first 20 entries with a separate
+      // `total` field for the full row count. So `memory_bridge_status`
+      // reported `totalEntries: 0`...20 even when the DB had hundreds of
+      // rows. Use `.total` for the count, and surface the namespaces with
+      // entries so the report matches what's actually in the store.
       let agentdbEntries = 0;
       let claudeMemoryEntries = 0;
+      const namespaceCounts: Record<string, number> = {};
       try {
         const { listEntries } = await getMemoryFunctions();
         const allEntries = await listEntries({});
-        agentdbEntries = allEntries?.entries?.length ?? 0;
+        agentdbEntries = (allEntries as { total?: number })?.total
+          ?? allEntries?.entries?.length ?? 0;
         const claudeEntries = await listEntries({ namespace: 'claude-memories' });
-        claudeMemoryEntries = claudeEntries?.entries?.length ?? 0;
+        claudeMemoryEntries = (claudeEntries as { total?: number })?.total
+          ?? claudeEntries?.entries?.length ?? 0;
+        // Per-namespace counts for the namespaces the reporter referenced
+        // (#1940). Best-effort — a namespace with 0 entries is omitted.
+        for (const ns of ['default', 'patterns', 'claude-memories', 'auto-memory', 'tasks', 'feedback', 'pretrain']) {
+          try {
+            const r = await listEntries({ namespace: ns });
+            const t = (r as { total?: number })?.total ?? r?.entries?.length ?? 0;
+            if (t > 0) namespaceCounts[ns] = t;
+          } catch { /* skip per-namespace failure */ }
+        }
       } catch { /* ignore */ }
 
       // Intelligence status
@@ -921,9 +1003,12 @@ export const memoryTools: MCPTool[] = [
 
       return {
         claudeCode: { memoryFiles: claudeFiles, projects: claudeProjects },
-        agentdb: { totalEntries: agentdbEntries, claudeMemoryEntries, backend: 'sql.js + ONNX' },
+        agentdb: { totalEntries: agentdbEntries, claudeMemoryEntries, namespaces: namespaceCounts, backend: 'sql.js + ONNX' },
         intelligence,
-        bridge: { status: claudeMemoryEntries > 0 ? 'connected' : 'not-synced', embedding: 'all-MiniLM-L6-v2 (384-dim)' },
+        // #1940: report 'connected' whenever ANY namespace has imported
+        // content, not just `claude-memories` — the bridge can be in active
+        // use from other import paths (e.g. plugin namespaces, task memory).
+        bridge: { status: agentdbEntries > 0 ? 'connected' : 'not-synced', embedding: 'all-MiniLM-L6-v2 (384-dim)' },
       };
     },
   },
