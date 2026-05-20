@@ -10,6 +10,7 @@ import { Pricing } from '@/components/sections/Pricing';
 import { Faq } from '@/components/sections/Faq';
 import { CtaFinal } from '@/components/sections/CtaFinal';
 import { Footer } from '@/components/sections/Footer';
+import { organizationLd, websiteLd, courseLd, faqLd, jsonLdProps } from '@/lib/jsonld';
 
 export default async function HomePage({ params }: { params: { locale: string } }) {
   if (!isLocale(params.locale)) notFound();
@@ -17,6 +18,11 @@ export default async function HomePage({ params }: { params: { locale: string } 
 
   return (
     <>
+      <script {...jsonLdProps(organizationLd(params.locale))} />
+      <script {...jsonLdProps(websiteLd(params.locale))} />
+      <script {...jsonLdProps(courseLd(params.locale))} />
+      <script {...jsonLdProps(faqLd(dict.faq.items))} />
+
       <Navbar dict={dict} locale={params.locale} />
       <main id="main">
         <Hero dict={dict} locale={params.locale} />
