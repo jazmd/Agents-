@@ -55,6 +55,19 @@
     "semantic-release": "25.0.2"
   },
   "pnpm": {
+    "approvedBuilds": [
+      "@google/genai",
+      "agentdb",
+      "agentic-flow",
+      "argon2",
+      "better-sqlite3",
+      "esbuild",
+      "hnswlib-node",
+      "onnxruntime-node",
+      "protobufjs",
+      "sharp",
+      "tldjs"
+    ],
     "neverBuiltDependencies": [
       "sharp"
     ],
