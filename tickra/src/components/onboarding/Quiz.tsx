@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowLeft, ArrowRight, Check } from 'lucide-react';
@@ -8,6 +8,7 @@ import { Container } from '@/components/ui/Container';
 import { Eyebrow } from '@/components/ui/Eyebrow';
 import { easeOutExpo } from '@/lib/motion';
 import { cn } from '@/lib/cn';
+import { persistLevel } from '@/app/[locale]/onboarding/actions';
 import type { Dictionary } from '@/lib/i18n/dictionaries';
 import type { Locale } from '@/lib/i18n/config';
 
@@ -44,6 +45,21 @@ export function Quiz({ dict, locale }: Props) {
   const level: 'novice' | 'intermediate' | 'advanced' =
     ratio < 0.35 ? 'novice' : ratio < 0.75 ? 'intermediate' : 'advanced';
   const result = t.result[level];
+
+  const [persistPending, startPersist] = useTransition();
+  const [persisted, setPersisted] = useState(false);
+
+  useEffect(() => {
+    if (!done || persisted) return;
+    startPersist(async () => {
+      try {
+        // best-effort; ignored when unauthenticated or env missing
+        await persistLevel(level, locale);
+      } finally {
+        setPersisted(true);
+      }
+    });
+  }, [done, level, locale, persisted]);
 
   function select(i: number) {
     setAnswers((prev) => prev.map((v, idx) => (idx === step ? i : v)));

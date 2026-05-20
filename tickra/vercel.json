@@ -7,5 +7,15 @@
   "regions": ["cdg1"],
   "github": {
     "silent": false
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/refill-lives",
+      "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/weekly-digest",
+      "schedule": "0 17 * * 0"
+    }
+  ]
 }

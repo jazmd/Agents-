@@ -8,3 +8,6 @@ dist
 *.log
 .vercel
 .turbo
+playwright-report
+test-results
+.playwright
