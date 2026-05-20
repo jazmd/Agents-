@@ -38,7 +38,6 @@ export function LevelMap({ title, legend, nodes }: Props) {
             className={cn(
               'flex items-center justify-between gap-6 bg-surface px-5 py-4 transition-colors',
               n.status === 'current' && 'bg-elevated',
-              n.status === 'locked' && 'opacity-55',
             )}
           >
             <div className="flex items-center gap-4">
@@ -59,9 +58,16 @@ export function LevelMap({ title, legend, nodes }: Props) {
                   String(n.id).padStart(2, '0')
                 )}
               </span>
-              <span className="text-[14.5px] text-ink">{n.title}</span>
+              <span
+                className={cn(
+                  'text-[14.5px]',
+                  n.status === 'locked' ? 'text-muted' : 'text-ink',
+                )}
+              >
+                {n.title}
+              </span>
             </div>
-            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-subtle">
+            <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-muted">
               {n.status === 'done' ? legend.done : n.status === 'current' ? legend.current : legend.locked}
             </span>
           </li>

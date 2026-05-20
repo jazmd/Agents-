@@ -172,7 +172,7 @@ export function CandlestickChart({ caption }: { caption: string }) {
       </svg>
       <figcaption className="mt-3 flex items-center justify-between font-mono text-[11px] uppercase tracking-[0.18em] text-muted">
         <span>{caption}</span>
-        <span className="flex items-center gap-1.5 text-up">
+        <span className="flex items-center gap-1.5 text-ink">
           <span aria-hidden className="inline-block h-1.5 w-1.5 rounded-full bg-up" />
           +0.21%
         </span>

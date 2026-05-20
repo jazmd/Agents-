@@ -14,9 +14,9 @@ export function LessonCard({ label, title, duration, cta, href }: Props) {
     <article className="relative flex flex-col justify-between rounded-sm border border-ink bg-ink p-6 text-canvas md:p-8">
       <div>
         <p className="font-mono text-[11px] uppercase tracking-[0.22em] text-canvas/60">{label}</p>
-        <h3 className="mt-6 font-display text-display-md font-medium tracking-tight text-balance">
+        <h2 className="mt-6 font-display text-display-md font-medium tracking-tight text-balance">
           {title}
-        </h3>
+        </h2>
       </div>
       <div className="mt-10 flex flex-wrap items-center justify-between gap-4 border-t border-canvas/20 pt-6">
         <span className="inline-flex items-center gap-2 font-mono text-[12px] tracking-[0.16em] text-canvas/70">

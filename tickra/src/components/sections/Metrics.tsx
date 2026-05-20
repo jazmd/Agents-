@@ -47,7 +47,7 @@ export function Metrics({ dict }: { dict: Dictionary }) {
           ))}
         </dl>
 
-        <p className="mt-8 font-mono text-[11px] uppercase tracking-[0.22em] text-canvas/45">
+        <p className="mt-8 font-mono text-[11px] uppercase tracking-[0.22em] text-canvas/70">
           {t.footnote}
         </p>
       </Container>
