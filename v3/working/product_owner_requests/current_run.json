@@ -1,0 +1,17 @@
+{
+  "request_id": "20260520_222735_objetivo_el_repositorio_ruflo_tiene_660_errores_",
+  "request_dir": "/home/jsanchhi/sovereign_fabric/working/ruflo_repo/v3/working/product_owner_requests/20260520_222735_objetivo_el_repositorio_ruflo_tiene_660_errores_",
+  "status": "preparing_workspace",
+  "phase": "shadow_worktree_setup",
+  "task_id": null,
+  "attempt": null,
+  "branch_name": "refactor/ruflo-orbital-fix-tsc-errors",
+  "current_log_path": null,
+  "last_output_at": null,
+  "heartbeat_at": null,
+  "execution_lane": "high_risk",
+  "semantic_surfaces": [
+    "workflows"
+  ],
+  "updated_at": "2026-05-20T22:28:47.517910+00:00"
+}

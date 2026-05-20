@@ -1,0 +1,8 @@
+OBJETIVO: El repositorio Ruflo tiene ~660 errores tras migrar a Event Sourcing. Tu meta es reducir estos errores a 0 o al mínimo posible.
+
+MÉTODO (EJECUCIÓN AUTÓNOMA):
+1. **Descubrimiento (Vital):** En tu primera tarea, DEBES ejecutar `npx pnpm --config.ignore-scripts=false exec tsc --noEmit` y guardar el volcado de errores en un archivo (ej. `ts_errors.log`). Lee este archivo para entender el mapa topológico del daño.
+2. **Mutación AST:** Navega por el AST o usa búsqueda/reemplazo estricto. Inyecta los métodos semánticos faltantes (ej. `setIdle`, `activate`) en las interfaces y clases que fallan.
+3. **Purga:** Si falta una librería, purga el código muerto asociado.
+
+RESTRICCIÓN: Auto-aprueba las modificaciones basadas en el volcado de `tsc`. No pidas intervención humana para ver los errores.
