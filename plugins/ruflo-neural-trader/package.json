@@ -1,0 +1,11 @@
+{
+  "name": "ruflo-neural-trader",
+  "version": "0.1.0-alpha.1",
+  "description": "Neural trading strategies — self-learning LSTM/Transformer/N-BEATS models with Rust/NAPI backtesting",
+  "type": "module",
+  "license": "MIT",
+  "claude-flow": {
+    "agents": ["agents/backtest-engineer.md", "agents/market-analyst.md", "agents/risk-analyst.md", "agents/trading-strategist.md"],
+    "commands": ["commands/trader.md"]
+  }
+}
