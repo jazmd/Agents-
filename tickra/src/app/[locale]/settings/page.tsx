@@ -8,6 +8,7 @@ import { Container } from '@/components/ui/Container';
 import { Eyebrow } from '@/components/ui/Eyebrow';
 import { createSupabaseServerClient, hasSupabaseEnv } from '@/lib/supabase/server';
 import { BillingPortalButton } from '@/components/billing/BillingPortalButton';
+import { DeleteAccount } from '@/components/settings/DeleteAccount';
 import { updateProfile } from './actions';
 import type { Profile, Subscription } from '@/lib/supabase/types';
 
@@ -188,18 +189,30 @@ export default async function SettingsPage({ params, searchParams }: Props) {
               </p>
             </section>
 
-            <form
-              action={`/api/signout?locale=${params.locale}`}
-              method="post"
-              className="col-span-12 lg:col-span-7 lg:col-start-6"
-            >
-              <button
-                type="submit"
-                className="inline-flex h-11 items-center justify-center gap-2 rounded-full border border-line px-5 text-[14px] font-medium tracking-tight text-ink hover:border-ink hover:bg-ink hover:text-canvas"
-              >
-                {t.sections.danger.signOut}
-              </button>
-            </form>
+            <div className="col-span-12 space-y-6 lg:col-span-7 lg:col-start-6">
+              <form action={`/api/signout?locale=${params.locale}`} method="post">
+                <button
+                  type="submit"
+                  className="inline-flex h-11 items-center justify-center gap-2 rounded-full border border-line px-5 text-[14px] font-medium tracking-tight text-ink hover:border-ink hover:bg-ink hover:text-canvas"
+                >
+                  {t.sections.danger.signOut}
+                </button>
+              </form>
+
+              <div className="border-t border-line pt-6">
+                <DeleteAccount
+                  email={user.email ?? ''}
+                  locale={params.locale}
+                  title={dict.deleteAccount.title}
+                  body={dict.deleteAccount.body}
+                  confirmLabel={dict.deleteAccount.confirm}
+                  cta={dict.deleteAccount.cta}
+                  cancel={dict.deleteAccount.cancel}
+                  doneMessage={dict.deleteAccount.done}
+                  failMessage={dict.deleteAccount.fail}
+                />
+              </div>
+            </div>
           </div>
         </Container>
       </section>

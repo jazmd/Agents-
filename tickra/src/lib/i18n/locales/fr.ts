@@ -473,6 +473,38 @@ const fr = {
       },
     ],
   },
+  reset: {
+    request: {
+      eyebrow: 'Mot de passe',
+      title: 'Un nouveau mot de passe, envoyé dans votre boîte.',
+      body: 'Saisissez l’email lié à votre compte Tickra. Nous envoyons un lien unique, valable une heure.',
+      emailLabel: 'Email',
+      emailPlaceholder: 'vous@exemple.com',
+      cta: 'Envoyer le lien',
+      back: 'Retour à la connexion',
+      sent: {
+        title: 'Consultez votre boîte.',
+        body: 'Si un compte existe pour cet email, un lien de réinitialisation est en route. Ouvrez‑le dans l’heure.',
+      },
+    },
+    confirm: {
+      eyebrow: 'Nouveau mot de passe',
+      title: 'Définissez un nouveau mot de passe.',
+      body: 'Huit caractères minimum. Nous le hachons, nous ne le voyons jamais.',
+      passwordLabel: 'Nouveau mot de passe',
+      cta: 'Enregistrer',
+      success: 'Mot de passe mis à jour. Vous pouvez vous connecter.',
+    },
+  },
+  deleteAccount: {
+    title: 'Supprimer le compte',
+    body: 'Définitif. Nous effaçons votre profil, votre progression, vos streaks, votre journal et votre abonnement actif sous 30 jours.',
+    confirm: 'Saisissez votre email pour confirmer.',
+    cta: 'Supprimer le compte',
+    cancel: 'Annuler',
+    done: 'Compte supprimé.',
+    fail: 'Suppression impossible. Contactez le support.',
+  },
   signIn: {
     eyebrow: 'Connexion',
     title: 'Content de vous revoir.',

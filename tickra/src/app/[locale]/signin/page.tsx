@@ -61,7 +61,7 @@ export default async function SignInPage({ params, searchParams }: Props) {
                 autoComplete="current-password"
                 required
                 trailing={
-                  <Link href={`/${params.locale}/signin/reset`} className="text-[12.5px] text-muted hover:text-ink">
+                  <Link href={`/${params.locale}/reset`} className="text-[12.5px] text-muted hover:text-ink">
                     {t.forgotten}
                   </Link>
                 }

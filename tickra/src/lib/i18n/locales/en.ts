@@ -331,6 +331,38 @@ const en = {
       secondary: 'See pricing',
     },
   },
+  reset: {
+    request: {
+      eyebrow: 'Reset password',
+      title: 'A fresh password, sent to your inbox.',
+      body: 'Enter the email tied to your Tickra account. We send a one‑time link, valid for one hour.',
+      emailLabel: 'Email',
+      emailPlaceholder: 'you@example.com',
+      cta: 'Send reset link',
+      back: 'Back to sign in',
+      sent: {
+        title: 'Check your inbox.',
+        body: 'If an account exists for this email, a reset link is on its way. Open it within the next hour.',
+      },
+    },
+    confirm: {
+      eyebrow: 'New password',
+      title: 'Set a new password.',
+      body: 'Eight characters minimum. We hash, we never see it.',
+      passwordLabel: 'New password',
+      cta: 'Save password',
+      success: 'Password updated. You can now sign in.',
+    },
+  },
+  deleteAccount: {
+    title: 'Delete account',
+    body: 'Permanent. We erase your profile, progress, streak, journal, and active subscription within 30 days.',
+    confirm: 'Type your email to confirm.',
+    cta: 'Delete account',
+    cancel: 'Cancel',
+    done: 'Account deleted.',
+    fail: 'Could not delete account. Please contact support.',
+  },
   signIn: {
     eyebrow: 'Sign in',
     title: 'Welcome back.',

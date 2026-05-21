@@ -2,9 +2,16 @@
 
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
+import { headers } from 'next/headers';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { sendWelcomeEmail } from '@/lib/email/send';
 import { isLocale } from '@/lib/i18n/config';
+import { rateLimit } from '@/lib/rate-limit';
+
+function ipFromHeaders(): string {
+  const h = headers();
+  return h.get('x-forwarded-for')?.split(',')[0].trim() ?? h.get('x-real-ip') ?? 'unknown';
+}
 
 function siteUrl() {
   return process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
@@ -18,6 +25,11 @@ export async function signInWithPassword(formData: FormData) {
 
   if (!email || !password) {
     redirect(`/${locale}/signin?error=missing`);
+  }
+
+  const limit = rateLimit(`signin:${ipFromHeaders()}`, { limit: 8, windowMs: 10 * 60 * 1000 });
+  if (!limit.allowed) {
+    redirect(`/${locale}/signin?error=${encodeURIComponent('Too many attempts. Wait a few minutes.')}`);
   }
 
   const supabase = createSupabaseServerClient();
@@ -39,6 +51,11 @@ export async function signUpWithPassword(formData: FormData) {
 
   if (!email || password.length < 8) {
     redirect(`/${locale}/signup?error=invalid`);
+  }
+
+  const limit = rateLimit(`signup:${ipFromHeaders()}`, { limit: 5, windowMs: 60 * 60 * 1000 });
+  if (!limit.allowed) {
+    redirect(`/${locale}/signup?error=${encodeURIComponent('Too many attempts. Try again later.')}`);
   }
 
   const supabase = createSupabaseServerClient();
