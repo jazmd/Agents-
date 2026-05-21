@@ -474,6 +474,26 @@ const fr = {
       },
     ],
   },
+  search: {
+    eyebrow: 'Recherche',
+    title: 'Trouvez n’importe quelle leçon, instantanément.',
+    placeholder: 'Chercher bougies, risque, structure…',
+    empty: 'Aucun résultat. Essayez moins de mots ou un autre angle.',
+    promptEmpty: 'Tapez quelques mots d’une leçon, d’une figure, ou d’une piste.',
+    resultLabel: 'résultat',
+    resultsLabel: 'résultats',
+  },
+  bookmarks: {
+    addLabel: 'Sauvegarder',
+    addedLabel: 'Sauvegardée',
+    listTitle: 'Favoris',
+  },
+  notes: {
+    label: 'Vos notes',
+    placeholder: 'Tout ce que vous voulez retenir de cette leçon…',
+    save: 'Enregistrer',
+    saved: 'Enregistré',
+  },
   reviews: {
     eyebrow: 'Révisions',
     title: 'Leçons à réviser aujourd’hui.',

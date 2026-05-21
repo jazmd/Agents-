@@ -210,3 +210,30 @@ create index if not exists lesson_reviews_user_id_next_due_idx
 alter table public.lesson_reviews enable row level security;
 create policy if not exists "own reviews read"  on public.lesson_reviews for select using (auth.uid() = user_id);
 create policy if not exists "own reviews write" on public.lesson_reviews for all    using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- ----------------------------------------------------------------------------
+-- 9. lesson_bookmarks — user-flagged lessons (Phase 14)
+-- ----------------------------------------------------------------------------
+create table if not exists public.lesson_bookmarks (
+  user_id     uuid not null references public.profiles(id) on delete cascade,
+  lesson_slug text not null,
+  created_at  timestamptz not null default now(),
+  primary key (user_id, lesson_slug)
+);
+alter table public.lesson_bookmarks enable row level security;
+create policy if not exists "own bookmarks read"  on public.lesson_bookmarks for select using (auth.uid() = user_id);
+create policy if not exists "own bookmarks write" on public.lesson_bookmarks for all    using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- ----------------------------------------------------------------------------
+-- 10. lesson_notes — free-form per-lesson notes (Phase 14)
+-- ----------------------------------------------------------------------------
+create table if not exists public.lesson_notes (
+  user_id     uuid not null references public.profiles(id) on delete cascade,
+  lesson_slug text not null,
+  body        text not null default '',
+  updated_at  timestamptz not null default now(),
+  primary key (user_id, lesson_slug)
+);
+alter table public.lesson_notes enable row level security;
+create policy if not exists "own notes read"  on public.lesson_notes for select using (auth.uid() = user_id);
+create policy if not exists "own notes write" on public.lesson_notes for all    using (auth.uid() = user_id) with check (auth.uid() = user_id);

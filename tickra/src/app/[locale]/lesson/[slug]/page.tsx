@@ -8,8 +8,11 @@ import { Container } from '@/components/ui/Container';
 import { Eyebrow } from '@/components/ui/Eyebrow';
 import { Paywall } from '@/components/lesson/Paywall';
 import { BlockRenderer } from '@/components/lesson/Block';
+import { BookmarkToggle } from '@/components/lesson/BookmarkToggle';
+import { Notes } from '@/components/lesson/Notes';
 import { LESSONS, lessonBySlug } from '@/lib/lessons/catalog';
 import { getSubscription, isProEntitlement } from '@/lib/supabase/queries';
+import { createSupabaseServerClient, hasSupabaseEnv } from '@/lib/supabase/server';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,12 +33,39 @@ export default async function LessonPage({
   const locale = params.locale;
 
   let entitled = !lesson.paywalled;
-  if (lesson.paywalled) {
+  let userId: string | null = null;
+  let bookmarked = false;
+  let noteBody = '';
+
+  if (hasSupabaseEnv()) {
     try {
-      const sub = await getSubscription();
-      entitled = isProEntitlement(sub);
+      const sb = createSupabaseServerClient();
+      const { data: userData } = await sb.auth.getUser();
+      userId = userData.user?.id ?? null;
+      if (lesson.paywalled) {
+        const sub = await getSubscription();
+        entitled = isProEntitlement(sub);
+      }
+      if (userId) {
+        const [{ data: bm }, { data: note }] = await Promise.all([
+          sb
+            .from('lesson_bookmarks')
+            .select('lesson_slug')
+            .eq('user_id', userId)
+            .eq('lesson_slug', params.slug)
+            .maybeSingle(),
+          sb
+            .from('lesson_notes')
+            .select('body')
+            .eq('user_id', userId)
+            .eq('lesson_slug', params.slug)
+            .maybeSingle(),
+        ]);
+        bookmarked = Boolean(bm);
+        noteBody = (note?.body as string | undefined) ?? '';
+      }
     } catch {
-      entitled = false;
+      // gracefully no-op
     }
   }
 
@@ -64,6 +94,17 @@ export default async function LessonPage({
                 <h1 className="mt-6 font-display text-display-lg font-medium tracking-tight text-balance text-ink">
                   {lesson.title[locale]}
                 </h1>
+                {userId ? (
+                  <div className="mt-6">
+                    <BookmarkToggle
+                      slug={lesson.slug}
+                      locale={locale}
+                      initialSaved={bookmarked}
+                      addLabel={dict.bookmarks.addLabel}
+                      addedLabel={dict.bookmarks.addedLabel}
+                    />
+                  </div>
+                ) : null}
               </div>
               <p className="col-span-12 max-w-2xl text-pretty text-[17px] leading-relaxed text-muted lg:col-span-4 lg:col-start-9 lg:mt-2">
                 {lesson.intro[locale]}
@@ -73,16 +114,33 @@ export default async function LessonPage({
         </header>
 
         {entitled ? (
-          lesson.blocks.map((block, i) => {
-            const tone = i % 2 === 0 ? 'border-b border-line' : 'border-b border-line bg-elevated';
-            return (
-              <section key={i} className={tone}>
-                <Container as="div" className="py-16 md:py-24">
-                  <BlockRenderer block={block} locale={locale} dict={dict} slug={lesson.slug} />
+          <>
+            {lesson.blocks.map((block, i) => {
+              const tone = i % 2 === 0 ? 'border-b border-line' : 'border-b border-line bg-elevated';
+              return (
+                <section key={i} className={tone}>
+                  <Container as="div" className="py-16 md:py-24">
+                    <BlockRenderer block={block} locale={locale} dict={dict} slug={lesson.slug} />
+                  </Container>
+                </section>
+              );
+            })}
+            {userId ? (
+              <section className="border-b border-line">
+                <Container as="div" className="py-16 md:py-20">
+                  <Notes
+                    slug={lesson.slug}
+                    locale={locale}
+                    initialBody={noteBody}
+                    label={dict.notes.label}
+                    placeholder={dict.notes.placeholder}
+                    saveLabel={dict.notes.save}
+                    savedLabel={dict.notes.saved}
+                  />
                 </Container>
               </section>
-            );
-          })
+            ) : null}
+          </>
         ) : (
           <>
             {/* free preview: first non-interactive, non-chart block only */}

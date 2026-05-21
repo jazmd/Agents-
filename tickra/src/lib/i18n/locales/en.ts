@@ -332,6 +332,26 @@ const en = {
       secondary: 'See pricing',
     },
   },
+  search: {
+    eyebrow: 'Search',
+    title: 'Find any lesson, instantly.',
+    placeholder: 'Search candles, risk, structure…',
+    empty: 'No results. Try fewer words or a different angle.',
+    promptEmpty: 'Type a few words from a lesson, a pattern, or a track.',
+    resultLabel: 'result',
+    resultsLabel: 'results',
+  },
+  bookmarks: {
+    addLabel: 'Save',
+    addedLabel: 'Saved',
+    listTitle: 'Bookmarks',
+  },
+  notes: {
+    label: 'Your notes',
+    placeholder: 'Anything you want to remember from this lesson…',
+    save: 'Save',
+    saved: 'Saved',
+  },
   reviews: {
     eyebrow: 'Reviews',
     title: 'Lessons due today.',
