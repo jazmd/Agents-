@@ -152,6 +152,12 @@ importers:
       '@ruvector/learning-wasm':
         specifier: workspace:*
         version: link:../../local-contracts/@ruvector/learning-wasm
+      '@ruvector/ruvllm-wasm':
+        specifier: workspace:*
+        version: link:../../local-contracts/@ruvector/ruvllm-wasm
+      '@ruvector/rvagent-wasm':
+        specifier: workspace:*
+        version: link:../../local-contracts/@ruvector/rvagent-wasm
       '@ruvector/sona':
         specifier: workspace:*
         version: link:../../local-contracts/@ruvector/sona
@@ -585,6 +591,8 @@ importers:
 
   local-contracts/@ruvector/cognitum-gate-kernel: {}
 
+  local-contracts/@ruvector/dag-wasm: {}
+
   local-contracts/@ruvector/exotic-wasm: {}
 
   local-contracts/@ruvector/gnn: {}
@@ -601,13 +609,31 @@ importers:
 
   local-contracts/@ruvector/ruvllm: {}
 
+  local-contracts/@ruvector/ruvllm-wasm: {}
+
+  local-contracts/@ruvector/rvagent-wasm: {}
+
   local-contracts/@ruvector/sona: {}
+
+  local-contracts/@ruvector/sparse-inference-wasm: {}
 
   local-contracts/@ruvector/wasm: {}
 
   local-contracts/@ruvnet/bmssp: {}
 
+  local-contracts/micro-hnsw-wasm: {}
+
   local-contracts/prime-radiant-advanced-wasm: {}
+
+  local-contracts/ruvector-economy-wasm: {}
+
+  local-contracts/ruvector-gnn-wasm: {}
+
+  local-contracts/ruvector-hyperbolic-hnsw-wasm: {}
+
+  local-contracts/ruvector-learning-wasm: {}
+
+  local-contracts/ruvector-sparse-inference-wasm: {}
 
   plugins/agentic-qe:
     dependencies:
@@ -680,6 +706,22 @@ importers:
       zod:
         specifier: ^3.22.0
         version: 3.25.76
+    optionalDependencies:
+      micro-hnsw-wasm:
+        specifier: workspace:*
+        version: link:../../local-contracts/micro-hnsw-wasm
+      ruvector-economy-wasm:
+        specifier: workspace:*
+        version: link:../../local-contracts/ruvector-economy-wasm
+      ruvector-gnn-wasm:
+        specifier: workspace:*
+        version: link:../../local-contracts/ruvector-gnn-wasm
+      ruvector-learning-wasm:
+        specifier: workspace:*
+        version: link:../../local-contracts/ruvector-learning-wasm
+      ruvector-sparse-inference-wasm:
+        specifier: workspace:*
+        version: link:../../local-contracts/ruvector-sparse-inference-wasm
     devDependencies:
       '@types/node':
         specifier: ^20.0.0
@@ -739,6 +781,19 @@ importers:
       zod:
         specifier: ^3.22.0
         version: 3.25.76
+    optionalDependencies:
+      micro-hnsw-wasm:
+        specifier: workspace:*
+        version: link:../../local-contracts/micro-hnsw-wasm
+      ruvector-gnn-wasm:
+        specifier: workspace:*
+        version: link:../../local-contracts/ruvector-gnn-wasm
+      ruvector-hyperbolic-hnsw-wasm:
+        specifier: workspace:*
+        version: link:../../local-contracts/ruvector-hyperbolic-hnsw-wasm
+      ruvector-sparse-inference-wasm:
+        specifier: workspace:*
+        version: link:../../local-contracts/ruvector-sparse-inference-wasm
     devDependencies:
       '@types/node':
         specifier: ^20.0.0
@@ -871,9 +926,15 @@ importers:
         specifier: ^3.22.0
         version: 3.25.76
     optionalDependencies:
+      '@ruvector/dag-wasm':
+        specifier: workspace:*
+        version: link:../../local-contracts/@ruvector/dag-wasm
       '@ruvector/exotic-wasm':
         specifier: workspace:*
         version: link:../../local-contracts/@ruvector/exotic-wasm
+      '@ruvector/sparse-inference-wasm':
+        specifier: workspace:*
+        version: link:../../local-contracts/@ruvector/sparse-inference-wasm
     devDependencies:
       '@types/node':
         specifier: ^20.0.0
@@ -1309,7 +1370,6 @@ packages:
   /@claude-flow/embeddings@3.0.0-alpha.45(@claude-flow/shared@3.0.0-alpha.7)(@ruvector/attention@0.1.32)(@ruvector/diskann@0.1.0)(@ruvector/rabitq-wasm@0.1.0)(agentic-flow@3.0.0-alpha.2):
     resolution: {integrity: sha512-OcFFh7H22ZnApdzqWXPNvUgz6XYYjhaDFyYRufmKPfRYsh8TmWOF5xUV3i9MCRqz38EugJqKQ8mbs35DC+Dgjg==}
     engines: {node: '>=20.0.0'}
-    requiresBuild: true
     peerDependencies:
       '@claude-flow/shared': ^3.0.0-alpha.1
       '@huggingface/transformers': ^4.0.0
