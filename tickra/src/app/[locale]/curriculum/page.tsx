@@ -65,7 +65,12 @@ export default async function CurriculumPage({ params }: { params: { locale: str
                     id={`track-${track.id}-title`}
                     className="mt-6 font-display text-display-md font-medium tracking-tight text-balance text-ink"
                   >
-                    {track.title[locale]}
+                    <Link
+                      href={`/${locale}/curriculum/${track.id}`}
+                      className="transition-colors hover:text-muted"
+                    >
+                      {track.title[locale]}
+                    </Link>
                   </h2>
                   <p className="mt-5 max-w-sm text-pretty text-[15px] leading-relaxed text-muted">
                     {track.summary[locale]}

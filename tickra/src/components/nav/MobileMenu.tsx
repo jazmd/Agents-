@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useFocusTrap } from '@/lib/useFocusTrap';
 import Link from 'next/link';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Menu, X } from 'lucide-react';
@@ -19,6 +20,8 @@ type Props = {
 
 export function MobileMenu({ dict, locale, links, signedIn }: Props) {
   const [open, setOpen] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, open);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -46,6 +49,7 @@ export function MobileMenu({ dict, locale, links, signedIn }: Props) {
       <AnimatePresence>
         {open ? (
           <motion.div
+            ref={dialogRef}
             key="menu"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}

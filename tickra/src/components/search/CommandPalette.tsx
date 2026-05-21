@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { ArrowUpRight, Command, Search, X } from 'lucide-react';
+import { useFocusTrap } from '@/lib/useFocusTrap';
 
 type Hit = {
   slug: string;
@@ -25,6 +26,8 @@ export function CommandPalette({ locale, labels }: { locale: string; labels: Lab
   const [hits, setHits] = useState<Hit[]>([]);
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(dialogRef, open);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -109,6 +112,7 @@ export function CommandPalette({ locale, labels }: { locale: string; labels: Lab
       onClick={() => setOpen(false)}
     >
       <div
+        ref={dialogRef}
         onClick={(e) => e.stopPropagation()}
         className="w-full max-w-2xl overflow-hidden rounded-sm border border-ink bg-canvas shadow-[0_2px_0_0_rgba(10,10,12,0.6)]"
       >

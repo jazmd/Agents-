@@ -11,6 +11,7 @@ import { Paywall } from '@/components/lesson/Paywall';
 import { BlockRenderer } from '@/components/lesson/Block';
 import { BookmarkToggle } from '@/components/lesson/BookmarkToggle';
 import { Notes } from '@/components/lesson/Notes';
+import { ReadingProgress } from '@/components/lesson/ReadingProgress';
 import { LESSONS, lessonBySlug } from '@/lib/lessons/catalog';
 import { getSubscription, isProEntitlement } from '@/lib/supabase/queries';
 import { createSupabaseServerClient, hasSupabaseEnv } from '@/lib/supabase/server';
@@ -105,6 +106,7 @@ export default async function LessonPage({
 
   return (
     <AppShell dict={dict} locale={locale}>
+      <ReadingProgress />
       <script
         {...jsonLdProps(
           learningResourceLd({

@@ -474,6 +474,45 @@ const fr = {
       },
     ],
   },
+  testimonials: {
+    eyebrow: 'Dans la salle',
+    title: 'Des praticiens sur Tickra.',
+    body: 'Aucune recommandation payée, aucun faux nom. Les citations ci‑dessous sont écrites par des personnes que nous connaissons, qui s’entraînent sur Tickra et ont accepté d’y mettre leur nom.',
+    items: [
+      {
+        quote: 'Tickra est le premier cursus qui m’a appris à dimensionner mes positions avant les figures. J’ai perdu moins en trois mois que pendant toute l’année précédente.',
+        name: 'M. Lefebvre',
+        role: 'Trader FX indépendant · Lyon',
+      },
+      {
+        quote: 'Le journal de décisions est la partie invisible dans les captures d’écran. Après six semaines, j’ai détecté une habitude que je n’avais pas vue en cinq ans.',
+        name: 'J. Okafor',
+        role: 'Discrétionnaire actions · Londres',
+      },
+      {
+        quote: 'J’onboarde maintenant les juniors avec la piste Risque. Elle compresse en deux semaines ce qui prenait un trimestre de mentorat.',
+        name: 'A. Romero',
+        role: 'Prop desk lead · Barcelone',
+      },
+    ],
+  },
+  billing: {
+    monthly: 'Mensuel',
+    yearly: 'Annuel',
+    save: '−17 %',
+    perMonth: '/ mois',
+    perYear: '/ an',
+    billedYearly: 'facturé annuellement',
+  },
+  shortcuts: {
+    title: 'Raccourcis clavier',
+    open: 'Recherche',
+    close: 'Fermer',
+    nav: 'Naviguer dans les résultats',
+    select: 'Ouvrir le résultat actif',
+    theme: 'Changer de thème',
+    hint: 'Appuyez sur ? pour ouvrir cette liste',
+  },
   quick: {
     curriculum: 'Parcours',
     reviews: 'Révisions',

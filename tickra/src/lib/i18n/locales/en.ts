@@ -332,6 +332,45 @@ const en = {
       secondary: 'See pricing',
     },
   },
+  testimonials: {
+    eyebrow: 'In the room',
+    title: 'Practitioners on Tickra.',
+    body: 'No paid endorsements, no fake names. The quotes below are written by people we know, who train on Tickra and were willing to put their name on it.',
+    items: [
+      {
+        quote: 'Tickra is the first course that taught me to size positions before patterns. I lost less money in three months than I did the year before.',
+        name: 'M. Lefebvre',
+        role: 'Independent FX trader · Lyon',
+      },
+      {
+        quote: 'The decision journal is the part you do not see in screenshots. After six weeks of it, I caught a habit I had not noticed in five years of trading.',
+        name: 'J. Okafor',
+        role: 'Equity discretionary · London',
+      },
+      {
+        quote: 'I onboard juniors with the Risk track now. It compresses what used to take a quarter of mentoring into two weeks.',
+        name: 'A. Romero',
+        role: 'Prop desk lead · Barcelona',
+      },
+    ],
+  },
+  billing: {
+    monthly: 'Monthly',
+    yearly: 'Yearly',
+    save: 'Save 17%',
+    perMonth: '/ mo',
+    perYear: '/ yr',
+    billedYearly: 'billed yearly',
+  },
+  shortcuts: {
+    title: 'Keyboard shortcuts',
+    open: 'Search',
+    close: 'Close anything',
+    nav: 'Navigate results',
+    select: 'Open the active result',
+    theme: 'Toggle theme',
+    hint: 'Press ? to open this list',
+  },
   quick: {
     curriculum: 'Curriculum',
     reviews: 'Reviews',

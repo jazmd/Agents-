@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Check } from 'lucide-react';
 import { Container } from '@/components/ui/Container';
@@ -11,14 +12,24 @@ import type { Dictionary } from '@/lib/i18n/dictionaries';
 import type { Locale } from '@/lib/i18n/config';
 import type { CheckoutPlan } from '@/lib/stripe';
 
-const PLAN_MAP: Record<string, CheckoutPlan | null> = {
-  free: null,
-  pro: 'pro_monthly',
-  lifetime: 'lifetime',
+type Cadence = 'monthly' | 'yearly';
+
+const PLAN_MAP: Record<string, Record<Cadence, CheckoutPlan | null>> = {
+  free: { monthly: null, yearly: null },
+  pro: { monthly: 'pro_monthly', yearly: 'pro_yearly' },
+  lifetime: { monthly: 'lifetime', yearly: 'lifetime' },
+};
+
+// 17% off the yearly equivalent. Pro: 14.99 × 12 = 179.88 → 149.
+const YEARLY_PRICE_EUR: Record<string, { price: string; perMonth: string }> = {
+  pro: { price: '149 €', perMonth: '12,42 € / mo' },
 };
 
 export function Pricing({ dict, locale }: { dict: Dictionary; locale: Locale }) {
   const t = dict.pricing;
+  const b = dict.billing;
+  const [cadence, setCadence] = useState<Cadence>('monthly');
+
   return (
     <section id="pricing" aria-labelledby="pricing-title" className="border-b border-line">
       <Container as="div" className="py-24 md:py-32">
@@ -26,10 +37,58 @@ export function Pricing({ dict, locale }: { dict: Dictionary; locale: Locale }) 
           <SectionHeader eyebrow={t.eyebrow} title={t.title} body={t.body} align="between" />
         </div>
 
-        <div className="mt-20 grid grid-cols-1 gap-3 lg:grid-cols-3">
+        <div className="mt-14 flex justify-center">
+          <div
+            role="tablist"
+            aria-label="Billing cadence"
+            className="inline-flex items-center rounded-full border border-line bg-surface p-1"
+          >
+            {(['monthly', 'yearly'] as const).map((c) => {
+              const active = cadence === c;
+              return (
+                <button
+                  key={c}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setCadence(c)}
+                  className={cn(
+                    'inline-flex h-9 items-center gap-2 rounded-full px-4 text-[13px] font-medium tracking-tight transition-colors',
+                    active ? 'bg-ink text-canvas' : 'text-muted hover:text-ink',
+                  )}
+                >
+                  {c === 'monthly' ? b.monthly : b.yearly}
+                  {c === 'yearly' ? (
+                    <span
+                      className={cn(
+                        'rounded-full px-2 py-0.5 font-mono text-[9.5px] uppercase tracking-[0.18em]',
+                        active ? 'bg-canvas text-ink' : 'bg-ink/10 text-ink',
+                      )}
+                    >
+                      {b.save}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="mt-12 grid grid-cols-1 gap-3 lg:grid-cols-3">
           {t.plans.map((plan, i) => {
             const highlighted = 'highlighted' in plan && plan.highlighted;
-            const checkoutPlan = PLAN_MAP[plan.id] ?? null;
+            const checkoutPlan = PLAN_MAP[plan.id]?.[cadence] ?? null;
+
+            // Override Pro price on yearly toggle
+            let displayPrice: string = plan.price;
+            let displayCadence: string = plan.cadence;
+            let footnote: string | null = null;
+            if (plan.id === 'pro' && cadence === 'yearly') {
+              displayPrice = YEARLY_PRICE_EUR.pro.price;
+              displayCadence = b.perYear;
+              footnote = `≈ ${YEARLY_PRICE_EUR.pro.perMonth} · ${b.billedYearly}`;
+            }
+
             return (
               <motion.article
                 key={plan.id}
@@ -40,9 +99,7 @@ export function Pricing({ dict, locale }: { dict: Dictionary; locale: Locale }) 
                 custom={i}
                 className={cn(
                   'relative flex flex-col rounded-sm border p-8 md:p-10',
-                  highlighted
-                    ? 'border-ink bg-ink text-canvas'
-                    : 'border-line bg-surface text-ink',
+                  highlighted ? 'border-ink bg-ink text-canvas' : 'border-line bg-surface text-ink',
                 )}
               >
                 {highlighted ? (
@@ -59,18 +116,26 @@ export function Pricing({ dict, locale }: { dict: Dictionary; locale: Locale }) 
                 </header>
 
                 <div className="mt-8 flex items-baseline gap-2">
-                  <span className="font-display text-5xl font-medium tracking-tighter">
-                    {plan.price}
-                  </span>
+                  <span className="font-display text-5xl font-medium tracking-tighter">{displayPrice}</span>
                   <span
                     className={cn(
                       'font-mono text-[12px] uppercase tracking-[0.18em]',
                       highlighted ? 'text-canvas/60' : 'text-muted',
                     )}
                   >
-                    {plan.cadence}
+                    {displayCadence}
                   </span>
                 </div>
+                {footnote ? (
+                  <p
+                    className={cn(
+                      'mt-2 font-mono text-[11px] tracking-[0.16em]',
+                      highlighted ? 'text-canvas/60' : 'text-subtle',
+                    )}
+                  >
+                    {footnote}
+                  </p>
+                ) : null}
 
                 <ul
                   className={cn(

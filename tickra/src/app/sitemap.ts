@@ -1,6 +1,7 @@
 import type { MetadataRoute } from 'next';
 import { locales } from '@/lib/i18n/config';
 import { LESSONS } from '@/lib/lessons/catalog';
+import { TRACKS } from '@/lib/lessons/tracks';
 
 const SITE = 'https://tickra.com';
 const STATIC_PATHS = [
@@ -35,6 +36,20 @@ export default function sitemap(): MetadataRoute.Sitemap {
           languages: {
             en: `${SITE}/en${path ? `/${path}` : ''}`,
             fr: `${SITE}/fr${path ? `/${path}` : ''}`,
+          },
+        },
+      });
+    }
+    for (const track of TRACKS) {
+      entries.push({
+        url: `${SITE}/${locale}/curriculum/${track.id}`,
+        lastModified: now,
+        changeFrequency: 'monthly',
+        priority: 0.85,
+        alternates: {
+          languages: {
+            en: `${SITE}/en/curriculum/${track.id}`,
+            fr: `${SITE}/fr/curriculum/${track.id}`,
           },
         },
       });

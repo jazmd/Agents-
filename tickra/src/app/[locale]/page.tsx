@@ -6,6 +6,7 @@ import { Hero } from '@/components/sections/Hero';
 import { Method } from '@/components/sections/Method';
 import { BentoFeatures } from '@/components/sections/BentoFeatures';
 import { Metrics } from '@/components/sections/Metrics';
+import { Testimonials } from '@/components/sections/Testimonials';
 import { Pricing } from '@/components/sections/Pricing';
 import { Faq } from '@/components/sections/Faq';
 import { CtaFinal } from '@/components/sections/CtaFinal';
@@ -29,6 +30,7 @@ export default async function HomePage({ params }: { params: { locale: string } 
         <Method dict={dict} />
         <BentoFeatures dict={dict} />
         <Metrics dict={dict} />
+        <Testimonials dict={dict} />
         <Pricing dict={dict} locale={params.locale} />
         <Faq dict={dict} />
         <CtaFinal dict={dict} locale={params.locale} />
