@@ -292,3 +292,42 @@ select
   (select count(*) from public.daily_activity where day = current_date)::integer as active_today,
   (select coalesce(sum(minutes), 0) from public.daily_activity where day >= current_date - 6)::integer as minutes_last_7d;
 grant select on public.admin_overview to authenticated;
+
+-- ----------------------------------------------------------------------------
+-- 14. referrals — invite codes + referred users (Phase 18)
+-- ----------------------------------------------------------------------------
+create table if not exists public.referral_codes (
+  user_id    uuid primary key references public.profiles(id) on delete cascade,
+  code       text not null unique,
+  uses       integer not null default 0,
+  created_at timestamptz not null default now()
+);
+alter table public.referral_codes enable row level security;
+create policy if not exists "own referral read"  on public.referral_codes for select using (auth.uid() = user_id);
+create policy if not exists "own referral write" on public.referral_codes for all    using (auth.uid() = user_id) with check (auth.uid() = user_id);
+-- Public lookup is granted via a security-definer RPC below.
+
+create table if not exists public.referral_redemptions (
+  id          uuid primary key default gen_random_uuid(),
+  referrer_id uuid not null references public.profiles(id) on delete cascade,
+  referee_id  uuid not null references public.profiles(id) on delete cascade,
+  code        text not null,
+  redeemed_at timestamptz not null default now(),
+  unique (referee_id)
+);
+alter table public.referral_redemptions enable row level security;
+create policy if not exists "own redemption read"
+  on public.referral_redemptions for select
+  using (auth.uid() = referrer_id or auth.uid() = referee_id);
+
+-- Public referral-code resolver (no PII exposure).
+create or replace function public.referral_referrer_for(code_in text)
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select user_id from public.referral_codes where code = code_in limit 1;
+$$;
+grant execute on function public.referral_referrer_for(text) to anon, authenticated;

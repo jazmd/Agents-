@@ -332,6 +332,28 @@ const en = {
       secondary: 'See pricing',
     },
   },
+  refer: {
+    eyebrow: 'Referrals',
+    title: 'Bring a friend, earn a month.',
+    body: 'Share your code. When someone subscribes to Pro using it, you get a free month and they get a 15% discount on the first month.',
+    yourCode: 'Your code',
+    yourLink: 'Your link',
+    uses: 'uses',
+    copy: 'Copy',
+    copied: 'Copied',
+    howItWorks: 'How it works',
+    steps: [
+      'Share your code or link with a friend.',
+      'They sign up and subscribe to Pro using your code.',
+      'You get a free month, they get 15% off the first month.',
+    ],
+  },
+  pwa: {
+    title: 'Install Tickra',
+    body: 'Add Tickra to your home screen. Opens in a window of its own, works offline for what you have already read.',
+    install: 'Install',
+    later: 'Later',
+  },
   achievements: {
     eyebrow: 'Badges',
     title: 'What you have earned.',

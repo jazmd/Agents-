@@ -474,6 +474,28 @@ const fr = {
       },
     ],
   },
+  refer: {
+    eyebrow: 'Parrainage',
+    title: 'Amenez un ami, gagnez un mois.',
+    body: 'Partagez votre code. Quand quelqu’un s’abonne à Pro avec ce code, vous gagnez un mois offert et il bénéficie de 15 % de réduction le premier mois.',
+    yourCode: 'Votre code',
+    yourLink: 'Votre lien',
+    uses: 'utilisations',
+    copy: 'Copier',
+    copied: 'Copié',
+    howItWorks: 'Comment ça marche',
+    steps: [
+      'Partagez votre code ou votre lien avec un ami.',
+      'Il s’inscrit et souscrit à Pro avec votre code.',
+      'Vous gagnez un mois offert, il bénéficie de 15 % le premier mois.',
+    ],
+  },
+  pwa: {
+    title: 'Installer Tickra',
+    body: 'Ajoutez Tickra à votre écran d’accueil. S’ouvre dans sa propre fenêtre, fonctionne hors‑ligne pour ce que vous avez déjà lu.',
+    install: 'Installer',
+    later: 'Plus tard',
+  },
   achievements: {
     eyebrow: 'Badges',
     title: 'Ce que vous avez gagné.',
