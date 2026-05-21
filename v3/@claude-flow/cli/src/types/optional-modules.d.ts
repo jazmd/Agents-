@@ -436,3 +436,48 @@ declare module '@claude-flow/mcp' {
   export const startMCPServer: any;
   export class MCPServer { constructor(...args: any[]); }
 }
+
+declare module '@claude-flow/memory' {
+  export class ControllerRegistry {
+    constructor(...args: any[]);
+    [key: string]: any;
+  }
+  export const INIT_LEVELS: any;
+  const mod: any;
+  export default mod;
+  export const smartSearch: any;
+  export const search: any;
+  export const store: any;
+  export const retrieve: any;
+}
+
+declare module '@ruvector/learning-wasm' {
+  export class WasmMicroLoRA {
+    constructor(...args: any[]);
+    apply(input: Float32Array): Float32Array;
+    adapt(...args: any[]): void;
+    adapt_array(...args: any[]): void;
+    stats(): any;
+    reset(): void;
+    [key: string]: any;
+  }
+  export class WasmScopedLoRA {
+    constructor(...args: any[]);
+    apply(input: Float32Array): Float32Array;
+    adapt(...args: any[]): void;
+    set_category_fallback(val: boolean): void;
+    stats(): any;
+    reset(): void;
+    [key: string]: any;
+  }
+  export class WasmTrajectoryBuffer {
+    constructor(...args: any[]);
+    push(...args: any[]): void;
+    sample(...args: any[]): any[];
+    len(): number;
+    clear(): void;
+    [key: string]: any;
+  }
+  export function initSync(opts: { module: BufferSource } | BufferSource): void;
+  export default function init(...args: any[]): Promise<any>;
+}
