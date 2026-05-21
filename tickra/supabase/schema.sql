@@ -267,3 +267,28 @@ join public.profiles p on p.id = s.user_id
 order by s.xp desc, s.streak_best desc
 limit 100;
 grant select on public.leaderboard to anon, authenticated;
+
+-- ----------------------------------------------------------------------------
+-- 13. admin_users — operator allow-list (Phase 16)
+-- ----------------------------------------------------------------------------
+create table if not exists public.admin_users (
+  user_id uuid primary key references public.profiles(id) on delete cascade,
+  role    text not null default 'admin' check (role in ('admin','readonly')),
+  added_at timestamptz not null default now()
+);
+alter table public.admin_users enable row level security;
+create policy if not exists "admin read self" on public.admin_users for select using (auth.uid() = user_id);
+
+-- Aggregated operator view. Reading it does not bypass per-table RLS, so we
+-- expose only counts (no PII). Only admins are authorised at the application
+-- layer via /admin route guards.
+create or replace view public.admin_overview as
+select
+  (select count(*) from public.profiles)::integer as profiles_count,
+  (select count(*) from public.subscriptions where plan in ('pro','lifetime'))::integer as paying_count,
+  (select count(*) from public.subscriptions where plan = 'pro' and status = 'active')::integer as active_pro,
+  (select count(*) from public.subscriptions where plan = 'lifetime')::integer as lifetime_count,
+  (select count(*) from public.lesson_progress where status = 'done')::integer as lessons_completed,
+  (select count(*) from public.daily_activity where day = current_date)::integer as active_today,
+  (select coalesce(sum(minutes), 0) from public.daily_activity where day >= current_date - 6)::integer as minutes_last_7d;
+grant select on public.admin_overview to authenticated;

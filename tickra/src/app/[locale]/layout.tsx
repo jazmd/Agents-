@@ -7,6 +7,7 @@ import { buildMetadata } from '@/lib/seo';
 import { isLocale, locales, type Locale } from '@/lib/i18n/config';
 import { getDictionary } from '@/lib/i18n/dictionaries';
 import { CookieBanner } from '@/components/CookieBanner';
+import { PostHog } from '@/components/analytics/PostHog';
 import '../globals.css';
 
 const inter = Inter({ subsets: ['latin'], variable: '--font-inter', display: 'swap' });
@@ -58,6 +59,7 @@ export default async function LocaleLayout({
         >
           Skip to content
         </a>
+        <PostHog />
         <ThemeProvider>{children}</ThemeProvider>
         <CookieBanner
           locale={locale}
