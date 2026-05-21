@@ -10,6 +10,7 @@ import { createSupabaseServerClient, hasSupabaseEnv } from '@/lib/supabase/serve
 import { BillingPortalButton } from '@/components/billing/BillingPortalButton';
 import { DeleteAccount } from '@/components/settings/DeleteAccount';
 import { DataExport } from '@/components/settings/DataExport';
+import { Mfa } from '@/components/settings/Mfa';
 import { updateProfile } from './actions';
 import type { Profile, Subscription } from '@/lib/supabase/types';
 
@@ -178,6 +179,18 @@ export default async function SettingsPage({ params, searchParams }: Props) {
                   </Link>
                 )}
               </div>
+            </div>
+
+            {/* Security */}
+            <section className="col-span-12 mt-10 lg:col-span-4 lg:mt-0">
+              <h2 className="font-display text-2xl font-medium tracking-tight text-ink">
+                {dict.mfa.title}
+              </h2>
+              <p className="mt-3 max-w-sm text-[14.5px] leading-relaxed text-muted">{dict.mfa.body}</p>
+            </section>
+
+            <div className="col-span-12 lg:col-span-7 lg:col-start-6">
+              <Mfa labels={dict.mfa} />
             </div>
 
             {/* Danger / sign-out */}

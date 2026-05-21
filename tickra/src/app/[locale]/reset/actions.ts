@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation';
 import { createSupabaseServerClient, hasSupabaseEnv } from '@/lib/supabase/server';
 import { rateLimit } from '@/lib/rate-limit';
+import { verifyTurnstile } from '@/lib/turnstile';
 import { headers } from 'next/headers';
 
 function siteUrl() {
@@ -25,6 +26,12 @@ export async function requestPasswordReset(formData: FormData) {
   const limit = rateLimit(`reset:${ip}`, { limit: 5, windowMs: 10 * 60 * 1000 });
   if (!limit.allowed) {
     redirect(`/${locale}/reset?error=rate_limit`);
+  }
+
+  const captcha = String(formData.get('cf-turnstile-response') || '');
+  const ok = await verifyTurnstile(captcha, ip);
+  if (!ok) {
+    redirect(`/${locale}/reset?error=${encodeURIComponent('Captcha failed.')}`);
   }
 
   if (hasSupabaseEnv()) {

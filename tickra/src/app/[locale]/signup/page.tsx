@@ -7,6 +7,7 @@ import { AppShell } from '@/components/app/AppShell';
 import { Container } from '@/components/ui/Container';
 import { Eyebrow } from '@/components/ui/Eyebrow';
 import { OAuthButtons } from '@/components/auth/OAuthButtons';
+import { Turnstile } from '@/components/auth/Turnstile';
 import { signUpWithPassword } from '../signin/actions';
 
 type Props = { params: { locale: string }; searchParams: { error?: string; check?: string } };
@@ -74,6 +75,8 @@ export default async function SignUpPage({ params, searchParams }: Props) {
                   minLength={8}
                   hint={t.passwordHint}
                 />
+
+                <Turnstile action="signup" className="pt-1" />
 
                 <button
                   type="submit"

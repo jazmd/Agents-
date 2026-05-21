@@ -6,6 +6,7 @@ import { getDictionary } from '@/lib/i18n/dictionaries';
 import { AppShell } from '@/components/app/AppShell';
 import { Container } from '@/components/ui/Container';
 import { Eyebrow } from '@/components/ui/Eyebrow';
+import { Turnstile } from '@/components/auth/Turnstile';
 import { requestPasswordReset } from './actions';
 
 export const dynamic = 'force-static';
@@ -74,6 +75,8 @@ export default async function ResetRequestPage({ params, searchParams }: Props) 
                     className="h-12 w-full rounded-sm border border-line bg-canvas px-4 text-[15px] text-ink placeholder:text-subtle focus:border-ink focus:outline-none focus:ring-2 focus:ring-ink/15"
                   />
                 </div>
+
+                <Turnstile action="reset" />
 
                 <button
                   type="submit"

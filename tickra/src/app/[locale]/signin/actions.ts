@@ -7,6 +7,7 @@ import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { sendWelcomeEmail } from '@/lib/email/send';
 import { isLocale } from '@/lib/i18n/config';
 import { rateLimit } from '@/lib/rate-limit';
+import { verifyTurnstile } from '@/lib/turnstile';
 
 function ipFromHeaders(): string {
   const h = headers();
@@ -56,6 +57,12 @@ export async function signUpWithPassword(formData: FormData) {
   const limit = rateLimit(`signup:${ipFromHeaders()}`, { limit: 5, windowMs: 60 * 60 * 1000 });
   if (!limit.allowed) {
     redirect(`/${locale}/signup?error=${encodeURIComponent('Too many attempts. Try again later.')}`);
+  }
+
+  const captcha = String(formData.get('cf-turnstile-response') || '');
+  const ok = await verifyTurnstile(captcha, ipFromHeaders());
+  if (!ok) {
+    redirect(`/${locale}/signup?error=${encodeURIComponent('Captcha failed. Please retry.')}`);
   }
 
   const supabase = createSupabaseServerClient();
