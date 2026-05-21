@@ -11,6 +11,7 @@ import { LessonCard } from '@/components/dashboard/LessonCard';
 import { LevelMap } from '@/components/dashboard/LevelMap';
 import { ActivityChart } from '@/components/dashboard/ActivityChart';
 import { VerifyBanner } from '@/components/dashboard/VerifyBanner';
+import { QuickLinks } from '@/components/dashboard/QuickLinks';
 import { getDashboardData, getAuthedUser } from '@/lib/supabase/queries';
 
 export const dynamic = 'force-dynamic';
@@ -120,6 +121,10 @@ export default async function DashboardPage({ params }: { params: { locale: stri
             {fullName ? `${t.greeting.replace(/\.$/, '')}, ${fullName}.` : t.greeting}
           </h1>
           <p className="mt-5 max-w-xl text-[17px] leading-relaxed text-muted">{t.subtitle}</p>
+
+          <div className="mt-10">
+            <QuickLinks locale={params.locale} labels={dict.quick} />
+          </div>
 
           <div className="mt-16 grid grid-cols-12 gap-4">
             <div className="col-span-12 lg:col-span-5">

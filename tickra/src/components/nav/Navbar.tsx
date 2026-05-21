@@ -5,6 +5,7 @@ import { LocaleSwitcher } from './LocaleSwitcher';
 import { ThemeToggle } from './ThemeToggle';
 import { MobileMenu } from './MobileMenu';
 import { UserMenu } from './UserMenu';
+import { CommandPalette } from '@/components/search/CommandPalette';
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import type { Dictionary } from '@/lib/i18n/dictionaries';
 import type { Locale } from '@/lib/i18n/config';
@@ -48,6 +49,16 @@ export async function Navbar({ dict, locale }: Props) {
         </nav>
 
         <div className="flex items-center gap-2">
+          <div className="hidden md:block">
+            <CommandPalette
+              locale={locale}
+              labels={{
+                placeholder: dict.search.placeholder,
+                empty: dict.search.empty,
+                hint: dict.search.eyebrow,
+              }}
+            />
+          </div>
           <div className="hidden sm:block">
             <LocaleSwitcher current={locale} label={dict.locale.switch} />
           </div>

@@ -67,3 +67,56 @@ export function jsonLdProps(value: unknown) {
     dangerouslySetInnerHTML: { __html: JSON.stringify(value) },
   };
 }
+
+export function learningResourceLd(args: {
+  locale: Locale;
+  slug: string;
+  title: string;
+  intro: string;
+  duration: number;
+  paywalled: boolean;
+}) {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'LearningResource',
+    inLanguage: args.locale === 'fr' ? 'fr-FR' : 'en-US',
+    name: args.title,
+    description: args.intro,
+    url: `${URL_BASE}/${args.locale}/lesson/${args.slug}`,
+    learningResourceType: 'Lesson',
+    timeRequired: `PT${args.duration}M`,
+    isAccessibleForFree: !args.paywalled,
+    provider: { '@type': 'Organization', name: 'Tickra', url: URL_BASE },
+  };
+}
+
+export function productOfferLd(args: {
+  locale: Locale;
+  name: string;
+  price: string;
+  currency: 'EUR';
+  recurrence: 'P1M' | 'P1Y' | null;
+}) {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    name: args.name,
+    brand: { '@type': 'Brand', name: 'Tickra' },
+    offers: {
+      '@type': 'Offer',
+      price: args.price,
+      priceCurrency: args.currency,
+      availability: 'https://schema.org/InStock',
+      url: `${URL_BASE}/${args.locale}/pricing`,
+      ...(args.recurrence
+        ? {
+            priceSpecification: {
+              '@type': 'UnitPriceSpecification',
+              billingDuration: args.recurrence,
+              referenceQuantity: { '@type': 'QuantitativeValue', value: 1, unitCode: 'MON' },
+            },
+          }
+        : {}),
+    },
+  };
+}

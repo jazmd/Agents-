@@ -332,6 +332,14 @@ const en = {
       secondary: 'See pricing',
     },
   },
+  quick: {
+    curriculum: 'Curriculum',
+    reviews: 'Reviews',
+    journal: 'Journal',
+    achievements: 'Badges',
+    leaderboard: 'Leaderboard',
+    refer: 'Invite',
+  },
   verify: {
     title: 'One step left — confirm your email.',
     body: 'We sent a confirmation link to',

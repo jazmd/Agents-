@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { ChevronRight } from 'lucide-react';
 import { isLocale, locales } from '@/lib/i18n/config';
@@ -13,11 +14,44 @@ import { Notes } from '@/components/lesson/Notes';
 import { LESSONS, lessonBySlug } from '@/lib/lessons/catalog';
 import { getSubscription, isProEntitlement } from '@/lib/supabase/queries';
 import { createSupabaseServerClient, hasSupabaseEnv } from '@/lib/supabase/server';
+import { jsonLdProps, learningResourceLd } from '@/lib/jsonld';
 
 export const dynamic = 'force-dynamic';
 
 export function generateStaticParams() {
   return locales.flatMap((locale) => LESSONS.map((l) => ({ locale, slug: l.slug })));
+}
+
+export async function generateMetadata({
+  params,
+}: {
+  params: { locale: string; slug: string };
+}): Promise<Metadata> {
+  if (!isLocale(params.locale)) return {};
+  const lesson = lessonBySlug(params.slug);
+  if (!lesson) return {};
+  const title = lesson.title[params.locale].replace(/\.$/, '');
+  const description = lesson.intro[params.locale].slice(0, 180);
+  const url = `/${params.locale}/lesson/${params.slug}`;
+  return {
+    title,
+    description,
+    alternates: {
+      canonical: url,
+      languages: {
+        en: `/en/lesson/${params.slug}`,
+        fr: `/fr/lesson/${params.slug}`,
+      },
+    },
+    openGraph: {
+      title,
+      description,
+      url,
+      type: 'article',
+      locale: params.locale === 'fr' ? 'fr_FR' : 'en_US',
+    },
+    twitter: { card: 'summary_large_image', title, description },
+  };
 }
 
 export default async function LessonPage({
@@ -71,6 +105,18 @@ export default async function LessonPage({
 
   return (
     <AppShell dict={dict} locale={locale}>
+      <script
+        {...jsonLdProps(
+          learningResourceLd({
+            locale,
+            slug: lesson.slug,
+            title: lesson.title[locale],
+            intro: lesson.intro[locale],
+            duration: lesson.duration,
+            paywalled: lesson.paywalled,
+          }),
+        )}
+      />
       <article>
         <header className="border-b border-line">
           <Container as="div" className="py-16 md:py-20">

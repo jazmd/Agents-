@@ -474,6 +474,14 @@ const fr = {
       },
     ],
   },
+  quick: {
+    curriculum: 'Parcours',
+    reviews: 'Révisions',
+    journal: 'Journal',
+    achievements: 'Badges',
+    leaderboard: 'Classement',
+    refer: 'Inviter',
+  },
   verify: {
     title: 'Encore une étape — confirmez votre email.',
     body: 'Nous avons envoyé un lien de confirmation à',
