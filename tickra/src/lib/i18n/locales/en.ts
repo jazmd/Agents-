@@ -198,6 +198,7 @@ const en = {
           { label: 'Terms', href: '/terms' },
           { label: 'Privacy', href: '/privacy' },
           { label: 'Risk disclosure', href: '/risk' },
+          { label: 'Imprint', href: '/imprint' },
         ],
       },
     ],
@@ -331,6 +332,29 @@ const en = {
       primary: 'Unlock with Pro',
       secondary: 'See pricing',
     },
+  },
+  imprint: {
+    eyebrow: 'Imprint',
+    title: 'Legal information.',
+    updated: 'Last updated · May 2026',
+    sections: [
+      {
+        heading: 'Publisher',
+        body: 'Tickra SAS, 16 rue du Faubourg, 75010 Paris, France. Registered with the Paris Trade and Companies Register. SIREN 941 027 583. Director of publication: M. Karout.',
+      },
+      {
+        heading: 'Hosting',
+        body: 'Vercel Inc., 440 N Barranca Ave #4133, Covina, CA 91723, USA. EU customer data is processed in the Paris (CDG1) region.',
+      },
+      {
+        heading: 'Contact',
+        body: 'For any legal matter, write to legal@tickra.com. We respond within five business days.',
+      },
+      {
+        heading: 'VAT',
+        body: 'EU VAT registration pending. Invoices will reflect VAT as soon as the registration is granted.',
+      },
+    ],
   },
   testimonials: {
     eyebrow: 'In the room',

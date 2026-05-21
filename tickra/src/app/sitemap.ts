@@ -17,6 +17,7 @@ const STATIC_PATHS = [
   'terms',
   'privacy',
   'risk',
+  'imprint',
   'signin',
   'signup',
 ];

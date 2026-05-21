@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
-import { ArrowUpRight, CalendarClock } from 'lucide-react';
+import { ArrowUpRight, CalendarClock, CalendarCheck } from 'lucide-react';
+import { EmptyState } from '@/components/ui/EmptyState';
 import { isLocale } from '@/lib/i18n/config';
 import { getDictionary } from '@/lib/i18n/dictionaries';
 import { AppShell } from '@/components/app/AppShell';
@@ -65,7 +66,7 @@ export default async function ReviewsPage({ params }: { params: { locale: string
       <section className="border-b border-line bg-elevated">
         <Container as="div" className="py-16 md:py-20">
           {items.length === 0 ? (
-            <p className="text-pretty text-[16px] text-muted">{t.empty}</p>
+            <EmptyState icon={CalendarCheck} title={t.title} body={t.empty} />
           ) : (
             <ul className="divide-y divide-line border-y border-line">
               {items.map((r) => {

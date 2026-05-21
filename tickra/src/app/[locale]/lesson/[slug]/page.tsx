@@ -15,7 +15,8 @@ import { ReadingProgress } from '@/components/lesson/ReadingProgress';
 import { LESSONS, lessonBySlug } from '@/lib/lessons/catalog';
 import { getSubscription, isProEntitlement } from '@/lib/supabase/queries';
 import { createSupabaseServerClient, hasSupabaseEnv } from '@/lib/supabase/server';
-import { jsonLdProps, learningResourceLd } from '@/lib/jsonld';
+import { jsonLdProps, learningResourceLd, breadcrumbLd } from '@/lib/jsonld';
+import { TRACKS } from '@/lib/lessons/tracks';
 
 export const dynamic = 'force-dynamic';
 
@@ -117,6 +118,19 @@ export default async function LessonPage({
             duration: lesson.duration,
             paywalled: lesson.paywalled,
           }),
+        )}
+      />
+      <script
+        {...jsonLdProps(
+          breadcrumbLd([
+            { name: dict.curriculum.eyebrow, href: `/${locale}/curriculum` },
+            {
+              name:
+                TRACKS.find((tr) => tr.id === lesson.track)?.title[locale] ?? lesson.track,
+              href: `/${locale}/curriculum/${lesson.track}`,
+            },
+            { name: lesson.title[locale], href: `/${locale}/lesson/${lesson.slug}` },
+          ]),
         )}
       />
       <article>

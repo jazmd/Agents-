@@ -61,6 +61,19 @@ export function faqLd(items: ReadonlyArray<{ q: string; a: string }>) {
   };
 }
 
+export function breadcrumbLd(items: Array<{ name: string; href: string }>) {
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: items.map((it, i) => ({
+      '@type': 'ListItem',
+      position: i + 1,
+      name: it.name,
+      item: it.href.startsWith('http') ? it.href : `${URL_BASE}${it.href}`,
+    })),
+  };
+}
+
 export function jsonLdProps(value: unknown) {
   return {
     type: 'application/ld+json' as const,

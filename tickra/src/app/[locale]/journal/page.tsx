@@ -7,6 +7,8 @@ import { Eyebrow } from '@/components/ui/Eyebrow';
 import { createSupabaseServerClient, hasSupabaseEnv } from '@/lib/supabase/server';
 import { JournalForm } from '@/components/journal/JournalForm';
 import { JournalEntryCard } from '@/components/journal/JournalEntryCard';
+import { EmptyState } from '@/components/ui/EmptyState';
+import { NotebookPen } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
@@ -74,7 +76,7 @@ export default async function JournalPage({ params }: { params: { locale: string
       <section className="border-b border-line">
         <Container as="div" className="py-16 md:py-20">
           {entries.length === 0 ? (
-            <p className="text-pretty text-[16px] text-muted">{t.empty}</p>
+            <EmptyState icon={NotebookPen} title={t.new} body={t.empty} />
           ) : (
             <ul className="space-y-4">
               {entries.map((e) => (

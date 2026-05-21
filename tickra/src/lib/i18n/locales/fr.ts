@@ -198,6 +198,7 @@ const fr = {
           { label: 'CGU', href: '/terms' },
           { label: 'Confidentialité', href: '/privacy' },
           { label: 'Avertissement risque', href: '/risk' },
+          { label: 'Mentions légales', href: '/imprint' },
         ],
       },
     ],
@@ -471,6 +472,29 @@ const fr = {
           'Ajout d’un jeton de freeze pour pardonner un jour manqué par semaine.',
           'Le record de streak est affiché à côté du streak actuel.',
         ],
+      },
+    ],
+  },
+  imprint: {
+    eyebrow: 'Mentions légales',
+    title: 'Informations légales.',
+    updated: 'Dernière mise à jour · mai 2026',
+    sections: [
+      {
+        heading: 'Éditeur',
+        body: 'Tickra SAS, 16 rue du Faubourg, 75010 Paris, France. Immatriculée au Registre du Commerce et des Sociétés de Paris. SIREN 941 027 583. Directeur de publication : M. Karout.',
+      },
+      {
+        heading: 'Hébergeur',
+        body: 'Vercel Inc., 440 N Barranca Ave #4133, Covina, CA 91723, USA. Les données des clients UE sont traitées dans la région Paris (CDG1).',
+      },
+      {
+        heading: 'Contact',
+        body: 'Pour toute question légale, écrivez à legal@tickra.com. Nous répondons sous cinq jours ouvrés.',
+      },
+      {
+        heading: 'TVA',
+        body: 'Immatriculation TVA UE en cours. Les factures refléteront la TVA dès que l’immatriculation sera accordée.',
       },
     ],
   },
