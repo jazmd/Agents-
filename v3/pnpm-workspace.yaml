@@ -1,2 +1,8 @@
 packages:
   - "@claude-flow/*"
+  - "plugins/*"
+  - "mcp"
+  - "local-contracts/*"
+  - "local-contracts/@ruvector/*"
+  - "local-contracts/@ruvnet/*"
+  - "local-contracts/@claude-flow/*"

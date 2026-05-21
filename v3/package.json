@@ -72,8 +72,8 @@
       "sharp"
     ],
     "overrides": {
-      "@ruvector/gnn": "0.1.25",
-      "@ruvector/gnn-linux-x64-gnu": "0.1.25"
+      "@ruvector/gnn": "workspace:*",
+      "@ruvector/gnn-linux-x64-gnu": "workspace:*"
     }
   }
 }
