@@ -108,6 +108,36 @@ export const LESSONS: Lesson[] = [
           ],
         },
       },
+      {
+        kind: 'multi',
+        question: {
+          en: 'Which of these are signs of a strong bullish session?',
+          fr: 'Lesquels de ces signes indiquent une séance haussière forte ?',
+        },
+        choices: {
+          en: [
+            'Wide green body covering > 70% of the range',
+            'Close near the high of the session',
+            'Tiny green body with a long upper wick',
+            'Close higher than the previous candle',
+          ],
+          fr: [
+            'Grand corps vert couvrant > 70 % de l’amplitude',
+            'Clôture proche du plus haut de la séance',
+            'Petit corps vert avec une longue mèche haute',
+            'Clôture au‑dessus de la bougie précédente',
+          ],
+        },
+        correct: [0, 1, 3],
+        success: {
+          en: 'Right. A wide body + close near the high + breaking the prior bar are aligned. A long upper wick is rejection, not strength.',
+          fr: 'Exact. Grand corps + clôture proche du plus haut + cassure de la bougie précédente sont alignés. Une longue mèche haute est un rejet, pas de la force.',
+        },
+        retry: {
+          en: 'A long upper wick is the market refusing the highs — that is not strength. Try again.',
+          fr: 'Une longue mèche haute est un rejet des plus hauts — ce n’est pas de la force. Réessayez.',
+        },
+      },
     ],
   },
   {
@@ -222,6 +252,35 @@ export const LESSONS: Lesson[] = [
             'Marquez des zones, pas des lignes — tracez une bande de 0,1 % autour du prix.',
             'Attendez que le marché revienne. Le niveau n’est confirmé qu’au second touch.',
           ],
+        },
+      },
+      {
+        kind: 'match',
+        question: {
+          en: 'Match each structure term with its definition.',
+          fr: 'Associez chaque terme de structure à sa définition.',
+        },
+        pairs: {
+          en: [
+            { term: 'Support', definition: 'Zone where buyers historically absorb selling pressure.' },
+            { term: 'Resistance', definition: 'Zone where sellers historically cap a rally.' },
+            { term: 'Swing high', definition: 'Local peak with lower bars on both sides.' },
+            { term: 'Breakout', definition: 'Decisive close beyond a confirmed level.' },
+          ],
+          fr: [
+            { term: 'Support', definition: 'Zone où les acheteurs absorbent historiquement la vente.' },
+            { term: 'Résistance', definition: 'Zone où les vendeurs plafonnent historiquement une hausse.' },
+            { term: 'Swing high', definition: 'Pic local entouré de barres plus basses des deux côtés.' },
+            { term: 'Breakout', definition: 'Clôture décisive au‑delà d’un niveau confirmé.' },
+          ],
+        },
+        success: {
+          en: 'All four matched. You now have the grammar for the rest of this track.',
+          fr: 'Les quatre sont corrects. Vous avez désormais la grammaire pour le reste de cette piste.',
+        },
+        retry: {
+          en: 'Read each definition twice before pairing — the wording is precise on purpose.',
+          fr: 'Relisez chaque définition deux fois avant d’associer — la formulation est précise volontairement.',
         },
       },
     ],
@@ -410,6 +469,35 @@ export const LESSONS: Lesson[] = [
             'Stop — déclenche un ordre market quand le prix franchit un seuil.',
             'Stop‑limit — déclenche un ordre limit quand le prix franchit un seuil. Attention aux gaps.',
           ],
+        },
+      },
+      {
+        kind: 'order',
+        question: {
+          en: 'Arrange the steps of a disciplined market entry, top to bottom.',
+          fr: 'Classez les étapes d’une entrée en marché disciplinée, de haut en bas.',
+        },
+        items: {
+          en: [
+            'Define the maximum loss you accept on this trade.',
+            'Compute position size from that loss and the stop distance.',
+            'Place the order with the calculated size.',
+            'Write the thesis in your journal before clicking Buy.',
+          ],
+          fr: [
+            'Définir la perte maximale acceptée sur ce trade.',
+            'Calculer la taille de position à partir de cette perte et de la distance au stop.',
+            'Passer l’ordre avec la taille calculée.',
+            'Écrire la thèse dans votre journal avant de cliquer sur Acheter.',
+          ],
+        },
+        success: {
+          en: 'Right. Risk first, math second, journal third, execution last. Anything else is improvisation.',
+          fr: 'Exact. Risque d’abord, calcul ensuite, journal troisième, exécution en dernier. Le reste est de l’improvisation.',
+        },
+        retry: {
+          en: 'Risk and sizing always come before execution. Try again.',
+          fr: 'Le risque et le sizing viennent toujours avant l’exécution. Réessayez.',
         },
       },
     ],

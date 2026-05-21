@@ -2,6 +2,9 @@ import { Info, AlertTriangle } from 'lucide-react';
 import { CandleAnatomy } from './CandleAnatomy';
 import { TradingViewEmbed } from './TradingViewEmbed';
 import { LessonQuiz } from './LessonQuiz';
+import { MultiSelectBlock } from './blocks/MultiSelect';
+import { MatchBlock } from './blocks/Match';
+import { OrderBlock } from './blocks/Order';
 import type { Block, Locale } from '@/lib/lessons/types';
 import type { Dictionary } from '@/lib/i18n/dictionaries';
 import { cn } from '@/lib/cn';
@@ -99,6 +102,37 @@ export function BlockRenderer({ block, locale, dict, slug }: Props) {
           retryMessage={block.retry[locale]}
           locale={locale}
           slug={slug}
+        />
+      );
+    case 'multi':
+      return (
+        <MultiSelectBlock
+          title={dict.lesson.quiz.title}
+          question={block.question[locale]}
+          choices={block.choices[locale]}
+          correct={block.correct}
+          successMessage={block.success[locale]}
+          retryMessage={block.retry[locale]}
+        />
+      );
+    case 'match':
+      return (
+        <MatchBlock
+          title={dict.lesson.quiz.title}
+          question={block.question[locale]}
+          pairs={block.pairs[locale]}
+          successMessage={block.success[locale]}
+          retryMessage={block.retry[locale]}
+        />
+      );
+    case 'order':
+      return (
+        <OrderBlock
+          title={dict.lesson.quiz.title}
+          question={block.question[locale]}
+          items={block.items[locale]}
+          successMessage={block.success[locale]}
+          retryMessage={block.retry[locale]}
         />
       );
   }
