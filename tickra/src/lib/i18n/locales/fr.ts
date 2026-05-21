@@ -181,6 +181,7 @@ const fr = {
           { label: 'Parcours', href: '#curriculum' },
           { label: 'Tarifs', href: '/pricing' },
           { label: 'Journal des versions', href: '/changelog' },
+          { label: 'État', href: '/status' },
         ],
       },
       {
@@ -472,6 +473,24 @@ const fr = {
         ],
       },
     ],
+  },
+  status: {
+    eyebrow: 'État',
+    title: 'Tout ce que nous exploitons, et son état.',
+    body: 'Vue en direct des systèmes qui alimentent Tickra. Cette page est rafraîchie à la demande — pas de dashboard marketing, pas de remplissage.',
+    operational: 'Opérationnel',
+    notConfigured: 'Non configuré',
+    components: {
+      web: 'Application web',
+      supabase: 'Authentification & base de données',
+      email: 'Envoi d’emails',
+      stripe: 'Paiements',
+      turnstile: 'Protection anti‑bot',
+      sentry: 'Surveillance des erreurs',
+    },
+    buildLabel: 'Build',
+    regionLabel: 'Région',
+    updated: 'Mis à jour',
   },
   mfa: {
     title: 'Authentification à deux facteurs',

@@ -181,6 +181,7 @@ const en = {
           { label: 'Curriculum', href: '#curriculum' },
           { label: 'Pricing', href: '/pricing' },
           { label: 'Changelog', href: '/changelog' },
+          { label: 'Status', href: '/status' },
         ],
       },
       {
@@ -330,6 +331,24 @@ const en = {
       primary: 'Unlock with Pro',
       secondary: 'See pricing',
     },
+  },
+  status: {
+    eyebrow: 'Status',
+    title: 'Everything we run, and how it’s doing.',
+    body: 'Live snapshot of the systems that power Tickra. We refresh this page on demand — no marketing dashboard, no padding.',
+    operational: 'Operational',
+    notConfigured: 'Not configured',
+    components: {
+      web: 'Web app',
+      supabase: 'Auth & database',
+      email: 'Email delivery',
+      stripe: 'Payments',
+      turnstile: 'Bot protection',
+      sentry: 'Error monitoring',
+    },
+    buildLabel: 'Build',
+    regionLabel: 'Region',
+    updated: 'Updated',
   },
   mfa: {
     title: 'Two‑factor authentication',
