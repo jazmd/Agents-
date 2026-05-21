@@ -165,3 +165,48 @@ create policy if not exists "own state write"
 
 -- subscriptions writes are restricted to service role only (webhook)
 -- (no policy means no client access; service role bypasses RLS)
+
+-- ----------------------------------------------------------------------------
+-- 7. journal_entries — decision journal (Phase 13)
+-- ----------------------------------------------------------------------------
+create table if not exists public.journal_entries (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references public.profiles(id) on delete cascade,
+  symbol      text,
+  setup       text,
+  thesis      text not null,
+  invalidation text,
+  target      text,
+  emotion     text check (emotion in ('calm','fomo','revenge','tired','other') or emotion is null),
+  outcome     text check (outcome in ('open','win','loss','breakeven') or outcome is null) default 'open',
+  outcome_notes text,
+  created_at  timestamptz not null default now(),
+  closed_at   timestamptz
+);
+create index if not exists journal_entries_user_id_created_at_idx
+  on public.journal_entries (user_id, created_at desc);
+
+alter table public.journal_entries enable row level security;
+create policy if not exists "own journal read"  on public.journal_entries for select using (auth.uid() = user_id);
+create policy if not exists "own journal write" on public.journal_entries for all    using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- ----------------------------------------------------------------------------
+-- 8. lesson_reviews — SM-2 spaced repetition (Phase 13)
+-- ----------------------------------------------------------------------------
+create table if not exists public.lesson_reviews (
+  user_id      uuid not null references public.profiles(id) on delete cascade,
+  lesson_slug  text not null,
+  ease         numeric(4,2) not null default 2.50, -- SM-2 ease factor (min 1.30)
+  interval_days integer not null default 1,
+  repetitions  integer not null default 0,
+  next_due     date not null default current_date,
+  last_grade   integer,
+  updated_at   timestamptz not null default now(),
+  primary key (user_id, lesson_slug)
+);
+create index if not exists lesson_reviews_user_id_next_due_idx
+  on public.lesson_reviews (user_id, next_due);
+
+alter table public.lesson_reviews enable row level security;
+create policy if not exists "own reviews read"  on public.lesson_reviews for select using (auth.uid() = user_id);
+create policy if not exists "own reviews write" on public.lesson_reviews for all    using (auth.uid() = user_id) with check (auth.uid() = user_id);

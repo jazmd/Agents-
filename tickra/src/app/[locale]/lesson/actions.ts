@@ -83,10 +83,71 @@ export async function completeLesson(formData: FormData) {
     })
     .eq('user_id', user.id);
 
+  // 4) seed a spaced-repetition review (idempotent: skip if already scheduled)
+  const tomorrow = new Date();
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  await supabase.from('lesson_reviews').upsert(
+    {
+      user_id: user.id,
+      lesson_slug: slug,
+      next_due: tomorrow.toISOString().slice(0, 10),
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'user_id,lesson_slug', ignoreDuplicates: true },
+  );
+
   revalidatePath(`/${locale}/dashboard`);
   revalidatePath(`/${locale}/lesson/${slug}`);
+  revalidatePath(`/${locale}/reviews`);
 
   return { ok: true, xpAwarded: XP_PER_LESSON, streak, level: levelIndex };
+}
+
+export async function gradeReview(formData: FormData) {
+  const slug = String(formData.get('slug') || '');
+  const grade = Number(formData.get('grade') || 0);
+  const locale = String(formData.get('locale') || 'en');
+  if (!slug) return { ok: false, error: 'missing slug' };
+
+  const { nextSm2, DEFAULT_SM2 } = await import('@/lib/sm2');
+  const supabase = createSupabaseServerClient();
+  const { data: userData } = await supabase.auth.getUser();
+  const user = userData.user;
+  if (!user) return { ok: false, error: 'unauthenticated' };
+
+  const { data: existing } = await supabase
+    .from('lesson_reviews')
+    .select('ease, interval_days, repetitions')
+    .eq('user_id', user.id)
+    .eq('lesson_slug', slug)
+    .maybeSingle();
+
+  const prev = existing
+    ? {
+        ease: Number(existing.ease ?? DEFAULT_SM2.ease),
+        intervalDays: Number(existing.interval_days ?? DEFAULT_SM2.intervalDays),
+        repetitions: Number(existing.repetitions ?? DEFAULT_SM2.repetitions),
+      }
+    : DEFAULT_SM2;
+
+  const next = nextSm2(prev, grade);
+
+  await supabase.from('lesson_reviews').upsert(
+    {
+      user_id: user.id,
+      lesson_slug: slug,
+      ease: next.ease,
+      interval_days: next.intervalDays,
+      repetitions: next.repetitions,
+      next_due: next.nextDueAt.toISOString().slice(0, 10),
+      last_grade: grade,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'user_id,lesson_slug' },
+  );
+
+  revalidatePath(`/${locale}/reviews`);
+  return { ok: true, intervalDays: next.intervalDays, nextDue: next.nextDueAt.toISOString().slice(0, 10) };
 }
 
 export async function loseLife() {
