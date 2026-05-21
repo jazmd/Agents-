@@ -9,6 +9,7 @@ import { Eyebrow } from '@/components/ui/Eyebrow';
 import { createSupabaseServerClient, hasSupabaseEnv } from '@/lib/supabase/server';
 import { BillingPortalButton } from '@/components/billing/BillingPortalButton';
 import { DeleteAccount } from '@/components/settings/DeleteAccount';
+import { DataExport } from '@/components/settings/DataExport';
 import { updateProfile } from './actions';
 import type { Profile, Subscription } from '@/lib/supabase/types';
 
@@ -198,6 +199,20 @@ export default async function SettingsPage({ params, searchParams }: Props) {
                   {t.sections.danger.signOut}
                 </button>
               </form>
+
+              <div className="border-t border-line pt-6">
+                <p className="mb-4 font-mono text-[11px] uppercase tracking-[0.22em] text-muted">
+                  {dict.export.title}
+                </p>
+                <p className="mb-4 max-w-md text-[14px] leading-relaxed text-muted">
+                  {dict.export.body}
+                </p>
+                <DataExport
+                  cta={dict.export.cta}
+                  pendingLabel={dict.export.pending}
+                  failedLabel={dict.export.failed}
+                />
+              </div>
 
               <div className="border-t border-line pt-6">
                 <DeleteAccount

@@ -473,6 +473,19 @@ const fr = {
       },
     ],
   },
+  export: {
+    title: 'Exporter vos données',
+    body: 'Téléchargez un fichier JSON contenant tout ce que nous stockons sur vous — profil, abonnement, progression des leçons, historique d’activité.',
+    cta: 'Télécharger mes données',
+    pending: 'Préparation…',
+    failed: 'Échec de l’export. Réessayez ou contactez le support.',
+  },
+  cookies: {
+    title: 'Cookies, en bref.',
+    body: 'Tickra stocke deux cookies fonctionnels (votre langue et votre thème) plus une session de connexion lorsque vous avez un compte. Aucun tracking tiers. Aucune publicité.',
+    accept: 'J’ai compris',
+    learn: 'Lire la politique de confidentialité',
+  },
   reset: {
     request: {
       eyebrow: 'Mot de passe',

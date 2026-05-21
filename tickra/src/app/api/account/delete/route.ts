@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { createSupabaseServerClient, createSupabaseServiceClient } from '@/lib/supabase/server';
+import { createSupabaseServerClient, createSupabaseServiceClient, hasSupabaseEnv } from '@/lib/supabase/server';
 import { rateLimit, ipFrom } from '@/lib/rate-limit';
 
 export const runtime = 'nodejs';
@@ -14,6 +14,10 @@ export async function POST(req: Request) {
 
   const { email } = (await req.json().catch(() => ({}))) as { email?: string };
   if (!email) return NextResponse.json({ error: 'missing email' }, { status: 400 });
+
+  if (!hasSupabaseEnv()) {
+    return NextResponse.json({ error: 'not_configured' }, { status: 503 });
+  }
 
   const supabase = createSupabaseServerClient();
   const { data: userData } = await supabase.auth.getUser();

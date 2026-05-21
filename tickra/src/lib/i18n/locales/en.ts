@@ -331,6 +331,19 @@ const en = {
       secondary: 'See pricing',
     },
   },
+  export: {
+    title: 'Export your data',
+    body: 'Download a JSON file with everything we store about you — profile, subscription, lesson progress, activity history.',
+    cta: 'Download my data',
+    pending: 'Preparing…',
+    failed: 'Export failed. Try again or contact support.',
+  },
+  cookies: {
+    title: 'Cookies, briefly.',
+    body: 'Tickra stores two functional cookies (your language and theme) plus a sign‑in session when you have an account. No third‑party tracking. No advertising.',
+    accept: 'I understand',
+    learn: 'Read the privacy policy',
+  },
   reset: {
     request: {
       eyebrow: 'Reset password',

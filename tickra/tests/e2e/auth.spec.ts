@@ -20,7 +20,7 @@ test.describe('Auth gates', () => {
   });
 
   test('protected POST endpoints reject GET with 405', async ({ request }) => {
-    for (const path of ['/api/signout', '/api/checkout', '/api/billing/portal', '/api/stripe/webhook']) {
+    for (const path of ['/api/signout', '/api/checkout', '/api/billing/portal', '/api/stripe/webhook', '/api/account/delete']) {
       const r = await request.get(path);
       expect(r.status()).toBe(405);
     }
