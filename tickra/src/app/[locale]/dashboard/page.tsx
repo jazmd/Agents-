@@ -10,6 +10,7 @@ import { LivesIndicator } from '@/components/dashboard/LivesIndicator';
 import { LessonCard } from '@/components/dashboard/LessonCard';
 import { LevelMap } from '@/components/dashboard/LevelMap';
 import { ActivityChart } from '@/components/dashboard/ActivityChart';
+import { VerifyBanner } from '@/components/dashboard/VerifyBanner';
 import { getDashboardData, getAuthedUser } from '@/lib/supabase/queries';
 
 export const dynamic = 'force-dynamic';
@@ -101,6 +102,19 @@ export default async function DashboardPage({ params }: { params: { locale: stri
     <AppShell dict={dict} locale={params.locale}>
       <section className="border-b border-line">
         <Container as="div" className="py-20 md:py-24">
+          {user && !user.email_confirmed_at && user.email ? (
+            <div className="mb-8">
+              <VerifyBanner
+                email={user.email}
+                title={dict.verify.title}
+                body={dict.verify.body}
+                cta={dict.verify.cta}
+                pendingLabel={dict.verify.pending}
+                sentLabel={dict.verify.sent}
+                failedLabel={dict.verify.failed}
+              />
+            </div>
+          ) : null}
           <Eyebrow>{t.eyebrow}</Eyebrow>
           <h1 className="mt-6 font-display text-display-lg font-medium tracking-tight text-balance text-ink">
             {fullName ? `${t.greeting.replace(/\.$/, '')}, ${fullName}.` : t.greeting}

@@ -332,6 +332,14 @@ const en = {
       secondary: 'See pricing',
     },
   },
+  verify: {
+    title: 'One step left — confirm your email.',
+    body: 'We sent a confirmation link to',
+    cta: 'Resend email',
+    pending: 'Sending…',
+    sent: 'Sent. Check your inbox.',
+    failed: 'Could not send. Try later.',
+  },
   refer: {
     eyebrow: 'Referrals',
     title: 'Bring a friend, earn a month.',

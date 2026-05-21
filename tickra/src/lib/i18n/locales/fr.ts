@@ -474,6 +474,14 @@ const fr = {
       },
     ],
   },
+  verify: {
+    title: 'Encore une étape — confirmez votre email.',
+    body: 'Nous avons envoyé un lien de confirmation à',
+    cta: 'Renvoyer l’email',
+    pending: 'Envoi…',
+    sent: 'Envoyé. Vérifiez votre boîte.',
+    failed: 'Envoi impossible. Réessayez plus tard.',
+  },
   refer: {
     eyebrow: 'Parrainage',
     title: 'Amenez un ami, gagnez un mois.',
