@@ -96,9 +96,29 @@ export async function completeLesson(formData: FormData) {
     { onConflict: 'user_id,lesson_slug', ignoreDuplicates: true },
   );
 
+  // 5) unlock achievements based on the post-update state
+  const { badgesUnlockedBy } = await import('@/lib/achievements');
+  const { count: completedCount } = await supabase
+    .from('lesson_progress')
+    .select('lesson_slug', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+    .eq('status', 'done');
+  const candidate = badgesUnlockedBy(
+    { xp, streak_current: streak, streak_best: best, level_index: levelIndex },
+    { lessonsCompleted: completedCount ?? 0 },
+  );
+  if (candidate.length > 0) {
+    const rows = candidate.map((badge_id) => ({ user_id: user.id, badge_id }));
+    await supabase.from('achievements').upsert(rows, {
+      onConflict: 'user_id,badge_id',
+      ignoreDuplicates: true,
+    });
+  }
+
   revalidatePath(`/${locale}/dashboard`);
   revalidatePath(`/${locale}/lesson/${slug}`);
   revalidatePath(`/${locale}/reviews`);
+  revalidatePath(`/${locale}/achievements`);
 
   return { ok: true, xpAwarded: XP_PER_LESSON, streak, level: levelIndex };
 }

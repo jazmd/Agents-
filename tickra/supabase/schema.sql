@@ -237,3 +237,33 @@ create table if not exists public.lesson_notes (
 alter table public.lesson_notes enable row level security;
 create policy if not exists "own notes read"  on public.lesson_notes for select using (auth.uid() = user_id);
 create policy if not exists "own notes write" on public.lesson_notes for all    using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- ----------------------------------------------------------------------------
+-- 11. achievements — per-user unlocked badges (Phase 15)
+-- ----------------------------------------------------------------------------
+create table if not exists public.achievements (
+  user_id      uuid not null references public.profiles(id) on delete cascade,
+  badge_id     text not null,
+  unlocked_at  timestamptz not null default now(),
+  primary key (user_id, badge_id)
+);
+alter table public.achievements enable row level security;
+create policy if not exists "own achievements read" on public.achievements for select using (auth.uid() = user_id);
+create policy if not exists "own achievements write" on public.achievements for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+-- ----------------------------------------------------------------------------
+-- 12. leaderboard view — top 100 by XP (Phase 15)
+-- ----------------------------------------------------------------------------
+create or replace view public.leaderboard as
+select
+  s.user_id,
+  coalesce(nullif(trim(p.full_name), ''), 'Anonymous') as display_name,
+  s.xp,
+  s.level_index,
+  s.streak_current,
+  s.streak_best
+from public.user_state s
+join public.profiles p on p.id = s.user_id
+order by s.xp desc, s.streak_best desc
+limit 100;
+grant select on public.leaderboard to anon, authenticated;
