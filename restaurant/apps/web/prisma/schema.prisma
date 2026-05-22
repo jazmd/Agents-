@@ -1,0 +1,69 @@
+// Values validated in application code:
+// Role:          'CUSTOMER' | 'ADMIN'
+// OrderMethod:   'DELIVERY' | 'PICKUP'
+// OrderStatus:   'PENDING' | 'PREPARING' | 'READY' | 'DELIVERING' | 'COMPLETED' | 'CANCELLED'
+// PaymentMethod: 'CASH' | 'CARD'
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  name         String
+  phone        String?
+  role         String   @default("CUSTOMER")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  orders       Order[]
+}
+
+model Order {
+  id            String   @id @default(cuid())
+  publicId      String   @unique
+  userId        String?
+  user          User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  customerName  String
+  customerPhone String
+  customerEmail String?
+
+  method        String
+  status        String   @default("PENDING")
+
+  street        String?
+  zip           String?
+  city          String?
+  note          String?
+  paymentMethod String   @default("CASH")
+
+  subtotalCents Int
+  deliveryCents Int      @default(0)
+  totalCents    Int
+
+  items         OrderItem[]
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model OrderItem {
+  id         String @id @default(cuid())
+  orderId    String
+  order      Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId  String
+  name       String
+  quantity   Int
+  unitCents  Int
+  totalCents Int
+}

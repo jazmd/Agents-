@@ -1,0 +1,157 @@
+{
+  "brand": {
+    "name": "By Kebap",
+    "tagline": "Real döner experience. Freshly made every day."
+  },
+  "nav": {
+    "home": "Home",
+    "menu": "Menu",
+    "about": "About",
+    "contact": "Contact",
+    "cart": "Cart",
+    "account": "My account",
+    "login": "Sign in",
+    "register": "Sign up",
+    "logout": "Sign out",
+    "admin": "Admin"
+  },
+  "hero": {
+    "kicker": "Freshly from Paderborn",
+    "title": "From the charcoal grill straight to your plate",
+    "subtitle": "Juicy veal from the traditional rotating spit, paper-thin yufka and house-made sauces. Order online — delivery in 30 minutes.",
+    "ctaOrder": "Order now",
+    "ctaMenu": "View menu",
+    "stats": {
+      "rating": "Star rating",
+      "delivery": "Delivery time",
+      "orders": "Orders / month"
+    }
+  },
+  "highlights": {
+    "fresh": {
+      "title": "Daily fresh",
+      "text": "Everything in our kitchen is freshly prepared each day."
+    },
+    "halal": {
+      "title": "100% halal",
+      "text": "Certified halal meat from trusted local suppliers."
+    },
+    "fast": {
+      "title": "Fast delivery",
+      "text": "Within 30 minutes straight to your home or office."
+    }
+  },
+  "menu": {
+    "title": "Our menu",
+    "subtitle": "Everything you crave — from the classics to the bold new.",
+    "filter": {
+      "all": "All",
+      "popular": "Popular",
+      "spicy": "Spicy",
+      "vegetarian": "Vegetarian",
+      "vegan": "Vegan"
+    },
+    "badge": {
+      "popular": "Popular",
+      "spicy": "Spicy",
+      "vegetarian": "Vegetarian",
+      "vegan": "Vegan"
+    },
+    "addToCart": "Add to cart",
+    "added": "Added"
+  },
+  "cart": {
+    "title": "Your cart",
+    "empty": "Your cart is empty.",
+    "emptyCta": "Browse menu",
+    "subtotal": "Subtotal",
+    "delivery": "Delivery",
+    "freeFrom": "Free from €20",
+    "total": "Total",
+    "checkout": "Checkout",
+    "remove": "Remove",
+    "quantity": "Qty"
+  },
+  "checkout": {
+    "title": "Complete your order",
+    "deliveryMethod": "Delivery method",
+    "delivery": "Delivery",
+    "pickup": "Pickup",
+    "deliveryNote": "Delivery in ~30 min.",
+    "pickupNote": "Pickup in ~15 min.",
+    "contact": "Contact",
+    "name": "Name",
+    "phone": "Phone",
+    "email": "Email",
+    "address": "Delivery address",
+    "street": "Street & number",
+    "zip": "ZIP",
+    "city": "City",
+    "note": "Note",
+    "notePlaceholder": "Special requests, doorbell, floor …",
+    "payment": "Payment",
+    "paymentCash": "Cash on delivery",
+    "paymentCard": "Card on delivery",
+    "submit": "Place order",
+    "success": "Thank you for your order!",
+    "successText": "We've received your order and started preparing it. A confirmation was sent to your email."
+  },
+  "account": {
+    "title": "My account",
+    "orders": "My orders",
+    "noOrders": "You haven't placed any orders yet.",
+    "login": {
+      "title": "Sign in",
+      "email": "Email",
+      "password": "Password",
+      "submit": "Sign in",
+      "noAccount": "No account yet?",
+      "register": "Create one"
+    },
+    "register": {
+      "title": "Sign up",
+      "name": "Name",
+      "email": "Email",
+      "password": "Password",
+      "phone": "Phone (optional)",
+      "submit": "Create account",
+      "hasAccount": "Already have an account?",
+      "login": "Sign in"
+    }
+  },
+  "admin": {
+    "title": "Admin dashboard",
+    "stats": {
+      "today": "Today",
+      "orders": "Orders",
+      "revenue": "Revenue",
+      "avgOrder": "Avg. order"
+    },
+    "orders": {
+      "title": "Orders",
+      "id": "ID",
+      "customer": "Customer",
+      "items": "Items",
+      "total": "Total",
+      "status": "Status",
+      "time": "Time"
+    },
+    "status": {
+      "pending": "New",
+      "preparing": "Preparing",
+      "ready": "Ready",
+      "delivering": "On the way",
+      "completed": "Completed",
+      "cancelled": "Cancelled"
+    }
+  },
+  "footer": {
+    "hours": "Opening hours",
+    "monThu": "Mon–Thu: 11:00 – 23:00",
+    "friSat": "Fri–Sat: 11:00 – 02:00",
+    "sun": "Sun: 12:00 – 23:00",
+    "address": "Address",
+    "contact": "Contact",
+    "copyright": "All rights reserved."
+  }
+}
