@@ -1,15 +1,17 @@
 /**
  * Headless Worker Executor
- * Enables workers to invoke Claude Code in headless mode with configurable sandbox profiles.
+ * Enables workers to invoke AI coding agents (Claude Code or OpenCode) in headless mode.
  *
  * ADR-020: Headless Worker Integration Architecture
  * - Integrates with CLAUDE_CODE_HEADLESS and CLAUDE_CODE_SANDBOX_MODE environment variables
+ * - Supports multiple backends: Claude Code (default) and OpenCode
  * - Provides process pool for concurrent execution
  * - Builds context from file glob patterns
  * - Supports prompt templates and output parsing
  * - Implements timeout and graceful error handling
  *
  * Key Features:
+ * - Multi-backend support (Claude Code / OpenCode)
  * - Process pool with configurable maxConcurrent
  * - Context building from file glob patterns with caching
  * - Prompt template system with context injection
@@ -24,6 +26,7 @@ import { EventEmitter } from 'events';
 import { existsSync, readFileSync, readdirSync, mkdirSync, writeFileSync } from 'fs';
 import { join, relative } from 'path';
 import type { WorkerType } from './worker-daemon.js';
+import { normalizeOutput } from './executor-output.js';
 
 // ============================================
 // Type Definitions
@@ -66,6 +69,11 @@ export type OutputFormat = 'text' | 'json' | 'markdown';
  * Execution mode for workers
  */
 export type ExecutionMode = 'local' | 'headless';
+
+/**
+ * Coding agent backend for headless execution
+ */
+export type BackendType = 'claude' | 'opencode';
 
 /**
  * Worker priority levels
@@ -128,6 +136,9 @@ export interface HeadlessWorkerConfig extends WorkerConfig {
  * Executor configuration options
  */
 export interface HeadlessExecutorConfig {
+  /** Coding agent backend: claude (default) or opencode */
+  backend?: BackendType;
+
   /** Maximum concurrent headless processes */
   maxConcurrent?: number;
 
@@ -157,7 +168,7 @@ export interface HeadlessExecutionResult {
   /** Whether execution completed successfully */
   success: boolean;
 
-  /** Raw output from Claude Code */
+  /** Raw output from the coding agent */
   output: string;
 
   /** Parsed output (if outputFormat is json or markdown) */
@@ -186,6 +197,9 @@ export interface HeadlessExecutionResult {
 
   /** Execution ID for tracking */
   executionId: string;
+
+  /** Coding agent backend used */
+  backend: BackendType;
 }
 
 /**
@@ -586,9 +600,10 @@ export function getWorkerConfig(type: WorkerType): HeadlessWorkerConfig | undefi
 // ============================================
 
 /**
- * HeadlessWorkerExecutor - Executes workers using Claude Code in headless mode
+ * HeadlessWorkerExecutor - Executes workers using AI coding agents in headless mode
  *
  * Features:
+ * - Multi-backend support (Claude Code / OpenCode)
  * - Process pool with configurable concurrency limit
  * - Pending queue for overflow requests
  * - Context caching with configurable TTL
@@ -599,11 +614,14 @@ export function getWorkerConfig(type: WorkerType): HeadlessWorkerConfig | undefi
 export class HeadlessWorkerExecutor extends EventEmitter {
   private projectRoot: string;
   private config: Required<HeadlessExecutorConfig>;
+  private backend: BackendType;
   private processPool: Map<string, PoolEntry> = new Map();
   private pendingQueue: QueueEntry[] = [];
   private contextCache: Map<string, CacheEntry> = new Map();
   private claudeCodeAvailable: boolean | null = null;
   private claudeCodeVersion: string | null = null;
+  private openCodeAvailable: boolean | null = null;
+  private openCodeVersion: string | null = null;
 
   constructor(projectRoot: string, options?: HeadlessExecutorConfig) {
     super();
@@ -611,6 +629,7 @@ export class HeadlessWorkerExecutor extends EventEmitter {
 
     // Merge with defaults
     this.config = {
+      backend: options?.backend ?? 'claude',
       maxConcurrent: options?.maxConcurrent ?? 2,
       defaultTimeoutMs: options?.defaultTimeoutMs ?? 5 * 60 * 1000,
       maxContextFiles: options?.maxContextFiles ?? 20,
@@ -619,6 +638,8 @@ export class HeadlessWorkerExecutor extends EventEmitter {
       cacheContext: options?.cacheContext ?? true,
       cacheTtlMs: options?.cacheTtlMs ?? 60000, // 1 minute default
     };
+
+    this.backend = this.config.backend;
 
     // Ensure log directory exists
     this.ensureLogDir();
@@ -629,9 +650,34 @@ export class HeadlessWorkerExecutor extends EventEmitter {
   // ============================================
 
   /**
-   * Check if Claude Code CLI is available
+   * Get the current backend
+   */
+  getBackend(): BackendType {
+    return this.backend;
+  }
+
+  /**
+   * Set the backend dynamically
+   */
+  setBackend(backend: BackendType): void {
+    this.backend = backend;
+    this.emit('backendChange', { backend });
+  }
+
+  /**
+   * Check if the configured backend is available
    */
   async isAvailable(): Promise<boolean> {
+    if (this.backend === 'opencode') {
+      return this.isOpenCodeAvailable();
+    }
+    return this.isClaudeCodeAvailable();
+  }
+
+  /**
+   * Check if Claude Code CLI is available
+   */
+  async isClaudeCodeAvailable(): Promise<boolean> {
     if (this.claudeCodeAvailable !== null) {
       return this.claudeCodeAvailable;
     }
@@ -641,24 +687,53 @@ export class HeadlessWorkerExecutor extends EventEmitter {
         encoding: 'utf-8',
         stdio: 'pipe',
         timeout: 5000,
-        windowsHide: true, // Prevent phantom console windows on Windows
+        windowsHide: true,
       });
       this.claudeCodeAvailable = true;
       this.claudeCodeVersion = output.trim();
-      this.emit('status', { available: true, version: this.claudeCodeVersion });
+      this.emit('status', { backend: 'claude', available: true, version: this.claudeCodeVersion });
       return true;
     } catch {
       this.claudeCodeAvailable = false;
-      this.emit('status', { available: false });
+      this.emit('status', { backend: 'claude', available: false });
       return false;
     }
   }
 
   /**
-   * Get Claude Code version
+   * Check if OpenCode CLI is available
+   */
+  async isOpenCodeAvailable(): Promise<boolean> {
+    if (this.openCodeAvailable !== null) {
+      return this.openCodeAvailable;
+    }
+
+    try {
+      const output = execSync('opencode --version', {
+        encoding: 'utf-8',
+        stdio: 'pipe',
+        timeout: 5000,
+        windowsHide: true,
+      });
+      this.openCodeAvailable = true;
+      this.openCodeVersion = output.trim();
+      this.emit('status', { backend: 'opencode', available: true, version: this.openCodeVersion });
+      return true;
+    } catch {
+      this.openCodeAvailable = false;
+      this.emit('status', { backend: 'opencode', available: false });
+      return false;
+    }
+  }
+
+  /**
+   * Get the version of the configured backend
    */
   async getVersion(): Promise<string | null> {
     await this.isAvailable();
+    if (this.backend === 'opencode') {
+      return this.openCodeVersion;
+    }
     return this.claudeCodeVersion;
   }
 
@@ -677,9 +752,15 @@ export class HeadlessWorkerExecutor extends EventEmitter {
     // Check availability
     const available = await this.isAvailable();
     if (!available) {
+      const message = this.backend === 'opencode'
+        ? 'OpenCode backend selected but opencode binary not found on PATH.\n' +
+          'Install it with: npm install -g opencode-ai\n' +
+          'Or switch to the Claude backend: ruflo agent --backend claude'
+        : 'Claude Code CLI not available. Install with: npm install -g @anthropic-ai/claude-code\n' +
+          'Or switch to the OpenCode backend: ruflo agent --backend opencode';
       const result = this.createErrorResult(
         workerType,
-        'Claude Code CLI not available. Install with: npm install -g @anthropic-ai/claude-code'
+        message
       );
       this.emit('error', result);
       return result;
@@ -861,7 +942,7 @@ export class HeadlessWorkerExecutor extends EventEmitter {
     const startTime = Date.now();
     const executionId = `${workerType}_${startTime}_${Math.random().toString(36).slice(2, 8)}`;
 
-    this.emit('start', { executionId, workerType, config: headless });
+    this.emit('start', { executionId, workerType, config: headless, backend: this.backend });
 
     try {
       // Build context from file patterns
@@ -873,14 +954,24 @@ export class HeadlessWorkerExecutor extends EventEmitter {
       // Log prompt for debugging
       this.logExecution(executionId, 'prompt', fullPrompt);
 
-      // Execute Claude Code headlessly
-      const result = await this.executeClaudeCode(fullPrompt, {
-        sandbox: headless.sandbox,
-        model: headless.model || 'sonnet',
-        timeoutMs: headless.timeoutMs || this.config.defaultTimeoutMs,
-        executionId,
-        workerType,
-      });
+      // Route to the correct backend
+      let result: { success: boolean; output: string; tokensUsed?: number; error?: string };
+      if (this.backend === 'opencode') {
+        result = await this.executeOpenCode(fullPrompt, {
+          model: headless.model || 'sonnet',
+          timeoutMs: headless.timeoutMs || this.config.defaultTimeoutMs,
+          executionId,
+          workerType,
+        });
+      } else {
+        result = await this.executeClaudeCode(fullPrompt, {
+          sandbox: headless.sandbox,
+          model: headless.model || 'sonnet',
+          timeoutMs: headless.timeoutMs || this.config.defaultTimeoutMs,
+          executionId,
+          workerType,
+        });
+      }
 
       // Parse output based on format
       let parsedOutput: unknown;
@@ -890,9 +981,12 @@ export class HeadlessWorkerExecutor extends EventEmitter {
         parsedOutput = this.parseMarkdownOutput(result.output);
       }
 
+      // Normalize output for consistent downstream consumption
+      const normalized = normalizeOutput(result.output, result.success ? 0 : 1, this.backend);
+
       const executionResult: HeadlessExecutionResult = {
         success: result.success,
-        output: result.output,
+        output: normalized.text,
         parsedOutput,
         durationMs: Date.now() - startTime,
         tokensUsed: result.tokensUsed,
@@ -901,7 +995,8 @@ export class HeadlessWorkerExecutor extends EventEmitter {
         workerType,
         timestamp: new Date(),
         executionId,
-        error: result.error,
+        error: result.error || normalized.error,
+        backend: this.backend,
       };
 
       // Log result
@@ -1295,6 +1390,153 @@ Analyze the above codebase context and provide your response following the forma
   }
 
   /**
+   * Execute OpenCode in headless mode via CLI
+   *
+   * Uses `opencode run` for one-shot non-interactive execution,
+   * similar to `claude --print`. Supports streaming output and timeout.
+   */
+  private executeOpenCode(
+    prompt: string,
+    options: {
+      model: ModelType;
+      timeoutMs: number;
+      executionId: string;
+      workerType: HeadlessWorkerType;
+    }
+  ): Promise<{ success: boolean; output: string; tokensUsed?: number; error?: string }> {
+    return new Promise((resolve) => {
+      const env: Record<string, string> = {
+        ...(process.env as Record<string, string>),
+      };
+      delete env.CLAUDE_SESSION_ID;
+      delete env.CLAUDE_PARENT_SESSION_ID;
+
+      // OpenCode needs provider-specific API keys in the environment.
+      // Pass through all known provider keys so the configured model can authenticate.
+      if (process.env.ANTHROPIC_API_KEY) env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+      if (process.env.OPENAI_API_KEY) env.OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+      if (process.env.GOOGLE_API_KEY) env.GOOGLE_API_KEY = process.env.GOOGLE_API_KEY;
+      if (process.env.OPENROUTER_API_KEY) env.OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
+      if (process.env.GROQ_API_KEY) env.GROQ_API_KEY = process.env.GROQ_API_KEY;
+      if (process.env.MISTRAL_API_KEY) env.MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
+      if (process.env.DEEPSEEK_API_KEY) env.DEEPSEEK_API_KEY = process.env.DEEPSEEK_API_KEY;
+
+      // OpenCode uses 'run' with --dangerously-skip-permissions
+      // for fully headless operation (no interactive permission prompts).
+      const args = [
+        'run',
+        '--dangerously-skip-permissions',
+        prompt,
+      ];
+
+      // If a specific model is configured, pass it (opencode uses provider/model format).
+      // Priority: OPENCODE_MODEL env var > opencode.json config file > default (opencode auto-detects)
+      const model = this.resolveOpenCodeModel();
+      if (model) {
+        args.unshift('--model', model);
+      }
+
+      const child = spawn('opencode', args, {
+        cwd: this.projectRoot,
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        windowsHide: true,
+      });
+
+      // Setup timeout
+      const timeoutHandle = setTimeout(() => {
+        if (this.processPool.has(options.executionId)) {
+          child.kill('SIGTERM');
+          setTimeout(() => {
+            if (!child.killed) {
+              child.kill('SIGKILL');
+            }
+          }, 5000);
+        }
+      }, options.timeoutMs);
+
+      // Track in process pool
+      const poolEntry: PoolEntry = {
+        process: child,
+        executionId: options.executionId,
+        workerType: options.workerType,
+        startTime: new Date(),
+        timeout: timeoutHandle,
+      };
+      this.processPool.set(options.executionId, poolEntry);
+
+      let stdout = '';
+      let stderr = '';
+      let resolved = false;
+
+      const cleanup = () => {
+        clearTimeout(timeoutHandle);
+        this.processPool.delete(options.executionId);
+      };
+
+      child.stdout?.on('data', (data: Buffer) => {
+        const chunk = data.toString();
+        stdout += chunk;
+        this.emit('output', {
+          executionId: options.executionId,
+          type: 'stdout',
+          data: chunk,
+        });
+      });
+
+      child.stderr?.on('data', (data: Buffer) => {
+        const chunk = data.toString();
+        stderr += chunk;
+        this.emit('output', {
+          executionId: options.executionId,
+          type: 'stderr',
+          data: chunk,
+        });
+      });
+
+      child.on('close', (code: number | null) => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+
+        resolve({
+          success: code === 0,
+          output: stdout || stderr,
+          error: code !== 0 ? stderr || `Process exited with code ${code}` : undefined,
+        });
+      });
+
+      child.on('error', (error: Error) => {
+        if (resolved) return;
+        resolved = true;
+        cleanup();
+
+        resolve({
+          success: false,
+          output: '',
+          error: error.message,
+        });
+      });
+
+      // Handle timeout
+      setTimeout(() => {
+        if (resolved) return;
+        if (!this.processPool.has(options.executionId)) return;
+
+        resolved = true;
+        child.kill('SIGTERM');
+        cleanup();
+
+        resolve({
+          success: false,
+          output: stdout || stderr,
+          error: `Execution timed out after ${options.timeoutMs}ms`,
+        });
+      }, options.timeoutMs + 100);
+    });
+  }
+
+  /**
    * Parse JSON output from Claude Code
    */
   private parseJsonOutput(output: string): unknown {
@@ -1370,6 +1612,45 @@ Analyze the above codebase context and provide your response following the forma
   }
 
   /**
+   * Resolve the OpenCode model to use.
+   *
+   * Priority:
+   *   1. OPENCODE_MODEL env var (explicit override)
+   *   2. opencode.json / .opencode/opencode.jsonc config file (project-level)
+   *   3. undefined (let opencode auto-detect from its own config)
+   */
+  private resolveOpenCodeModel(): string | undefined {
+    // 1. Explicit env var override
+    if (process.env.OPENCODE_MODEL) {
+      return process.env.OPENCODE_MODEL;
+    }
+
+    // 2. Try to read from opencode config file
+    try {
+      const configPaths = [
+        join(this.projectRoot, 'opencode.json'),
+        join(this.projectRoot, '.opencode', 'opencode.jsonc'),
+        join(this.projectRoot, '.opencode', 'opencode.json'),
+      ];
+      for (const configPath of configPaths) {
+        if (existsSync(configPath)) {
+          const raw = readFileSync(configPath, 'utf-8');
+          // jsonc may have comments — strip single-line // comments
+          const cleaned = raw.replace(/\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '');
+          const config = JSON.parse(cleaned);
+          if (config.model && typeof config.model === 'string') {
+            return config.model;
+          }
+        }
+      }
+    } catch {
+      // Config file missing or invalid — fall through to auto-detect
+    }
+
+    return undefined;
+  }
+
+  /**
    * Create an error result
    */
   private createErrorResult(
@@ -1386,6 +1667,7 @@ Analyze the above codebase context and provide your response following the forma
       timestamp: new Date(),
       executionId: `error_${Date.now()}`,
       error,
+      backend: this.backend,
     };
   }
 
