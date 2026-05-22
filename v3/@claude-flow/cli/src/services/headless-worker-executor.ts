@@ -632,8 +632,12 @@ export class HeadlessWorkerExecutor extends EventEmitter {
    * Check if Claude Code CLI is available
    */
   async isAvailable(): Promise<boolean> {
-    if (this.claudeCodeAvailable !== null) {
-      return this.claudeCodeAvailable;
+    // Only short-circuit on a positive cached result. Caching `false` would lock the
+    // daemon to local-fallback mode for its entire lifetime after a single transient
+    // miss (e.g. WSL2 cold start, AV scanner racing with execSync). Always re-probe
+    // when the previous answer was false or unknown.
+    if (this.claudeCodeAvailable === true) {
+      return true;
     }
 
     try {
