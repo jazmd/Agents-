@@ -1064,6 +1064,14 @@ export class WorkerDaemon extends EventEmitter {
       try {
         this.log('info', `Running ${workerConfig.type} in headless mode (Claude Code AI)`);
         const result = await this.headlessExecutor.execute(workerConfig.type as HeadlessWorkerType);
+        // HeadlessWorkerExecutor.execute() returns createErrorResult({success:false}) when its
+        // own isAvailable() check fails, instead of throwing. Without this guard, that error
+        // result is persisted as a successful headless run and downstream consumers cannot
+        // tell a real AI run apart from a silent fallback.
+        if (!result || (result as { success?: boolean }).success !== true) {
+          const errMsg = (result as { error?: string } | undefined)?.error;
+          throw new Error(errMsg ? String(errMsg) : 'headless executor returned success=false');
+        }
         // #1793: persist the headless result to the same metrics files the
         // local workers write to. Without this, AI-mode runs produced rich
         // parsedOutput that lived only in `.claude-flow/logs/headless/*` and
