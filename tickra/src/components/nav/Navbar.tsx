@@ -6,7 +6,7 @@ import { ThemeToggle } from './ThemeToggle';
 import { MobileMenu } from './MobileMenu';
 import { UserMenu } from './UserMenu';
 import { CommandPalette } from '@/components/search/CommandPalette';
-import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { getIdentity } from '@/lib/demo/identity';
 import type { Dictionary } from '@/lib/i18n/dictionaries';
 import type { Locale } from '@/lib/i18n/config';
 
@@ -21,9 +21,8 @@ export async function Navbar({ dict, locale }: Props) {
 
   let userEmail: string | null = null;
   try {
-    const supabase = createSupabaseServerClient();
-    const { data } = await supabase.auth.getUser();
-    userEmail = data.user?.email ?? null;
+    const identity = await getIdentity();
+    userEmail = identity?.email ?? null;
   } catch {
     userEmail = null;
   }

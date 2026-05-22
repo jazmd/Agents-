@@ -45,8 +45,11 @@ export async function middleware(req: NextRequest) {
   const segments = pathname.split('/').filter(Boolean);
   const segmentAfterLocale = segments[1];
   if (segmentAfterLocale && PROTECTED_PATHS.includes(segmentAfterLocale)) {
-    const hasSession = req.cookies.getAll().some((c) => c.name.startsWith('sb-') && c.name.endsWith('-auth-token'));
-    if (!hasSession) {
+    const hasSupabaseSession = req.cookies
+      .getAll()
+      .some((c) => c.name.startsWith('sb-') && c.name.endsWith('-auth-token'));
+    const hasDemoSession = Boolean(req.cookies.get('tickra-demo-session')?.value);
+    if (!hasSupabaseSession && !hasDemoSession) {
       const locale = segments[0];
       const url = req.nextUrl.clone();
       url.pathname = `/${locale}/signin`;

@@ -17,6 +17,7 @@ import { getSubscription, isProEntitlement } from '@/lib/supabase/queries';
 import { createSupabaseServerClient, hasSupabaseEnv } from '@/lib/supabase/server';
 import { jsonLdProps, learningResourceLd, breadcrumbLd } from '@/lib/jsonld';
 import { TRACKS } from '@/lib/lessons/tracks';
+import { getIdentity } from '@/lib/demo/identity';
 
 export const dynamic = 'force-dynamic';
 
@@ -73,11 +74,20 @@ export default async function LessonPage({
   let bookmarked = false;
   let noteBody = '';
 
-  if (hasSupabaseEnv()) {
+  // Resolve identity (Supabase or demo). Paid plans unlock paywalled lessons.
+  const identity = await getIdentity();
+  if (identity) {
+    userId = identity.source === 'supabase' ? 'sb' : 'demo';
+    if (lesson.paywalled) {
+      entitled = identity.plan === 'pro' || identity.plan === 'lifetime';
+    }
+  }
+
+  if (hasSupabaseEnv() && identity?.source === 'supabase') {
     try {
       const sb = createSupabaseServerClient();
       const { data: userData } = await sb.auth.getUser();
-      userId = userData.user?.id ?? null;
+      userId = userData.user?.id ?? userId;
       if (lesson.paywalled) {
         const sub = await getSubscription();
         entitled = isProEntitlement(sub);

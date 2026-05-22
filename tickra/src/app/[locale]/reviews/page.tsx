@@ -10,6 +10,7 @@ import { Eyebrow } from '@/components/ui/Eyebrow';
 import { createSupabaseServerClient, hasSupabaseEnv } from '@/lib/supabase/server';
 import { lessonBySlug } from '@/lib/lessons/catalog';
 import { GradeButtons } from '@/components/reviews/GradeButtons';
+import { getIdentity } from '@/lib/demo/identity';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,8 +26,35 @@ export default async function ReviewsPage({ params }: { params: { locale: string
   const t = dict.reviews;
   const locale = params.locale;
 
-  if (!hasSupabaseEnv()) {
+  const identity = await getIdentity();
+  if (!identity) {
     redirect(`/${locale}/signin?next=${encodeURIComponent(`/${locale}/reviews`)}`);
+  }
+
+  // In demo mode (no Supabase) we render the empty state instead of a DB read.
+  if (identity.source === 'demo' || !hasSupabaseEnv()) {
+    return (
+      <AppShell dict={dict} locale={locale}>
+        <section className="border-b border-line">
+          <Container as="div" className="grid grid-cols-12 gap-x-6 gap-y-10 py-20 md:py-28">
+            <div className="col-span-12 lg:col-span-7">
+              <Eyebrow>{t.eyebrow}</Eyebrow>
+              <h1 className="mt-8 font-display text-display-xl font-medium tracking-tight text-balance text-ink">
+                {t.title}
+              </h1>
+            </div>
+            <p className="col-span-12 max-w-xl text-pretty text-[16.5px] leading-relaxed text-muted lg:col-span-5 lg:col-start-8 lg:mt-32">
+              {t.body}
+            </p>
+          </Container>
+        </section>
+        <section className="border-b border-line bg-elevated">
+          <Container as="div" className="py-16 md:py-20">
+            <EmptyState icon={CalendarCheck} title={t.title} body={t.empty} />
+          </Container>
+        </section>
+      </AppShell>
+    );
   }
 
   const supabase = createSupabaseServerClient();

@@ -12,7 +12,9 @@ import { LevelMap } from '@/components/dashboard/LevelMap';
 import { ActivityChart } from '@/components/dashboard/ActivityChart';
 import { VerifyBanner } from '@/components/dashboard/VerifyBanner';
 import { QuickLinks } from '@/components/dashboard/QuickLinks';
-import { getDashboardData, getAuthedUser } from '@/lib/supabase/queries';
+import { DemoBanner } from '@/components/dashboard/DemoBanner';
+import { getDashboardData } from '@/lib/supabase/queries';
+import { getIdentity } from '@/lib/demo/identity';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,38 +44,45 @@ function buildActivityForLocale(locale: 'en' | 'fr', minutes: number[]) {
   return labels.map((day, i) => ({ day, minutes: minutes[i] ?? 0 }));
 }
 
-export default async function DashboardPage({ params }: { params: { locale: string } }) {
+export default async function DashboardPage({
+  params,
+  searchParams,
+}: {
+  params: { locale: string };
+  searchParams: { checkout?: string };
+}) {
   if (!isLocale(params.locale)) notFound();
   const dict = await getDictionary(params.locale);
   const t = dict.dashboard;
 
-  let user;
+  const identity = await getIdentity();
+  if (!identity) {
+    redirect(`/${params.locale}/signin?next=${encodeURIComponent(`/${params.locale}/dashboard`)}`);
+  }
+
+  // Real DB data when Supabase is configured. Otherwise show demo state.
   let data;
   try {
-    user = await getAuthedUser();
-    if (!user) {
-      redirect(`/${params.locale}/signin?next=${encodeURIComponent(`/${params.locale}/dashboard`)}`);
-    }
-    data = await getDashboardData();
+    data = identity.source === 'supabase' ? await getDashboardData() : null;
   } catch {
-    user = null;
     data = null;
   }
 
-  // Derive view-model: use DB data when present, fall back to demo state when env is unset
-  const state = data?.state ?? {
-    user_id: 'demo',
-    xp: 2340,
-    level_index: 3,
-    streak_current: 12,
-    streak_best: 41,
-    lives: 2,
-    lives_refilled_at: null,
-    freeze_tokens: 1,
-    last_active_day: null,
-    updated_at: '',
-  };
-  const fullName = data?.profile.full_name || (user?.email ?? '').split('@')[0];
+  const state =
+    data?.state ?? {
+      user_id: 'demo',
+      xp: identity.plan === 'free' ? 320 : 2340,
+      level_index: identity.plan === 'free' ? 1 : 3,
+      streak_current: identity.plan === 'free' ? 2 : 12,
+      streak_best: identity.plan === 'free' ? 2 : 41,
+      lives: identity.plan === 'free' ? 3 : 99,
+      lives_refilled_at: null,
+      freeze_tokens: 1,
+      last_active_day: null,
+      updated_at: '',
+    };
+
+  const fullName = data?.profile.full_name || identity.fullName;
 
   const today = new Date();
   const last7 = Array.from({ length: 7 }).map((_, i) => {
@@ -85,10 +94,12 @@ export default async function DashboardPage({ params }: { params: { locale: stri
   const minutes = data ? last7.map((d) => minutesByDay.get(d) ?? 0) : DEMO_ACTIVITY;
   const activity = buildActivityForLocale(params.locale === 'fr' ? 'fr' : 'en', minutes);
 
-  const doneSlugs = new Set((data?.progress ?? []).filter((p) => p.status === 'done').map((p) => p.lesson_slug));
+  const doneSlugs = new Set(
+    (data?.progress ?? []).filter((p) => p.status === 'done').map((p) => p.lesson_slug),
+  );
   const map = (params.locale === 'fr' ? DEMO_MAP_FR : DEMO_MAP_EN).map((node, i) => {
     if (!data) return node;
-    const slug = node.title; // until lesson slugs are wired
+    const slug = node.title;
     const done = doneSlugs.has(slug);
     const isCurrent = !done && i === doneSlugs.size;
     return {
@@ -98,15 +109,23 @@ export default async function DashboardPage({ params }: { params: { locale: stri
   });
 
   const xpThreshold = Math.max(state.xp + 1, (state.level_index + 1) * 1000);
+  const checkoutFlash = searchParams.checkout;
 
   return (
     <AppShell dict={dict} locale={params.locale}>
       <section className="border-b border-line">
         <Container as="div" className="py-20 md:py-24">
-          {user && !user.email_confirmed_at && user.email ? (
+          <DemoBanner
+            locale={params.locale}
+            source={identity.source}
+            plan={identity.plan}
+            checkout={checkoutFlash ?? null}
+          />
+
+          {identity.source === 'supabase' && !identity.emailConfirmed ? (
             <div className="mb-8">
               <VerifyBanner
-                email={user.email}
+                email={identity.email}
                 title={dict.verify.title}
                 body={dict.verify.body}
                 cta={dict.verify.cta}
@@ -116,6 +135,7 @@ export default async function DashboardPage({ params }: { params: { locale: stri
               />
             </div>
           ) : null}
+
           <Eyebrow>{t.eyebrow}</Eyebrow>
           <h1 className="mt-6 font-display text-display-lg font-medium tracking-tight text-balance text-ink">
             {fullName ? `${t.greeting.replace(/\.$/, '')}, ${fullName}.` : t.greeting}

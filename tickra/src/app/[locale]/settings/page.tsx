@@ -13,6 +13,7 @@ import { DataExport } from '@/components/settings/DataExport';
 import { Mfa } from '@/components/settings/Mfa';
 import { updateProfile } from './actions';
 import type { Profile, Subscription } from '@/lib/supabase/types';
+import { getIdentity } from '@/lib/demo/identity';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,23 +30,47 @@ export default async function SettingsPage({ params, searchParams }: Props) {
   const dict = await getDictionary(params.locale);
   const t = dict.settings;
 
-  if (!hasSupabaseEnv()) {
+  const identity = await getIdentity();
+  if (!identity) {
     redirect(`/${params.locale}/signin?next=${encodeURIComponent(`/${params.locale}/settings`)}`);
   }
 
-  const supabase = createSupabaseServerClient();
-  const { data: userData } = await supabase.auth.getUser();
-  const user = userData.user;
-  if (!user) {
-    redirect(`/${params.locale}/signin?next=${encodeURIComponent(`/${params.locale}/settings`)}`);
-  }
+  let profile: Profile | null = null;
+  let subscription: Subscription | null = null;
+  let user: { email: string | null; id: string } = { email: identity.email, id: 'demo' };
 
-  const [{ data: profileRow }, { data: subRow }] = await Promise.all([
-    supabase.from('profiles').select('*').eq('id', user.id).single(),
-    supabase.from('subscriptions').select('*').eq('user_id', user.id).single(),
-  ]);
-  const profile = profileRow as Profile | null;
-  const subscription = subRow as Subscription | null;
+  if (hasSupabaseEnv() && identity.source === 'supabase') {
+    const supabase = createSupabaseServerClient();
+    const { data: userData } = await supabase.auth.getUser();
+    if (userData.user) {
+      user = { email: userData.user.email ?? null, id: userData.user.id };
+      const [{ data: profileRow }, { data: subRow }] = await Promise.all([
+        supabase.from('profiles').select('*').eq('id', userData.user.id).single(),
+        supabase.from('subscriptions').select('*').eq('user_id', userData.user.id).single(),
+      ]);
+      profile = profileRow as Profile | null;
+      subscription = subRow as Subscription | null;
+    }
+  } else {
+    profile = {
+      id: 'demo',
+      full_name: identity.fullName,
+      locale: params.locale === 'fr' ? 'fr' : 'en',
+      level: 'novice',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    subscription = {
+      user_id: 'demo',
+      plan: identity.plan,
+      stripe_customer_id: null,
+      stripe_subscription_id: null,
+      status: identity.plan === 'free' ? 'free' : 'active',
+      current_period_end: null,
+      cancel_at_period_end: false,
+      updated_at: new Date().toISOString(),
+    };
+  }
 
   const plan = (subscription?.plan ?? 'free') as keyof typeof PLAN_COPY;
   const planLabel = PLAN_COPY[plan][params.locale === 'fr' ? 'fr' : 'en'];

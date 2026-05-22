@@ -7,6 +7,7 @@ import { Eyebrow } from '@/components/ui/Eyebrow';
 import { createSupabaseServerClient, hasSupabaseEnv } from '@/lib/supabase/server';
 import { ensureReferralCode } from './actions';
 import { ReferShare } from '@/components/refer/ReferShare';
+import { getIdentity } from '@/lib/demo/identity';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,19 +17,31 @@ export default async function ReferPage({ params }: { params: { locale: string }
   const t = dict.refer;
   const locale = params.locale;
 
-  if (!hasSupabaseEnv()) {
+  const identity = await getIdentity();
+  if (!identity) {
     redirect(`/${locale}/signin?next=${encodeURIComponent(`/${locale}/refer`)}`);
   }
 
-  const supabase = createSupabaseServerClient();
-  const { data: userData } = await supabase.auth.getUser();
-  if (!userData.user) {
-    redirect(`/${locale}/signin?next=${encodeURIComponent(`/${locale}/refer`)}`);
+  let code = 'TICKRADEMO';
+  let uses = 0;
+  if (hasSupabaseEnv() && identity.source === 'supabase') {
+    const supabase = createSupabaseServerClient();
+    const { data: userData } = await supabase.auth.getUser();
+    if (userData.user) {
+      const result = await ensureReferralCode(locale);
+      if (result.ok) {
+        code = result.code;
+        uses = result.uses;
+      }
+    }
+  } else {
+    // Demo: deterministic code based on email so it stays stable per session.
+    code = identity.email
+      .replace(/[^a-z0-9]/gi, '')
+      .toUpperCase()
+      .slice(0, 8)
+      .padEnd(8, 'X');
   }
-
-  const result = await ensureReferralCode(locale);
-  const code = result.ok ? result.code : '—';
-  const uses = result.ok ? result.uses : 0;
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'https://tickra.com';
   const link = `${siteUrl}/${locale}/signup?ref=${code}`;
 

@@ -8,6 +8,7 @@ import { Eyebrow } from '@/components/ui/Eyebrow';
 import { createSupabaseServerClient, hasSupabaseEnv } from '@/lib/supabase/server';
 import { BADGES } from '@/lib/achievements';
 import { cn } from '@/lib/cn';
+import { getIdentity } from '@/lib/demo/identity';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,25 +18,34 @@ export default async function AchievementsPage({ params }: { params: { locale: s
   const t = dict.achievements;
   const locale = params.locale as Locale;
 
-  if (!hasSupabaseEnv()) {
+  const identity = await getIdentity();
+  if (!identity) {
     redirect(`/${locale}/signin?next=${encodeURIComponent(`/${locale}/achievements`)}`);
   }
 
-  const supabase = createSupabaseServerClient();
-  const { data: userData } = await supabase.auth.getUser();
-  const user = userData.user;
-  if (!user) {
-    redirect(`/${locale}/signin?next=${encodeURIComponent(`/${locale}/achievements`)}`);
+  let rows: { badge_id: string; unlocked_at: string }[] = [];
+  if (hasSupabaseEnv() && identity.source === 'supabase') {
+    const supabase = createSupabaseServerClient();
+    const { data: userData } = await supabase.auth.getUser();
+    const user = userData.user;
+    if (user) {
+      const { data } = await supabase
+        .from('achievements')
+        .select('badge_id, unlocked_at')
+        .eq('user_id', user.id);
+      rows = (data ?? []) as { badge_id: string; unlocked_at: string }[];
+    }
+  } else if (identity.source === 'demo') {
+    // Demo: unlock first-candle by default, plus thousand-xp / level-three for paid plans.
+    const now = new Date().toISOString();
+    rows.push({ badge_id: 'first-candle', unlocked_at: now });
+    if (identity.plan === 'pro' || identity.plan === 'lifetime') {
+      rows.push({ badge_id: 'thousand-xp', unlocked_at: now });
+      rows.push({ badge_id: 'level-three', unlocked_at: now });
+    }
   }
 
-  const { data: rows } = await supabase
-    .from('achievements')
-    .select('badge_id, unlocked_at')
-    .eq('user_id', user.id);
-
-  const unlocked = new Map<string, string>(
-    (rows ?? []).map((r) => [r.badge_id as string, r.unlocked_at as string]),
-  );
+  const unlocked = new Map<string, string>(rows.map((r) => [r.badge_id, r.unlocked_at]));
 
   const unlockedCount = unlocked.size;
   const total = BADGES.length;
