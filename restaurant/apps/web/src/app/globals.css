@@ -1,0 +1,82 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: light;
+    --font-display: 'Georgia', 'Cormorant Garamond', 'Playfair Display', serif;
+    --font-body: 'Inter', 'system-ui', -apple-system, 'Segoe UI', 'Roboto', sans-serif;
+  }
+
+  html {
+    @apply scroll-smooth;
+    font-family: var(--font-body);
+  }
+
+  body {
+    @apply bg-cream-100 text-charcoal-900 antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+
+  h1, h2, h3, h4 {
+    @apply font-display tracking-tight;
+  }
+
+  ::selection {
+    @apply bg-brand-500 text-cream-50;
+  }
+}
+
+@layer components {
+  .container-page {
+    @apply mx-auto w-full max-w-7xl px-4 sm:px-6 lg:px-8;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-full px-6 py-3 text-sm font-semibold transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-brand-500 text-cream-50 shadow-glow hover:bg-brand-600 hover:shadow-lg active:scale-[0.98] focus-visible:ring-brand-300;
+  }
+  .btn-accent {
+    @apply btn bg-accent-400 text-charcoal-900 shadow-card hover:bg-accent-500 hover:shadow-md active:scale-[0.98] focus-visible:ring-accent-300;
+  }
+  .btn-ghost {
+    @apply btn bg-transparent text-charcoal-900 hover:bg-cream-200 focus-visible:ring-charcoal-300;
+  }
+  .btn-outline {
+    @apply btn border border-charcoal-900/15 bg-cream-50 text-charcoal-900 hover:border-brand-500 hover:text-brand-500 focus-visible:ring-brand-300;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium;
+  }
+
+  .card {
+    @apply rounded-3xl bg-cream-50 shadow-card transition-all duration-300 hover:shadow-soft;
+  }
+
+  .field {
+    @apply w-full rounded-xl border border-charcoal-100 bg-cream-50 px-4 py-3 text-sm text-charcoal-900 placeholder-charcoal-300 transition focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100;
+  }
+
+  .label {
+    @apply mb-1.5 block text-xs font-semibold uppercase tracking-wide text-charcoal-500;
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .text-pretty {
+    text-wrap: pretty;
+  }
+  .bg-radial-spotlight {
+    background-image: radial-gradient(80% 60% at 50% 0%, rgba(244, 166, 35, 0.18), transparent 70%);
+  }
+  .bg-radial-burgundy {
+    background-image: radial-gradient(60% 50% at 50% 50%, rgba(200, 16, 46, 0.12), transparent 70%);
+  }
+}

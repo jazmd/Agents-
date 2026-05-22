@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "By Kebap",
+    "slug": "by-kebap",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "bykebap",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "backgroundColor": "#C8102E",
+      "resizeMode": "contain"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "de.bykebap.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#C8102E"
+      },
+      "package": "de.bykebap.app"
+    },
+    "plugins": ["expo-router"],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}

@@ -1,0 +1,157 @@
+{
+  "brand": {
+    "name": "By Kebap",
+    "tagline": "Gerçek döner deneyimi. Her gün taze."
+  },
+  "nav": {
+    "home": "Ana sayfa",
+    "menu": "Menü",
+    "about": "Hakkımızda",
+    "contact": "İletişim",
+    "cart": "Sepet",
+    "account": "Hesabım",
+    "login": "Giriş yap",
+    "register": "Kayıt ol",
+    "logout": "Çıkış yap",
+    "admin": "Yönetim"
+  },
+  "hero": {
+    "kicker": "Paderborn'dan taze",
+    "title": "Kömür ızgaradan doğrudan tabağınıza",
+    "subtitle": "Geleneksel döner şişinden sulu dana eti, incecik yufka ve ev yapımı soslar. Online sipariş — 30 dakikada teslim.",
+    "ctaOrder": "Hemen sipariş ver",
+    "ctaMenu": "Menüyü gör",
+    "stats": {
+      "rating": "Yıldız puanı",
+      "delivery": "Teslim süresi",
+      "orders": "Aylık sipariş"
+    }
+  },
+  "highlights": {
+    "fresh": {
+      "title": "Her gün taze",
+      "text": "Mutfağımızda her şey günlük taze hazırlanır."
+    },
+    "halal": {
+      "title": "%100 helal",
+      "text": "Güvenilir yerel tedarikçilerden sertifikalı helal et."
+    },
+    "fast": {
+      "title": "Hızlı teslimat",
+      "text": "30 dakika içinde evinize veya ofisinize."
+    }
+  },
+  "menu": {
+    "title": "Menümüz",
+    "subtitle": "Klasiklerden cesur yeniliklere — aradığınız her şey.",
+    "filter": {
+      "all": "Tümü",
+      "popular": "Popüler",
+      "spicy": "Acılı",
+      "vegetarian": "Vejetaryen",
+      "vegan": "Vegan"
+    },
+    "badge": {
+      "popular": "Popüler",
+      "spicy": "Acılı",
+      "vegetarian": "Vejetaryen",
+      "vegan": "Vegan"
+    },
+    "addToCart": "Sepete ekle",
+    "added": "Eklendi"
+  },
+  "cart": {
+    "title": "Sepetiniz",
+    "empty": "Sepetiniz boş.",
+    "emptyCta": "Menüye git",
+    "subtotal": "Ara toplam",
+    "delivery": "Teslimat",
+    "freeFrom": "20 €'dan itibaren ücretsiz",
+    "total": "Toplam",
+    "checkout": "Ödeme",
+    "remove": "Kaldır",
+    "quantity": "Adet"
+  },
+  "checkout": {
+    "title": "Siparişi tamamla",
+    "deliveryMethod": "Teslim şekli",
+    "delivery": "Teslimat",
+    "pickup": "Gel-al",
+    "deliveryNote": "~30 dk içinde teslim.",
+    "pickupNote": "~15 dk içinde hazır.",
+    "contact": "İletişim",
+    "name": "Ad",
+    "phone": "Telefon",
+    "email": "E-posta",
+    "address": "Teslimat adresi",
+    "street": "Sokak ve numara",
+    "zip": "Posta kodu",
+    "city": "Şehir",
+    "note": "Not",
+    "notePlaceholder": "Özel istekler, kapı zili, kat …",
+    "payment": "Ödeme",
+    "paymentCash": "Teslimatta nakit",
+    "paymentCard": "Teslimatta kart",
+    "submit": "Siparişi ver",
+    "success": "Siparişiniz için teşekkürler!",
+    "successText": "Siparişinizi aldık ve hazırlamaya başladık. Onay e-postanıza gönderildi."
+  },
+  "account": {
+    "title": "Hesabım",
+    "orders": "Siparişlerim",
+    "noOrders": "Henüz siparişiniz yok.",
+    "login": {
+      "title": "Giriş yap",
+      "email": "E-posta",
+      "password": "Şifre",
+      "submit": "Giriş yap",
+      "noAccount": "Hesabınız yok mu?",
+      "register": "Kayıt ol"
+    },
+    "register": {
+      "title": "Kayıt ol",
+      "name": "Ad",
+      "email": "E-posta",
+      "password": "Şifre",
+      "phone": "Telefon (isteğe bağlı)",
+      "submit": "Hesap oluştur",
+      "hasAccount": "Zaten hesabınız var mı?",
+      "login": "Giriş yap"
+    }
+  },
+  "admin": {
+    "title": "Yönetim paneli",
+    "stats": {
+      "today": "Bugün",
+      "orders": "Siparişler",
+      "revenue": "Ciro",
+      "avgOrder": "Ort. sipariş"
+    },
+    "orders": {
+      "title": "Siparişler",
+      "id": "ID",
+      "customer": "Müşteri",
+      "items": "Ürünler",
+      "total": "Toplam",
+      "status": "Durum",
+      "time": "Zaman"
+    },
+    "status": {
+      "pending": "Yeni",
+      "preparing": "Hazırlanıyor",
+      "ready": "Hazır",
+      "delivering": "Yolda",
+      "completed": "Tamamlandı",
+      "cancelled": "İptal"
+    }
+  },
+  "footer": {
+    "hours": "Çalışma saatleri",
+    "monThu": "Pzt–Per: 11:00 – 23:00",
+    "friSat": "Cum–Cmt: 11:00 – 02:00",
+    "sun": "Paz: 12:00 – 23:00",
+    "address": "Adres",
+    "contact": "İletişim",
+    "copyright": "Tüm hakları saklıdır."
+  }
+}
