@@ -641,19 +641,21 @@ export class HeadlessWorkerExecutor extends EventEmitter {
     }
 
     try {
+      const timeoutMs = parseInt(process.env.CLAUDE_CODE_AVAILABILITY_TIMEOUT_MS || '30000', 10);
       const output = execSync('claude --version', {
         encoding: 'utf-8',
         stdio: 'pipe',
-        timeout: 5000,
+        timeout: Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 30000,
         windowsHide: true, // Prevent phantom console windows on Windows
       });
       this.claudeCodeAvailable = true;
       this.claudeCodeVersion = output.trim();
       this.emit('status', { available: true, version: this.claudeCodeVersion });
       return true;
-    } catch {
+    } catch (error) {
       this.claudeCodeAvailable = false;
-      this.emit('status', { available: false });
+      const reason = error instanceof Error ? error.message : String(error);
+      this.emit('status', { available: false, reason });
       return false;
     }
   }
