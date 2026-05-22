@@ -528,7 +528,21 @@ export class WorkerDaemon extends EventEmitter {
     const freeMem = os.freemem();
     const freePercent = (freeMem / totalMem) * 100;
 
-    if (cpuLoad > this.config.resourceThresholds.maxCpuLoad) {
+    // WSL2 reports inflated load averages (200-400 on 4-CPU systems) because Windows-side
+    // process counting is mapped into /proc/loadavg. Skip the CPU gate when running on WSL2
+    // to avoid permanently deferring every worker; honour the gate on native Linux / macOS.
+    const isWsl2 = (() => {
+      if (process.env.WSL_DISTRO_NAME) return true;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const fs = require('fs');
+        const release = fs.readFileSync('/proc/sys/kernel/osrelease', 'utf-8');
+        return /microsoft/i.test(release);
+      } catch {
+        return false;
+      }
+    })();
+    if (!isWsl2 && cpuLoad > this.config.resourceThresholds.maxCpuLoad) {
       return { allowed: false, reason: `CPU load too high: ${cpuLoad.toFixed(2)}` };
     }
     if (freePercent < this.config.resourceThresholds.minFreeMemoryPercent) {
