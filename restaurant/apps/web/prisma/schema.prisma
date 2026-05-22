@@ -1,4 +1,4 @@
-// SQLite does not support enums — values are validated in application code.
+// Values validated in application code:
 // Role:          'CUSTOMER' | 'ADMIN'
 // OrderMethod:   'DELIVERY' | 'PICKUP'
 // OrderStatus:   'PENDING' | 'PREPARING' | 'READY' | 'DELIVERING' | 'COMPLETED' | 'CANCELLED'
@@ -9,7 +9,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
