@@ -5,6 +5,7 @@ import { Navbar } from '@/components/nav/Navbar';
 import { Hero } from '@/components/sections/Hero';
 import { Method } from '@/components/sections/Method';
 import { BentoFeatures } from '@/components/sections/BentoFeatures';
+import { Compare } from '@/components/sections/Compare';
 import { Metrics } from '@/components/sections/Metrics';
 import { Testimonials } from '@/components/sections/Testimonials';
 import { Pricing } from '@/components/sections/Pricing';
@@ -29,6 +30,7 @@ export default async function HomePage({ params }: { params: { locale: string } 
         <Hero dict={dict} locale={params.locale} />
         <Method dict={dict} />
         <BentoFeatures dict={dict} />
+        <Compare dict={dict} />
         <Metrics dict={dict} />
         <Testimonials dict={dict} />
         <Pricing dict={dict} locale={params.locale} />

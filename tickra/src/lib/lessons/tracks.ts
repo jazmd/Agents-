@@ -29,8 +29,17 @@ export const TRACKS: Track[] = [
     },
   },
   {
-    id: 'risk',
+    id: 'indicators',
     order: 4,
+    title: { en: 'Indicators', fr: 'Indicateurs' },
+    summary: {
+      en: 'Moving averages, RSI, MACD, Bollinger Bands — used with discipline.',
+      fr: 'Moyennes mobiles, RSI, MACD, bandes de Bollinger — avec discipline.',
+    },
+  },
+  {
+    id: 'risk',
+    order: 5,
     title: { en: 'Risk', fr: 'Risque' },
     summary: {
       en: 'Position sizing, stops, expectancy. The whole game.',
@@ -38,8 +47,35 @@ export const TRACKS: Track[] = [
     },
   },
   {
+    id: 'psychology',
+    order: 6,
+    title: { en: 'Psychology', fr: 'Psychologie' },
+    summary: {
+      en: 'FOMO, revenge, tilt, attention. The half of trading no one teaches.',
+      fr: 'FOMO, revanche, tilt, attention. La moitié du trading que personne n’enseigne.',
+    },
+  },
+  {
+    id: 'assets',
+    order: 7,
+    title: { en: 'Asset classes', fr: 'Classes d’actifs' },
+    summary: {
+      en: 'Forex, stocks, indices, commodities, crypto — what each demands.',
+      fr: 'Forex, actions, indices, matières premières, crypto — ce que chacune exige.',
+    },
+  },
+  {
+    id: 'strategy',
+    order: 8,
+    title: { en: 'Strategy', fr: 'Stratégie' },
+    summary: {
+      en: 'Mean reversion, momentum, breakouts. Building a system you can run.',
+      fr: 'Mean reversion, momentum, breakouts. Construire un système que vous pouvez tenir.',
+    },
+  },
+  {
     id: 'execution',
-    order: 5,
+    order: 9,
     title: { en: 'Execution', fr: 'Exécution' },
     summary: {
       en: 'Order types, broker mechanics, journaling the decision.',

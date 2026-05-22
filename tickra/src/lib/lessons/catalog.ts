@@ -1,10 +1,29 @@
-import type { Lesson, TrackId } from './types';
+import type { Lesson, LessonLevel, LessonTier, TrackId } from './types';
+
+type LessonInput = Omit<Lesson, 'level' | 'tier'> & Partial<Pick<Lesson, 'level' | 'tier'>>;
+
+function normalizeLesson(input: LessonInput, indexInArray: number): Lesson {
+  // Free tier: the first 10 lessons in declaration order are always free.
+  // Beyond that, paywalled lessons map to 'pro', the rest stay 'free'.
+  const inferredTier: LessonTier =
+    input.tier ?? (indexInArray < 10 ? 'free' : input.paywalled ? 'pro' : 'free');
+  // Level inference: 'novice' for the first 6 lessons of a track,
+  // 'intermediate' next 6, 'advanced' beyond.
+  const inferredLevel: LessonLevel =
+    input.level ?? (input.order <= 3 ? 'novice' : input.order <= 8 ? 'intermediate' : 'advanced');
+  return {
+    ...input,
+    level: inferredLevel,
+    tier: inferredTier,
+    paywalled: inferredTier !== 'free',
+  };
+}
 
 // ---------------------------------------------------------------------------
 // 12 lessons across 5 tracks. The first three are free.
 // Lesson "japanese-candles" mirrors the original Tickra demo lesson.
 // ---------------------------------------------------------------------------
-export const LESSONS: Lesson[] = [
+const RAW_LESSONS: LessonInput[] = [
   {
     slug: 'what-a-candle-says',
     track: 'foundations',
@@ -1076,7 +1095,235 @@ export const LESSONS: Lesson[] = [
       },
     ],
   },
+
+  // ==========================================================================
+  // INDICATORS — 6 lessons
+  // ==========================================================================
+  { slug: 'moving-averages', track: 'indicators', order: 1, duration: 10, paywalled: true,
+    title: { en: 'Moving averages.', fr: 'Moyennes mobiles.' },
+    eyebrow: { en: 'Lesson 81 · 10 min', fr: 'Leçon 81 · 10 min' },
+    breadcrumb: { en: 'Curriculum / Track 04 · Indicators', fr: 'Parcours / Piste 04 · Indicateurs' },
+    intro: { en: 'The simplest indicator: average price over N periods. Useful as a trend filter, dangerous as a signal.', fr: "L'indicateur le plus simple : le prix moyen sur N périodes. Utile comme filtre de tendance, dangereux comme signal." },
+    blocks: [
+      { kind: 'list', ordered: false, items: { en: ['Above the 200-day MA = bull market regime.', 'Below = bear market.', 'Slope matters more than crossings.'], fr: ['Au-dessus de la MM200 = régime haussier.', 'En-dessous = baissier.', 'La pente compte plus que les croisements.'] } },
+      { kind: 'quiz', question: { en: 'A flat 200-day MA suggests…', fr: 'Une MM200 plate suggère…' }, choices: { en: ['A strong trend', 'A range or transition', 'An imminent crash', 'A buy signal'], fr: ['Une tendance forte', 'Un range ou une transition', 'Un krach imminent', 'Un signal d’achat'] }, correct: 1, success: { en: 'Right. Flat MA = no directional bias. Don’t trend-trade.', fr: 'Exact. MM plate = pas de biais directionnel. Ne tradez pas la tendance.' }, retry: { en: 'Flat = no direction. That’s the whole point.', fr: 'Plate = pas de direction. C’est le point.' } },
+    ],
+  },
+  { slug: 'rsi-explained', track: 'indicators', order: 2, duration: 11, paywalled: true,
+    title: { en: 'RSI, properly.', fr: 'Le RSI, correctement.' },
+    eyebrow: { en: 'Lesson 82 · 11 min', fr: 'Leçon 82 · 11 min' },
+    breadcrumb: { en: 'Curriculum / Track 04 · Indicators', fr: 'Parcours / Piste 04 · Indicateurs' },
+    intro: { en: 'Relative Strength Index measures the speed of price changes from 0 to 100. The textbook says 70 overbought, 30 oversold. The textbook lies in strong trends.', fr: 'Le Relative Strength Index mesure la vitesse des changements de prix de 0 à 100. Le manuel dit 70 surachat, 30 survente. Le manuel ment en tendance forte.' },
+    blocks: [
+      { kind: 'callout', tone: 'warn', title: { en: 'Trend trap', fr: 'Piège de tendance' }, text: { en: 'In a strong uptrend, RSI stays above 70 for weeks. Selling 70 is selling strength.', fr: 'En tendance haussière forte, le RSI reste au-dessus de 70 des semaines. Vendre 70 = vendre la force.' } },
+      { kind: 'quiz', question: { en: 'In a confirmed downtrend, an RSI bounce to 60 is best read as…', fr: 'En tendance baissière confirmée, un rebond du RSI à 60 se lit comme…' }, choices: { en: ['A buy signal', 'A short-entry zone', 'A reversal warning', 'Neutral'], fr: ['Un signal d’achat', 'Une zone d’entrée short', 'Une alerte de retournement', 'Neutre'] }, correct: 1, success: { en: 'Right. In a downtrend, RSI rejection from 60 is a classic short setup.', fr: 'Exact. En tendance baissière, un rejet RSI à 60 est un setup short classique.' }, retry: { en: 'Trade with the trend. Bounces in a downtrend favour shorts.', fr: 'Tradez la tendance. Les rebonds en baissier favorisent les shorts.' } },
+    ],
+  },
+  { slug: 'macd-deeper', track: 'indicators', order: 3, duration: 12, paywalled: true,
+    title: { en: 'MACD, deeper.', fr: 'Le MACD, plus profond.' },
+    eyebrow: { en: 'Lesson 83 · 12 min', fr: 'Leçon 83 · 12 min' },
+    breadcrumb: { en: 'Curriculum / Track 04 · Indicators', fr: 'Parcours / Piste 04 · Indicateurs' },
+    intro: { en: 'MACD is the difference between two moving averages, smoothed. Read the divergence, not the crossover.', fr: 'Le MACD est la différence entre deux moyennes mobiles, lissée. Lisez la divergence, pas le croisement.' },
+    blocks: [
+      { kind: 'paragraph', text: { en: 'Bullish divergence: price prints a lower low while MACD prints a higher low. The thrust is leaving the move.', fr: 'Divergence haussière : le prix imprime un plus bas plus bas alors que le MACD imprime un plus bas plus haut. La poussée quitte le mouvement.' } },
+    ],
+  },
+  { slug: 'bollinger-bands', track: 'indicators', order: 4, duration: 10, paywalled: true,
+    title: { en: 'Bollinger bands.', fr: 'Bandes de Bollinger.' },
+    eyebrow: { en: 'Lesson 84 · 10 min', fr: 'Leçon 84 · 10 min' },
+    breadcrumb: { en: 'Curriculum / Track 04 · Indicators', fr: 'Parcours / Piste 04 · Indicateurs' },
+    intro: { en: 'A 20-period moving average with bands at ±2 standard deviations. Price touching the upper band is not overbought — it is volatile.', fr: 'Une MM 20 périodes avec des bandes à ±2 écarts-types. Toucher la bande haute n’est pas du surachat — c’est de la volatilité.' },
+    blocks: [
+      { kind: 'list', ordered: false, items: { en: ['Squeeze (bands narrowing) = breakout imminent.', 'Walking the band = strong trend, do not fade.', 'Mean reversion only when bands are wide.'], fr: ['Squeeze (bandes qui se resserrent) = cassure imminente.', 'Marcher sur la bande = tendance forte, ne pas contrer.', 'Mean reversion seulement quand les bandes sont larges.'] } },
+    ],
+  },
+  { slug: 'volume-analysis', track: 'indicators', order: 5, duration: 11, paywalled: true,
+    title: { en: 'Volume analysis.', fr: 'Analyse du volume.' },
+    eyebrow: { en: 'Lesson 85 · 11 min', fr: 'Leçon 85 · 11 min' },
+    breadcrumb: { en: 'Curriculum / Track 04 · Indicators', fr: 'Parcours / Piste 04 · Indicateurs' },
+    intro: { en: 'Volume confirms or denies what price tells you. A breakout on weak volume is a fake.', fr: 'Le volume confirme ou dément ce que le prix raconte. Une cassure sur faible volume est fausse.' },
+    blocks: [
+      { kind: 'quiz', question: { en: 'A breakout to a new high on volume 3× the average suggests…', fr: 'Une cassure vers un nouveau plus haut avec un volume 3× la moyenne suggère…' }, choices: { en: ['A trap', 'A genuine breakout', 'Indecision', 'A pullback ahead'], fr: ['Un piège', 'Une vraie cassure', 'Indécision', 'Un repli à venir'] }, correct: 1, success: { en: 'Right. High volume + new high = institutional participation, real breakout.', fr: 'Exact. Volume élevé + nouveau plus haut = participation institutionnelle, vraie cassure.' }, retry: { en: 'High volume on a directional move confirms it. That is the rule.', fr: 'Volume élevé sur un mouvement directionnel le confirme. C’est la règle.' } },
+    ],
+  },
+  { slug: 'fibonacci-retracement', track: 'indicators', order: 6, duration: 12, paywalled: true,
+    title: { en: 'Fibonacci retracement.', fr: 'Retracement de Fibonacci.' },
+    eyebrow: { en: 'Lesson 86 · 12 min', fr: 'Leçon 86 · 12 min' },
+    breadcrumb: { en: 'Curriculum / Track 04 · Indicators', fr: 'Parcours / Piste 04 · Indicateurs' },
+    intro: { en: '0.382, 0.5, 0.618. Three levels where pullbacks tend to end. Not magic — convergence with structure makes them work.', fr: '0,382, 0,5, 0,618. Trois niveaux où les pullbacks tendent à se terminer. Pas magique — la convergence avec la structure les fait fonctionner.' },
+    blocks: [],
+  },
+
+  // ==========================================================================
+  // PSYCHOLOGY — 6 lessons
+  // ==========================================================================
+  { slug: 'fomo', track: 'psychology', order: 1, duration: 9, paywalled: true,
+    title: { en: 'FOMO — naming the enemy.', fr: 'FOMO — nommer l’ennemi.' },
+    eyebrow: { en: 'Lesson 91 · 9 min', fr: 'Leçon 91 · 9 min' },
+    breadcrumb: { en: 'Curriculum / Track 06 · Psychology', fr: 'Parcours / Piste 06 · Psychologie' },
+    intro: { en: 'Fear of missing out is the most expensive emotion in trading. Buying because price moves without you = buying tops.', fr: 'La peur de rater (FOMO) est l’émotion la plus chère en trading. Acheter parce que le prix monte sans vous = acheter des sommets.' },
+    blocks: [
+      { kind: 'callout', tone: 'warn', title: { en: 'Antidote', fr: 'Antidote' }, text: { en: 'If a trade was not in your plan an hour ago, it’s not your trade now.', fr: 'Si un trade n’était pas dans votre plan il y a une heure, ce n’est pas votre trade maintenant.' } },
+    ],
+  },
+  { slug: 'revenge-trading', track: 'psychology', order: 2, duration: 10, paywalled: true,
+    title: { en: 'Revenge trading.', fr: 'Trading de revanche.' },
+    eyebrow: { en: 'Lesson 92 · 10 min', fr: 'Leçon 92 · 10 min' },
+    breadcrumb: { en: 'Curriculum / Track 06 · Psychology', fr: 'Parcours / Piste 06 · Psychologie' },
+    intro: { en: 'Doubling down after a loss to "make it back" is how blowups happen. The market does not owe you anything.', fr: 'Doubler la mise après une perte pour « se refaire » est ainsi que les comptes sautent. Le marché ne vous doit rien.' },
+    blocks: [],
+  },
+  { slug: 'tilt', track: 'psychology', order: 3, duration: 9, paywalled: true,
+    title: { en: 'Recognising tilt.', fr: 'Reconnaître le tilt.' },
+    eyebrow: { en: 'Lesson 93 · 9 min', fr: 'Leçon 93 · 9 min' },
+    breadcrumb: { en: 'Curriculum / Track 06 · Psychology', fr: 'Parcours / Piste 06 · Psychologie' },
+    intro: { en: 'Tilt is when you keep trading after the day is decided. Pros walk away. Amateurs press.', fr: 'Le tilt, c’est continuer à trader après que la journée est jouée. Les pros s’arrêtent. Les amateurs insistent.' },
+    blocks: [
+      { kind: 'quiz', question: { en: 'You hit your daily loss limit. The next action is…', fr: 'Vous touchez votre limite de perte journalière. L’action suivante est…' }, choices: { en: ['One more trade to even out', 'Reduce size and continue', 'Close everything, stop trading today', 'Switch to a different market'], fr: ['Un trade de plus pour égaliser', 'Réduire la taille et continuer', 'Tout fermer, arrêter pour aujourd’hui', 'Changer de marché'] }, correct: 2, success: { en: 'Right. The limit exists for a reason. Respect it.', fr: 'Exact. La limite existe pour une raison. Respectez-la.' }, retry: { en: 'The discipline IS the strategy.', fr: 'La discipline EST la stratégie.' } },
+    ],
+  },
+  { slug: 'cognitive-biases', track: 'psychology', order: 4, duration: 11, paywalled: true,
+    title: { en: 'Cognitive biases.', fr: 'Biais cognitifs.' },
+    eyebrow: { en: 'Lesson 94 · 11 min', fr: 'Leçon 94 · 11 min' },
+    breadcrumb: { en: 'Curriculum / Track 06 · Psychology', fr: 'Parcours / Piste 06 · Psychologie' },
+    intro: { en: 'Confirmation bias, anchoring, recency. Three biases that quietly drain accounts.', fr: 'Biais de confirmation, ancrage, récence. Trois biais qui vident les comptes en silence.' },
+    blocks: [],
+  },
+  { slug: 'routines', track: 'psychology', order: 5, duration: 10, paywalled: true,
+    title: { en: 'Pre-trade routine.', fr: 'Routine pré-trade.' },
+    eyebrow: { en: 'Lesson 95 · 10 min', fr: 'Leçon 95 · 10 min' },
+    breadcrumb: { en: 'Curriculum / Track 06 · Psychology', fr: 'Parcours / Piste 06 · Psychologie' },
+    intro: { en: 'Same five-minute ritual before every session. Removes emotion, surfaces context.', fr: 'Même rituel de cinq minutes avant chaque séance. Supprime l’émotion, fait remonter le contexte.' },
+    blocks: [],
+  },
+  { slug: 'attention-management', track: 'psychology', order: 6, duration: 11, paywalled: true,
+    title: { en: 'Attention as currency.', fr: 'L’attention comme monnaie.' },
+    eyebrow: { en: 'Lesson 96 · 11 min', fr: 'Leçon 96 · 11 min' },
+    breadcrumb: { en: 'Curriculum / Track 06 · Psychology', fr: 'Parcours / Piste 06 · Psychologie' },
+    intro: { en: 'Six hours staring at a 1-minute chart is not edge. It is exhaustion. Choose your screen time like you choose your size.', fr: 'Six heures à fixer un graphique 1 minute n’est pas un edge. C’est de l’épuisement. Choisissez votre temps d’écran comme votre taille.' },
+    blocks: [],
+  },
+
+  // ==========================================================================
+  // ASSETS — 5 lessons
+  // ==========================================================================
+  { slug: 'forex-basics', track: 'assets', order: 1, duration: 11, paywalled: true,
+    title: { en: 'Forex, basics.', fr: 'Forex, les bases.' },
+    eyebrow: { en: 'Lesson 101 · 11 min', fr: 'Leçon 101 · 11 min' },
+    breadcrumb: { en: 'Curriculum / Track 07 · Asset classes', fr: 'Parcours / Piste 07 · Classes d’actifs' },
+    intro: { en: 'Major pairs trade 24/5 with deep liquidity. Spreads tight, leverage abundant, mistakes still expensive.', fr: 'Les paires majeures se tradent 24/5 avec une liquidité profonde. Spreads serrés, levier abondant, erreurs toujours coûteuses.' },
+    blocks: [],
+  },
+  { slug: 'stock-trading', track: 'assets', order: 2, duration: 12, paywalled: true,
+    title: { en: 'Stocks.', fr: 'Actions.' },
+    eyebrow: { en: 'Lesson 102 · 12 min', fr: 'Leçon 102 · 12 min' },
+    breadcrumb: { en: 'Curriculum / Track 07 · Asset classes', fr: 'Parcours / Piste 07 · Classes d’actifs' },
+    intro: { en: 'Single names. Earnings drive multi-week regimes. Sector rotation moves weeks ahead of price.', fr: 'Titres individuels. Les résultats trimestriels conduisent les régimes pluri-semaines. La rotation sectorielle anticipe le prix.' },
+    blocks: [],
+  },
+  { slug: 'crypto-trading', track: 'assets', order: 3, duration: 11, paywalled: true,
+    title: { en: 'Crypto.', fr: 'Crypto.' },
+    eyebrow: { en: 'Lesson 103 · 11 min', fr: 'Leçon 103 · 11 min' },
+    breadcrumb: { en: 'Curriculum / Track 07 · Asset classes', fr: 'Parcours / Piste 07 · Classes d’actifs' },
+    intro: { en: '24/7 markets, retail-heavy flow, occasional manipulation. Risk management matters more here, not less.', fr: 'Marchés 24/7, flux dominé par le retail, manipulation occasionnelle. La gestion du risque compte plus ici, pas moins.' },
+    blocks: [
+      { kind: 'callout', tone: 'warn', title: { en: 'Liquidations', fr: 'Liquidations' }, text: { en: 'Leveraged crypto positions auto-liquidate when margin runs out. Use isolated margin, not cross.', fr: 'Les positions crypto à levier sont liquidées automatiquement quand la marge s’épuise. Utilisez la marge isolée, pas croisée.' } },
+    ],
+  },
+  { slug: 'indices-trading', track: 'assets', order: 4, duration: 10, paywalled: true,
+    title: { en: 'Indices.', fr: 'Indices.' },
+    eyebrow: { en: 'Lesson 104 · 10 min', fr: 'Leçon 104 · 10 min' },
+    breadcrumb: { en: 'Curriculum / Track 07 · Asset classes', fr: 'Parcours / Piste 07 · Classes d’actifs' },
+    intro: { en: 'S&P, Nasdaq, DAX, FTSE. Cleaner trends, smoother flow. The starter market for many pros.', fr: 'S&P, Nasdaq, DAX, FTSE. Tendances plus propres, flux plus lisse. Le marché d’entrée pour beaucoup de pros.' },
+    blocks: [],
+  },
+  { slug: 'commodities-trading', track: 'assets', order: 5, duration: 11, paywalled: true,
+    title: { en: 'Commodities.', fr: 'Matières premières.' },
+    eyebrow: { en: 'Lesson 105 · 11 min', fr: 'Leçon 105 · 11 min' },
+    breadcrumb: { en: 'Curriculum / Track 07 · Asset classes', fr: 'Parcours / Piste 07 · Classes d’actifs' },
+    intro: { en: 'Gold, oil, copper. Driven by macro flows, geopolitics, and inventory cycles. Slow but explosive.', fr: 'Or, pétrole, cuivre. Conduits par les flux macro, la géopolitique, et les cycles de stocks. Lents mais explosifs.' },
+    blocks: [],
+  },
+
+  // ==========================================================================
+  // STRATEGY — 5 lessons
+  // ==========================================================================
+  { slug: 'mean-reversion', track: 'strategy', order: 1, duration: 12, paywalled: true,
+    title: { en: 'Mean reversion.', fr: 'Mean reversion.' },
+    eyebrow: { en: 'Lesson 111 · 12 min', fr: 'Leçon 111 · 12 min' },
+    breadcrumb: { en: 'Curriculum / Track 08 · Strategy', fr: 'Parcours / Piste 08 · Stratégie' },
+    intro: { en: 'Buy weakness, sell strength — works in ranges, dies in trends. Knowing the regime is the whole job.', fr: 'Acheter la faiblesse, vendre la force — marche en range, meurt en tendance. Reconnaître le régime est tout le travail.' },
+    blocks: [],
+  },
+  { slug: 'breakout-strategy', track: 'strategy', order: 2, duration: 11, paywalled: true,
+    title: { en: 'Breakout strategy.', fr: 'Stratégie de cassure.' },
+    eyebrow: { en: 'Lesson 112 · 11 min', fr: 'Leçon 112 · 11 min' },
+    breadcrumb: { en: 'Curriculum / Track 08 · Strategy', fr: 'Parcours / Piste 08 · Stratégie' },
+    intro: { en: 'Buy strength, sell weakness — opposite of mean reversion. Win rate lower, average winner larger.', fr: 'Acheter la force, vendre la faiblesse — opposé de la mean reversion. Taux de réussite plus bas, gain moyen plus grand.' },
+    blocks: [],
+  },
+  { slug: 'momentum-strategy', track: 'strategy', order: 3, duration: 12, paywalled: true,
+    title: { en: 'Momentum.', fr: 'Momentum.' },
+    eyebrow: { en: 'Lesson 113 · 12 min', fr: 'Leçon 113 · 12 min' },
+    breadcrumb: { en: 'Curriculum / Track 08 · Strategy', fr: 'Parcours / Piste 08 · Stratégie' },
+    intro: { en: 'What is moving keeps moving for longer than people expect. Ride it, don’t fade it.', fr: 'Ce qui bouge continue à bouger plus longtemps qu’on ne le pense. Suivez, ne contrez pas.' },
+    blocks: [],
+  },
+  { slug: 'backtest-101', track: 'strategy', order: 4, duration: 14, paywalled: true,
+    title: { en: 'Backtesting, properly.', fr: 'Backtester correctement.' },
+    eyebrow: { en: 'Lesson 114 · 14 min', fr: 'Leçon 114 · 14 min' },
+    breadcrumb: { en: 'Curriculum / Track 08 · Strategy', fr: 'Parcours / Piste 08 · Stratégie' },
+    intro: { en: 'A backtest with 30 trades proves nothing. You need 200+ across regimes. Slippage, commission, look-ahead bias — all the gotchas.', fr: 'Un backtest sur 30 trades ne prouve rien. Il en faut 200+ traversant plusieurs régimes. Slippage, commission, biais de look-ahead — tous les pièges.' },
+    blocks: [
+      { kind: 'list', ordered: true, items: { en: ['200+ trades minimum.', 'Three different volatility regimes.', 'Realistic costs subtracted.', 'No look-ahead in the rules.'], fr: ['200+ trades minimum.', 'Trois régimes de volatilité différents.', 'Coûts réalistes soustraits.', 'Pas de look-ahead dans les règles.'] } },
+    ],
+  },
+  { slug: 'walk-forward', track: 'strategy', order: 5, duration: 13, paywalled: true,
+    title: { en: 'Walk-forward analysis.', fr: 'Analyse walk-forward.' },
+    eyebrow: { en: 'Lesson 115 · 13 min', fr: 'Leçon 115 · 13 min' },
+    breadcrumb: { en: 'Curriculum / Track 08 · Strategy', fr: 'Parcours / Piste 08 · Stratégie' },
+    intro: { en: 'Optimise on data A, validate on unseen data B, walk forward in time. The only honest way to test a system.', fr: 'Optimiser sur les données A, valider sur les données B inconnues, avancer dans le temps. La seule façon honnête de tester un système.' },
+    blocks: [],
+  },
+
+  // ==========================================================================
+  // FOUNDATIONS — extra lessons
+  // ==========================================================================
+  { slug: 'demo-account', track: 'foundations', order: 7, duration: 8, paywalled: true,
+    title: { en: 'Demo accounts.', fr: 'Comptes démo.' },
+    eyebrow: { en: 'Lesson 07 · 8 min', fr: 'Leçon 07 · 8 min' },
+    breadcrumb: { en: 'Curriculum / Track 01 · Foundations', fr: 'Parcours / Piste 01 · Fondations' },
+    intro: { en: 'Useful for mechanics, dangerous for psychology. You behave differently when nothing is at stake.', fr: 'Utiles pour la mécanique, dangereux pour la psychologie. Vous agissez différemment sans argent en jeu.' },
+    blocks: [],
+  },
+  { slug: 'choosing-a-broker', track: 'foundations', order: 8, duration: 12, paywalled: true,
+    title: { en: 'Choosing a broker.', fr: 'Choisir un broker.' },
+    eyebrow: { en: 'Lesson 08 · 12 min', fr: 'Leçon 08 · 12 min' },
+    breadcrumb: { en: 'Curriculum / Track 01 · Foundations', fr: 'Parcours / Piste 01 · Fondations' },
+    intro: { en: 'Regulation matters most. Then spreads, execution, withdrawal speed. Glossy interface is the last criterion.', fr: 'La régulation compte d’abord. Puis spreads, exécution, vitesse de retrait. L’interface jolie est le dernier critère.' },
+    blocks: [
+      { kind: 'list', ordered: false, items: { en: ['Regulated by a tier-1 authority (FCA, SEC, AMF, ASIC, BaFin).', 'Segregated client funds.', 'Public spread + commission schedule.', 'Withdrawal SLA under 48 hours.'], fr: ['Régulé par une autorité tier-1 (FCA, SEC, AMF, ASIC, BaFin).', 'Fonds clients ségrégués.', 'Grille de spreads + commissions publique.', 'SLA de retrait sous 48 heures.'] } },
+    ],
+  },
+  { slug: 'reading-the-news', track: 'foundations', order: 9, duration: 11, paywalled: true,
+    title: { en: 'Reading the news.', fr: 'Lire l’actualité.' },
+    eyebrow: { en: 'Lesson 09 · 11 min', fr: 'Leçon 09 · 11 min' },
+    breadcrumb: { en: 'Curriculum / Track 01 · Foundations', fr: 'Parcours / Piste 01 · Fondations' },
+    intro: { en: 'Economic calendar, central bank dates, earnings. The events that move price more than any pattern.', fr: 'Calendrier économique, dates de banques centrales, résultats. Les événements qui bougent le prix plus que n’importe quelle figure.' },
+    blocks: [],
+  },
+  { slug: 'market-hours', track: 'foundations', order: 10, duration: 9, paywalled: true,
+    title: { en: 'Market hours.', fr: 'Heures de marché.' },
+    eyebrow: { en: 'Lesson 10 · 9 min', fr: 'Leçon 10 · 9 min' },
+    breadcrumb: { en: 'Curriculum / Track 01 · Foundations', fr: 'Parcours / Piste 01 · Fondations' },
+    intro: { en: 'Liquidity has a schedule. London open, NY open, FOMC press. Plan your screen time around them.', fr: 'La liquidité a un horaire. Ouverture Londres, ouverture NY, conférence FOMC. Planifiez votre temps d’écran autour.' },
+    blocks: [],
+  },
 ];
+
+const LESSONS_NORMALIZED: Lesson[] = RAW_LESSONS.map(normalizeLesson);
+
+export const LESSONS: Lesson[] = LESSONS_NORMALIZED;
 
 export function lessonBySlug(slug: string): Lesson | null {
   return LESSONS.find((l) => l.slug === slug) ?? null;
@@ -1084,4 +1331,12 @@ export function lessonBySlug(slug: string): Lesson | null {
 
 export function lessonsByTrack(track: TrackId): Lesson[] {
   return LESSONS.filter((l) => l.track === track).sort((a, b) => a.order - b.order);
+}
+
+export function lessonsByLevel(level: Lesson['level']): Lesson[] {
+  return LESSONS.filter((l) => l.level === level);
+}
+
+export function freeLessons(): Lesson[] {
+  return LESSONS.filter((l) => l.tier === 'free');
 }

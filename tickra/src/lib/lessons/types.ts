@@ -5,7 +5,14 @@ export type TrackId =
   | 'structure'
   | 'patterns'
   | 'risk'
-  | 'execution';
+  | 'execution'
+  | 'indicators'
+  | 'psychology'
+  | 'assets'
+  | 'strategy';
+
+export type LessonLevel = 'novice' | 'intermediate' | 'advanced';
+export type LessonTier = 'free' | 'pro' | 'max';
 
 export type Track = {
   id: TrackId;
@@ -34,7 +41,7 @@ export type Block =
       kind: 'multi';
       question: Record<Locale, string>;
       choices: Record<Locale, string[]>;
-      correct: number[]; // indexes
+      correct: number[];
       success: Record<Locale, string>;
       retry: Record<Locale, string>;
     }
@@ -48,7 +55,6 @@ export type Block =
   | {
       kind: 'order';
       question: Record<Locale, string>;
-      // Items in canonical (correct) order, per locale.
       items: Record<Locale, string[]>;
       success: Record<Locale, string>;
       retry: Record<Locale, string>;
@@ -59,7 +65,10 @@ export type Lesson = {
   track: TrackId;
   order: number;
   duration: number;
+  /** @deprecated kept for backwards-compat; tier is the source of truth */
   paywalled: boolean;
+  level: LessonLevel;
+  tier: LessonTier;
   title: Record<Locale, string>;
   intro: Record<Locale, string>;
   breadcrumb: Record<Locale, string>;

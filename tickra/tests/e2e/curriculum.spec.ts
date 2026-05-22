@@ -16,7 +16,9 @@ test.describe('Curriculum', () => {
   });
 
   test('paywalled lesson shows the paywall when anonymous', async ({ page }) => {
-    await page.goto('/en/lesson/japanese-candles');
+    // Pick a lesson beyond the free 10-lesson tier — moving-averages is the
+    // first Indicators-track lesson and is reliably paywalled.
+    await page.goto('/en/lesson/moving-averages');
     await expect(page.getByRole('heading', { name: /Continue with the full lesson/ })).toBeVisible();
     expect(await page.locator('iframe').count()).toBe(0);
   });
