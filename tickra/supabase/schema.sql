@@ -331,3 +331,74 @@ as $$
   select user_id from public.referral_codes where code = code_in limit 1;
 $$;
 grant execute on function public.referral_referrer_for(text) to anon, authenticated;
+
+-- ----------------------------------------------------------------------------
+-- 15. forum_threads + forum_replies (Phase 26)
+-- ----------------------------------------------------------------------------
+create table if not exists public.forum_threads (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references public.profiles(id) on delete cascade,
+  category    text not null check (category in ('general','patterns','risk','brokers','strategies','beginners')),
+  locale      text not null default 'en' check (locale in ('en','fr')),
+  slug        text not null unique,
+  title       text not null check (char_length(title) between 4 and 140),
+  body        text not null check (char_length(body) between 8 and 4000),
+  pinned      boolean not null default false,
+  locked      boolean not null default false,
+  reply_count integer not null default 0,
+  created_at  timestamptz not null default now(),
+  updated_at  timestamptz not null default now()
+);
+create index if not exists forum_threads_category_idx on public.forum_threads (category, created_at desc);
+create index if not exists forum_threads_locale_idx   on public.forum_threads (locale, created_at desc);
+
+create table if not exists public.forum_replies (
+  id         uuid primary key default gen_random_uuid(),
+  thread_id  uuid not null references public.forum_threads(id) on delete cascade,
+  user_id    uuid not null references public.profiles(id) on delete cascade,
+  body       text not null check (char_length(body) between 4 and 4000),
+  created_at timestamptz not null default now()
+);
+create index if not exists forum_replies_thread_id_idx on public.forum_replies (thread_id, created_at);
+
+alter table public.forum_threads enable row level security;
+alter table public.forum_replies enable row level security;
+
+-- read: everyone authenticated; anon can read too (community-facing)
+create policy if not exists "threads readable to all" on public.forum_threads for select using (true);
+create policy if not exists "replies readable to all" on public.forum_replies for select using (true);
+
+-- write: only the author, never on locked threads
+create policy if not exists "own thread insert" on public.forum_threads for insert with check (auth.uid() = user_id);
+create policy if not exists "own thread update" on public.forum_threads for update using (auth.uid() = user_id and locked = false) with check (auth.uid() = user_id);
+create policy if not exists "own thread delete" on public.forum_threads for delete using (auth.uid() = user_id);
+
+create policy if not exists "own reply insert" on public.forum_replies for insert with check (
+  auth.uid() = user_id
+  and exists (select 1 from public.forum_threads t where t.id = thread_id and t.locked = false)
+);
+create policy if not exists "own reply update" on public.forum_replies for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy if not exists "own reply delete" on public.forum_replies for delete using (auth.uid() = user_id);
+
+-- Trigger: keep reply_count in sync on threads.
+create or replace function public.bump_reply_count()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if (tg_op = 'INSERT') then
+    update public.forum_threads set reply_count = reply_count + 1, updated_at = now() where id = new.thread_id;
+    return new;
+  elsif (tg_op = 'DELETE') then
+    update public.forum_threads set reply_count = greatest(reply_count - 1, 0) where id = old.thread_id;
+    return old;
+  end if;
+  return null;
+end;
+$$;
+drop trigger if exists on_forum_reply_insert on public.forum_replies;
+create trigger on_forum_reply_insert after insert on public.forum_replies for each row execute function public.bump_reply_count();
+drop trigger if exists on_forum_reply_delete on public.forum_replies;
+create trigger on_forum_reply_delete after delete on public.forum_replies for each row execute function public.bump_reply_count();
