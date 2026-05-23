@@ -362,6 +362,18 @@ const en = {
       },
     ],
   },
+  certificate: {
+    eyebrow: 'Certificate',
+    title: 'Certificates of completion.',
+    body: 'When you complete a track, Tickra generates a signed PDF certificate. No diploma mill — just a record you can attach to a portfolio or a learning log.',
+    download: 'Download PDF',
+    issuedTo: 'Issued to',
+    completed: 'Completed',
+    issuedOn: 'Issued on',
+    verifyBy: 'Verification id',
+    statement: 'has completed the {track} track on Tickra, comprising {n} structured lessons.',
+    notEligible: 'Track not complete yet. Finish all lessons in this track to unlock the certificate.',
+  },
   portfolio: {
     eyebrow: 'Paper portfolio',
     title: 'Practice the decision, not the money.',

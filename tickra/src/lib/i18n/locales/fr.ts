@@ -504,6 +504,18 @@ const fr = {
       },
     ],
   },
+  certificate: {
+    eyebrow: 'Certificat',
+    title: 'Certificats de complétion.',
+    body: 'À la fin d’une piste, Tickra génère un certificat PDF signé. Pas un faux diplôme — juste une trace à joindre à un portfolio ou un journal d’apprentissage.',
+    download: 'Télécharger le PDF',
+    issuedTo: 'Délivré à',
+    completed: 'Terminé',
+    issuedOn: 'Émis le',
+    verifyBy: 'Identifiant de vérification',
+    statement: 'a terminé la piste {track} sur Tickra, comprenant {n} leçons structurées.',
+    notEligible: 'Piste non complète. Terminez toutes les leçons de cette piste pour débloquer le certificat.',
+  },
   portfolio: {
     eyebrow: 'Portefeuille papier',
     title: 'Entraînez la décision, pas l’argent.',
