@@ -217,7 +217,7 @@ export default async function LessonPage({
           <>
             {/* free preview: first non-interactive, non-chart block only */}
             {lesson.blocks
-              .filter((b) => !['quiz', 'multi', 'match', 'order', 'chart'].includes(b.kind))
+              .filter((b) => !['quiz', 'multi', 'match', 'order', 'chart', 'video'].includes(b.kind))
               .slice(0, 1)
               .map((block, i) => (
                 <section key={i} className="border-b border-line">

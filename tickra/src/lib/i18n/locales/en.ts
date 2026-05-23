@@ -419,6 +419,7 @@ const en = {
     rows: [
       { feature: 'Structured curriculum', values: ['yes', 'yes', 'no', 'partial', 'partial', 'partial'] },
       { feature: 'Interactive quizzes per lesson', values: ['yes', 'yes', 'no', 'no', 'no', 'partial'] },
+      { feature: 'Embedded video walkthroughs', values: ['yes', 'partial', 'partial', 'yes', 'yes', 'yes'] },
       { feature: 'Real chart drills (TradingView)', values: ['yes', 'no', 'no', 'partial', 'no', 'no'] },
       { feature: 'Decision journal built in', values: ['yes', 'no', 'no', 'no', 'no', 'no'] },
       { feature: 'Spaced repetition (SM-2)', values: ['yes', 'no', 'no', 'no', 'no', 'no'] },

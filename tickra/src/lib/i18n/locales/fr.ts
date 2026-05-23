@@ -561,6 +561,7 @@ const fr = {
     rows: [
       { feature: 'Cursus structuré', values: ['yes', 'yes', 'no', 'partial', 'partial', 'partial'] },
       { feature: 'Quiz interactifs par leçon', values: ['yes', 'yes', 'no', 'no', 'no', 'partial'] },
+      { feature: 'Vidéos intégrées', values: ['yes', 'partial', 'partial', 'yes', 'yes', 'yes'] },
       { feature: 'Exercices sur vrais graphiques (TradingView)', values: ['yes', 'no', 'no', 'partial', 'no', 'no'] },
       { feature: 'Journal de décisions intégré', values: ['yes', 'no', 'no', 'no', 'no', 'no'] },
       { feature: 'Répétition espacée (SM‑2)', values: ['yes', 'no', 'no', 'no', 'no', 'no'] },

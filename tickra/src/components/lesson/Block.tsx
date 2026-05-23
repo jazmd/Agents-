@@ -2,6 +2,7 @@ import { Info, AlertTriangle } from 'lucide-react';
 import { CandleAnatomy } from './CandleAnatomy';
 import { TradingViewEmbed } from './TradingViewEmbed';
 import { LessonQuiz } from './LessonQuiz';
+import { VideoEmbed } from './VideoEmbed';
 import { MultiSelectBlock } from './blocks/MultiSelect';
 import { MatchBlock } from './blocks/Match';
 import { OrderBlock } from './blocks/Order';
@@ -91,6 +92,16 @@ export function BlockRenderer({ block, locale, dict, slug }: Props) {
       return <CandleAnatomy labels={dict.lesson.anatomy.labels} />;
     case 'chart':
       return <TradingViewEmbed locale={locale} />;
+    case 'video':
+      return (
+        <VideoEmbed
+          provider={block.provider}
+          src={block.src}
+          poster={block.poster}
+          title={block.title[locale]}
+          caption={block.caption?.[locale]}
+        />
+      );
     case 'quiz':
       return (
         <LessonQuiz

@@ -30,6 +30,17 @@ export type Block =
   | { kind: 'anatomy' }
   | { kind: 'chart' }
   | {
+      kind: 'video';
+      provider: 'youtube' | 'vimeo' | 'mp4';
+      /** Provider id (e.g. "dQw4w9WgXcQ") for youtube/vimeo, or a full URL for mp4. */
+      src: string;
+      /** Optional poster image URL shown before play. */
+      poster?: string;
+      /** Localised caption shown under the player. */
+      caption?: Record<Locale, string>;
+      title: Record<Locale, string>;
+    }
+  | {
       kind: 'quiz';
       question: Record<Locale, string>;
       choices: Record<Locale, string[]>;

@@ -33,6 +33,8 @@ function blockText(block: Block, locale: Locale): string {
     case 'anatomy':
     case 'chart':
       return '';
+    case 'video':
+      return `${block.title[locale]} ${block.caption?.[locale] ?? ''}`;
   }
 }
 

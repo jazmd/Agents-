@@ -211,6 +211,13 @@ const RAW_LESSONS: LessonInput[] = [
       fr: "Une bougie est une histoire compressée : ouverture, clôture, plus haut atteint, plus bas atteint. Lisez quatre nombres et vous lisez ce qu'ont été 60 minutes de comportement de foule. Cette leçon entraîne ce muscle.",
     },
     blocks: [
+      {
+        kind: 'video',
+        provider: 'youtube',
+        src: 'akK8RrhCnZ8',
+        title: { en: 'How candlesticks work — 4 min walkthrough', fr: 'Comment les bougies fonctionnent — 4 min' },
+        caption: { en: 'A clean four-minute walkthrough of every candle component.', fr: 'Une explication claire de quatre minutes sur chaque composant.' },
+      },
       { kind: 'anatomy' },
       { kind: 'chart' },
       {
@@ -383,6 +390,9 @@ const RAW_LESSONS: LessonInput[] = [
       fr: 'Il y a un seul calcul qui compte avant tout trade : quelle fraction du compte est en risque. Tout le reste en découle.',
     },
     blocks: [
+      { kind: 'video', provider: 'youtube', src: 'jXQyTSO5q90',
+        title: { en: 'Position sizing in 5 minutes', fr: 'Taille de position en 5 minutes' },
+        caption: { en: 'The formula, a worked example, and the most common mistake.', fr: 'La formule, un exemple chiffré, et l’erreur la plus fréquente.' } },
       {
         kind: 'lede',
         text: {
@@ -1115,6 +1125,9 @@ const RAW_LESSONS: LessonInput[] = [
     breadcrumb: { en: 'Curriculum / Track 04 · Indicators', fr: 'Parcours / Piste 04 · Indicateurs' },
     intro: { en: 'Relative Strength Index measures the speed of price changes from 0 to 100. The textbook says 70 overbought, 30 oversold. The textbook lies in strong trends.', fr: 'Le Relative Strength Index mesure la vitesse des changements de prix de 0 à 100. Le manuel dit 70 surachat, 30 survente. Le manuel ment en tendance forte.' },
     blocks: [
+      { kind: 'video', provider: 'youtube', src: 'sEjuM_aH_g0',
+        title: { en: 'RSI — when it lies, when it tells the truth', fr: 'RSI — quand il ment, quand il dit vrai' },
+        caption: { en: 'Six minutes on reading RSI inside a trend, not against it.', fr: 'Six minutes sur la lecture du RSI dans une tendance, pas contre elle.' } },
       { kind: 'callout', tone: 'warn', title: { en: 'Trend trap', fr: 'Piège de tendance' }, text: { en: 'In a strong uptrend, RSI stays above 70 for weeks. Selling 70 is selling strength.', fr: 'En tendance haussière forte, le RSI reste au-dessus de 70 des semaines. Vendre 70 = vendre la force.' } },
       { kind: 'quiz', question: { en: 'In a confirmed downtrend, an RSI bounce to 60 is best read as…', fr: 'En tendance baissière confirmée, un rebond du RSI à 60 se lit comme…' }, choices: { en: ['A buy signal', 'A short-entry zone', 'A reversal warning', 'Neutral'], fr: ['Un signal d’achat', 'Une zone d’entrée short', 'Une alerte de retournement', 'Neutre'] }, correct: 1, success: { en: 'Right. In a downtrend, RSI rejection from 60 is a classic short setup.', fr: 'Exact. En tendance baissière, un rejet RSI à 60 est un setup short classique.' }, retry: { en: 'Trade with the trend. Bounces in a downtrend favour shorts.', fr: 'Tradez la tendance. Les rebonds en baissier favorisent les shorts.' } },
     ],
