@@ -125,7 +125,7 @@ function runCveAudit(packageDir, accepted) {
 
   let audit;
   try {
-    const out = execSync('npm audit --json --audit-level=high', {
+    const out = execFileSync('npm', ['audit', '--json', '--audit-level=high'], {
       cwd: join(REPO_ROOT, packageDir),
       stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 60_000,
