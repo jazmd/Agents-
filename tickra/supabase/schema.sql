@@ -402,3 +402,46 @@ drop trigger if exists on_forum_reply_insert on public.forum_replies;
 create trigger on_forum_reply_insert after insert on public.forum_replies for each row execute function public.bump_reply_count();
 drop trigger if exists on_forum_reply_delete on public.forum_replies;
 create trigger on_forum_reply_delete after delete on public.forum_replies for each row execute function public.bump_reply_count();
+
+-- ----------------------------------------------------------------------------
+-- 16. paper_accounts + paper_positions (Phase 27)
+-- ----------------------------------------------------------------------------
+create table if not exists public.paper_accounts (
+  user_id          uuid primary key references public.profiles(id) on delete cascade,
+  starting_balance numeric(14,2) not null default 10000.00,
+  balance          numeric(14,2) not null default 10000.00,
+  realised_pnl     numeric(14,2) not null default 0.00,
+  updated_at       timestamptz not null default now()
+);
+alter table public.paper_accounts enable row level security;
+create policy if not exists "own paper account read"  on public.paper_accounts for select using (auth.uid() = user_id);
+create policy if not exists "own paper account write" on public.paper_accounts for all    using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+create table if not exists public.paper_positions (
+  id           uuid primary key default gen_random_uuid(),
+  user_id      uuid not null references public.profiles(id) on delete cascade,
+  symbol       text not null,
+  side         text not null check (side in ('long','short')),
+  qty          numeric(14,4) not null check (qty > 0),
+  entry_price  numeric(14,4) not null check (entry_price > 0),
+  exit_price   numeric(14,4),
+  status       text not null default 'open' check (status in ('open','closed')),
+  opened_at    timestamptz not null default now(),
+  closed_at    timestamptz,
+  pnl          numeric(14,2) not null default 0.00
+);
+create index if not exists paper_positions_user_status_idx on public.paper_positions (user_id, status, opened_at desc);
+
+alter table public.paper_positions enable row level security;
+create policy if not exists "own positions read"  on public.paper_positions for select using (auth.uid() = user_id);
+create policy if not exists "own positions write" on public.paper_positions for all    using (auth.uid() = user_id) with check (auth.uid() = user_id);
+
+create or replace function public.handle_new_profile_paper()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.paper_accounts (user_id) values (new.id) on conflict (user_id) do nothing;
+  return new;
+end;
+$$;
+drop trigger if exists on_profile_paper_created on public.profiles;
+create trigger on_profile_paper_created after insert on public.profiles for each row execute function public.handle_new_profile_paper();

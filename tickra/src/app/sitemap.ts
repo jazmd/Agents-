@@ -22,6 +22,7 @@ const STATIC_PATHS = [
   'tools',
   'calendar',
   'community',
+  'portfolio',
   'signin',
   'signup',
 ];
