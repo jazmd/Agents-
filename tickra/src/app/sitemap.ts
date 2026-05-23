@@ -18,6 +18,9 @@ const STATIC_PATHS = [
   'privacy',
   'risk',
   'imprint',
+  'glossary',
+  'tools',
+  'calendar',
   'signin',
   'signup',
 ];
