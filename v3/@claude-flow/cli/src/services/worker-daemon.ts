@@ -203,6 +203,16 @@ export class WorkerDaemon extends EventEmitter {
         minFreeMemoryPercent: config?.resourceThresholds?.minFreeMemoryPercent ?? fileConfig.minFreeMemoryPercent ?? defaultMinFreeMemory,
       },
       workers: config?.workers ?? DEFAULT_WORKERS,
+      // Constructor config wins over file (parity with other fields).
+      // Either source can flip the gate; default `enabled: false` so
+      // the merged block always has a concrete boolean — the type on
+      // DaemonConfig requires it, and `enabled === false` means "block
+      // present but opted out" which is a valid configured state.
+      queenDispatcher: (() => {
+        const src = config?.queenDispatcher ?? fileConfig.queenDispatcher;
+        if (!src) return undefined;
+        return { enabled: src.enabled === true, ...src };
+      })(),
     };
 
     // Setup graceful shutdown handlers
@@ -351,6 +361,13 @@ export class WorkerDaemon extends EventEmitter {
     workerTimeoutMs?: number;
     maxCpuLoad?: number;
     minFreeMemoryPercent?: number;
+    queenDispatcher?: {
+      enabled?: boolean;
+      pollIntervalMs?: number;
+      maxConcurrent?: number;
+      sandbox?: 'strict' | 'permissive' | 'disabled';
+      timeoutMs?: number;
+    };
   } {
     const jsonPath = join(claudeFlowDir, 'config.json');
     const yamlPath = join(claudeFlowDir, 'config.yaml');
@@ -401,12 +418,57 @@ export class WorkerDaemon extends EventEmitter {
       const rawMinMem = cfg['daemon.resourceThresholds.minFreeMemoryPercent'] ?? raw['daemon.resourceThresholds.minFreeMemoryPercent'];
       const rawMaxConcurrent = cfg['daemon.maxConcurrent'] ?? raw['daemon.maxConcurrent'];
       const rawTimeout = cfg['daemon.workerTimeoutMs'] ?? raw['daemon.workerTimeoutMs'];
+
+      // ADR-072 / #1916: queen-dispatcher block. Supports both nested
+      // (daemon: { queenDispatcher: { enabled: true, ... } }) and the
+      // dot-keyed style used elsewhere in this reader. Dot-keys win
+      // when both forms exist so an operator who already has e.g.
+      // `daemon.queenDispatcher.enabled: true` at the top of the file
+      // gets predictable behaviour.
+      const nestedQd = (cfg?.daemon?.queenDispatcher as Record<string, unknown> | undefined)
+        ?? (raw?.daemon?.queenDispatcher as Record<string, unknown> | undefined)
+        ?? undefined;
+      const flatEnabled = cfg['daemon.queenDispatcher.enabled'] ?? raw['daemon.queenDispatcher.enabled'];
+      const flatPoll = cfg['daemon.queenDispatcher.pollIntervalMs'] ?? raw['daemon.queenDispatcher.pollIntervalMs'];
+      const flatMaxConc = cfg['daemon.queenDispatcher.maxConcurrent'] ?? raw['daemon.queenDispatcher.maxConcurrent'];
+      const flatSandbox = cfg['daemon.queenDispatcher.sandbox'] ?? raw['daemon.queenDispatcher.sandbox'];
+      const flatTimeout = cfg['daemon.queenDispatcher.timeoutMs'] ?? raw['daemon.queenDispatcher.timeoutMs'];
+
+      const qdEnabled = typeof flatEnabled === 'boolean'
+        ? flatEnabled
+        : (typeof nestedQd?.enabled === 'boolean' ? nestedQd.enabled : undefined);
+      const qdPoll = typeof flatPoll === 'number'
+        ? flatPoll
+        : (typeof nestedQd?.pollIntervalMs === 'number' ? nestedQd.pollIntervalMs : undefined);
+      const qdMaxConc = typeof flatMaxConc === 'number'
+        ? flatMaxConc
+        : (typeof nestedQd?.maxConcurrent === 'number' ? nestedQd.maxConcurrent : undefined);
+      const qdSandbox = (typeof flatSandbox === 'string' && ['strict', 'permissive', 'disabled'].includes(flatSandbox))
+        ? (flatSandbox as 'strict' | 'permissive' | 'disabled')
+        : ((typeof nestedQd?.sandbox === 'string' && ['strict', 'permissive', 'disabled'].includes(nestedQd.sandbox as string))
+          ? (nestedQd.sandbox as 'strict' | 'permissive' | 'disabled')
+          : undefined);
+      const qdTimeout = typeof flatTimeout === 'number'
+        ? flatTimeout
+        : (typeof nestedQd?.timeoutMs === 'number' ? nestedQd.timeoutMs : undefined);
+
+      const queenDispatcher = (qdEnabled !== undefined || qdPoll !== undefined || qdMaxConc !== undefined || qdSandbox !== undefined || qdTimeout !== undefined)
+        ? {
+            ...(qdEnabled !== undefined ? { enabled: qdEnabled } : {}),
+            ...(qdPoll !== undefined && qdPoll > 0 ? { pollIntervalMs: qdPoll } : {}),
+            ...(qdMaxConc !== undefined && qdMaxConc > 0 ? { maxConcurrent: qdMaxConc } : {}),
+            ...(qdSandbox !== undefined ? { sandbox: qdSandbox } : {}),
+            ...(qdTimeout !== undefined && qdTimeout > 0 ? { timeoutMs: qdTimeout } : {}),
+          }
+        : undefined;
+
       return {
         autoStart: typeof raw['daemon.autoStart'] === 'boolean' ? raw['daemon.autoStart'] : undefined,
         maxConcurrent: (typeof rawMaxConcurrent === 'number' && rawMaxConcurrent > 0) ? rawMaxConcurrent : undefined,
         workerTimeoutMs: (typeof rawTimeout === 'number' && rawTimeout > 0) ? rawTimeout : undefined,
         maxCpuLoad: (typeof rawCpuLoad === 'number' && rawCpuLoad > 0 && rawCpuLoad < 1000) ? rawCpuLoad : undefined,
         minFreeMemoryPercent: (typeof rawMinMem === 'number' && rawMinMem >= 0 && rawMinMem <= 100) ? rawMinMem : undefined,
+        ...(queenDispatcher ? { queenDispatcher } : {}),
       };
     } catch {
       return {};
