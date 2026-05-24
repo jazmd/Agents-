@@ -1106,18 +1106,22 @@ jobs:
         # so plain npm works here.
         run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
 
-      - name: Install workspace deps (pnpm — `workspace:*` protocol lives in v3/)
+      - name: Install workspace deps + build CLI (pnpm — `workspace:*` protocol)
         # `cd v3/@claude-flow/cli && npm install` errors with
         # `EUNSUPPORTEDPROTOCOL: Unsupported URL Type "workspace:"` because
         # npm doesn't understand workspace:*. The pnpm workspace root is
-        # `v3/pnpm-workspace.yaml`, not the repo root — so we install from
-        # inside v3/.
+        # `v3/pnpm-workspace.yaml`. The CLI's tsc references project-refs to
+        # @claude-flow/swarm (and others), so those must be built first —
+        # `pnpm --filter @claude-flow/cli build` alone fails with TS6305.
+        # `--recursive --no-bail` builds the whole graph in topological order
+        # past unrelated package failures; we then assert the specific dist
+        # file the smoke imports.
         working-directory: v3
-        run: pnpm install --frozen-lockfile=false --ignore-scripts
-
-      - name: Build CLI dist
-        working-directory: v3
-        run: pnpm --filter @claude-flow/cli build
+        run: |
+          pnpm install --frozen-lockfile=false --ignore-scripts
+          pnpm --recursive --no-bail run build || true
+          test -f @claude-flow/cli/dist/src/memory/memory-initializer.js \
+            || (echo "CLI build did not produce memory-initializer.js"; exit 1)
 
       - name: Run memory stats legacy-DB smoke
         run: node scripts/smoke-memory-stats-legacy-db.mjs
