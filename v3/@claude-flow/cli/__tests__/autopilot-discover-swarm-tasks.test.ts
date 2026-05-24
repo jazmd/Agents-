@@ -14,7 +14,7 @@
  * the legacy path so a downstream tool writing the old shape isn't dropped
  * on the floor mid-migration.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -22,18 +22,21 @@ import { join } from 'node:path';
 import { discoverTasks } from '../src/autopilot-state.js';
 
 describe('autopilot discoverTasks(swarm-tasks) — storage location fix', () => {
-  let originalCwd: string;
   let tmpRoot: string;
+  let cwdSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    originalCwd = process.cwd();
     tmpRoot = mkdtempSync(join(tmpdir(), 'autopilot-swarm-tasks-'));
-    process.chdir(tmpRoot);
     mkdirSync(join(tmpRoot, '.claude-flow', 'tasks'), { recursive: true });
+    // `discoverTasks` uses `resolve('.claude-flow/...')` which is
+    // cwd-relative. vitest runs test files in worker threads where
+    // `process.chdir()` is forbidden, so we spy on `process.cwd()`
+    // instead — same effect for `path.resolve`.
+    cwdSpy = vi.spyOn(process, 'cwd').mockReturnValue(tmpRoot);
   });
 
   afterEach(() => {
-    process.chdir(originalCwd);
+    cwdSpy.mockRestore();
     rmSync(tmpRoot, { recursive: true, force: true });
   });
 
