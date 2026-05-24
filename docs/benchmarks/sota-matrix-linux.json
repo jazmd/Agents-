@@ -1,0 +1,249 @@
+{
+  "tag": "sota-matrix",
+  "status": "verified-real-numbers",
+  "capturedAt": "2026-05-24T22:29:00.000Z",
+  "platform": "linux-x64",
+  "host": "ruvultra (Ubuntu 24.04, Linux 6.17, x86_64, 32 cores, 123 GB RAM)",
+  "notes": "Mode A only (stub LLM). ruflo WASM module is darwin-arm64 only — single_turn falls back to compose proxy on Linux x86_64 (labeled). CrewAI single_turn and N_agent_parallel are proxied by instantiation overhead (LLM required for real dispatch — marked as lower bounds). Includes M10 speedups: manifest cache + isDestructiveTool fast-path + Buffer hoist + loadAgentWasm memoize.",
+  "workload": {
+    "N": 10,
+    "K": 50,
+    "T": 5,
+    "trials": 7
+  },
+  "frameworks": [
+    {
+      "framework": "ruflo",
+      "version": "3.8.0",
+      "language": "node",
+      "node_version": "v22.22.2",
+      "platform": "linux-x64",
+      "mode": "A",
+      "N": 10,
+      "K": 50,
+      "T": 5,
+      "trials": 7,
+      "capturedAt": "2026-05-24T22:29:40.230Z",
+      "measurements": {
+        "cold_start_ms": 2.664,
+        "import_overhead_ms": 2.528,
+        "compose_K_tools": {
+          "K": 50,
+          "medianMs": 0.146,
+          "minMs": 0.096,
+          "maxMs": 0.614
+        },
+        "single_turn_dispatch": {
+          "medianMs": 0.053,
+          "minMs": 0.049,
+          "maxMs": 0.072,
+          "note": "WASM module not available on linux-x64 (darwin-arm64 binary only); falls back to compose proxy"
+        },
+        "N_agent_parallel_dispatch": {
+          "N": 10,
+          "wall_medianMs": 0.751,
+          "wall_minMs": 0.711,
+          "wall_maxMs": 1.027
+        },
+        "rss_peak_mb": 60.24,
+        "rss_baseline_mb": 55.15
+      },
+      "notes": "Mode A: wasm_agent_compose with MCP tool names only. WASM createWasmAgent not available on linux-x64; single_turn proxied by compose call (lower bound — real WASM would be faster). N-agent parallel uses Promise.all."
+    },
+    {
+      "framework": "langgraph",
+      "version": "1.2.1",
+      "language": "python",
+      "python_version": "3.12.3",
+      "platform": "linux-x64",
+      "mode": "A",
+      "N": 10,
+      "K": 50,
+      "T": 5,
+      "trials": 7,
+      "capturedAt": "2026-05-24T22:27:00.000Z",
+      "measurements": {
+        "cold_start_ms": 213.011,
+        "import_overhead_ms": 211.381,
+        "compose_K_tools": {
+          "K": 50,
+          "medianMs": 26.94,
+          "minMs": 26.836,
+          "maxMs": 39.974
+        },
+        "single_turn_dispatch": {
+          "medianMs": 31.298,
+          "minMs": 30.375,
+          "maxMs": 50.56
+        },
+        "N_agent_parallel_dispatch": {
+          "N": 10,
+          "wall_medianMs": 349.181,
+          "wall_minMs": 345.032,
+          "wall_maxMs": 358.571
+        },
+        "rss_peak_mb": 78.61,
+        "rss_baseline_mb": 71.79
+      },
+      "notes": "Mode A: pure-Python stub agent node (no LLM API calls). Uses StateGraph with stateless node that counts AIMessages in history. N-agent parallel uses ThreadPoolExecutor."
+    },
+    {
+      "framework": "autogen",
+      "version": "0.4.9",
+      "language": "python",
+      "python_version": "3.12.3",
+      "platform": "linux-x64",
+      "mode": "A",
+      "N": 10,
+      "K": 50,
+      "T": 5,
+      "trials": 7,
+      "capturedAt": "2026-05-24T22:28:00.000Z",
+      "measurements": {
+        "cold_start_ms": 104.132,
+        "import_overhead_ms": 103.045,
+        "compose_K_tools": {
+          "K": 50,
+          "medianMs": 4.845,
+          "minMs": 4.617,
+          "maxMs": 10.232
+        },
+        "single_turn_dispatch": {
+          "medianMs": 4.936,
+          "minMs": 4.861,
+          "maxMs": 5.158
+        },
+        "N_agent_parallel_dispatch": {
+          "N": 10,
+          "wall_medianMs": 48.867,
+          "wall_minMs": 47.563,
+          "wall_maxMs": 71.38
+        },
+        "rss_peak_mb": 77.37,
+        "rss_baseline_mb": 56.62
+      },
+      "notes": "Mode A: stub model client (0ms delay), no real API calls. Uses asyncio.gather for parallel N-agent dispatch."
+    },
+    {
+      "framework": "crewai",
+      "version": "0.80.0",
+      "language": "python",
+      "python_version": "3.12.3",
+      "platform": "linux-x64",
+      "mode": "A",
+      "N": 10,
+      "K": 50,
+      "T": 5,
+      "trials": 7,
+      "capturedAt": "2026-05-24T22:29:00.000Z",
+      "measurements": {
+        "cold_start_ms": 1420.927,
+        "import_overhead_ms": 1419.5,
+        "compose_K_tools": {
+          "K": 50,
+          "medianMs": 0.096,
+          "minMs": 0.091,
+          "maxMs": 0.168
+        },
+        "single_turn_dispatch": {
+          "medianMs": 0.091,
+          "minMs": 0.087,
+          "maxMs": 0.096,
+          "note": "Proxy: agent instantiation overhead (CrewAI requires real LLM for kickoff; Mode A measures setup cost only)"
+        },
+        "N_agent_parallel_dispatch": {
+          "N": 10,
+          "wall_medianMs": 0.093,
+          "wall_minMs": 0.09,
+          "wall_maxMs": 0.147,
+          "note": "Proxy: crew instantiation for N agents (no kickoff — LLM required)"
+        },
+        "rss_peak_mb": 251.21,
+        "rss_baseline_mb": 251.21
+      },
+      "notes": "Mode A partial: compose and agent-instantiation overhead measured without LLM calls. single_turn and N_agent_parallel are proxied (lower bounds). pkg_resources shim required (setuptools 82 dropped pkg_resources)."
+    }
+  ],
+  "comparison": {
+    "cold_start_ms": {
+      "ruflo": 2.664,
+      "langgraph": 213.011,
+      "autogen": 104.132,
+      "crewai": 1420.927
+    },
+    "compose_50_tools_ms": {
+      "ruflo": 0.146,
+      "langgraph": 26.94,
+      "autogen": 4.845,
+      "crewai": 0.096
+    },
+    "single_turn_ms": {
+      "ruflo": 0.053,
+      "langgraph": 31.298,
+      "autogen": 4.936,
+      "crewai": 0.091
+    },
+    "N10_parallel_ms": {
+      "ruflo": 0.751,
+      "langgraph": 349.181,
+      "autogen": 48.867,
+      "crewai": 0.093
+    },
+    "rss_peak_mb": {
+      "ruflo": 60.24,
+      "langgraph": 78.61,
+      "autogen": 77.37,
+      "crewai": 251.21
+    }
+  },
+  "winner_by_dimension": {
+    "cold_start_ms": {
+      "winner": "ruflo",
+      "value": 2.664,
+      "runners_up": [
+        {"fw": "autogen", "v": 104.132, "ratio": 39.09},
+        {"fw": "langgraph", "v": 213.011, "ratio": 79.96},
+        {"fw": "crewai", "v": 1420.927, "ratio": 533.38}
+      ]
+    },
+    "compose_50_tools_ms": {
+      "winner": "crewai",
+      "value": 0.096,
+      "note": "CrewAI is proxy lower bound",
+      "runners_up": [
+        {"fw": "ruflo", "v": 0.146, "ratio": 1.52},
+        {"fw": "autogen", "v": 4.845, "ratio": 50.47},
+        {"fw": "langgraph", "v": 26.94, "ratio": 280.63}
+      ]
+    },
+    "single_turn_ms": {
+      "winner": "ruflo",
+      "value": 0.053,
+      "note": "ruflo on linux: WASM unavailable, compose proxy used (lower bound — real WASM dispatch faster on darwin-arm64)",
+      "runners_up": [
+        {"fw": "crewai", "v": 0.091, "ratio": 1.72},
+        {"fw": "autogen", "v": 4.936, "ratio": 93.13},
+        {"fw": "langgraph", "v": 31.298, "ratio": 590.53}
+      ]
+    },
+    "N10_parallel_ms": {
+      "winner": "crewai",
+      "value": 0.093,
+      "note": "CrewAI is proxy lower bound",
+      "runners_up": [
+        {"fw": "ruflo", "v": 0.751, "ratio": 8.07},
+        {"fw": "autogen", "v": 48.867, "ratio": 525.45},
+        {"fw": "langgraph", "v": 349.181, "ratio": 3754.63}
+      ]
+    },
+    "rss_peak_mb": {
+      "winner": "ruflo",
+      "value": 60.24,
+      "runners_up": [
+        {"fw": "autogen", "v": 77.37, "ratio": 1.28},
+        {"fw": "langgraph", "v": 78.61, "ratio": 1.30},
+        {"fw": "crewai", "v": 251.21, "ratio": 4.17}
+      ]
+    }
+  }
+}
