@@ -22,6 +22,7 @@ import {
   type HeadlessWorkerType,
   type HeadlessExecutionResult,
 } from './headless-worker-executor.js';
+import { QueenDispatcher, type QueenDispatcherConfig } from './queen-dispatcher.js';
 
 // Worker types matching hooks-tools.ts
 export type WorkerType =
@@ -91,6 +92,21 @@ export interface DaemonConfig {
     minFreeMemoryPercent: number;
   };
   workers: WorkerConfig[];
+  /**
+   * Queen-dispatcher config. When `enabled`, the daemon starts a
+   * QueenDispatcher loop alongside the maintenance workers — it polls
+   * `.claude-flow/tasks/store.json` and routes assigned swarm tasks to
+   * HeadlessWorkerExecutor.executeArbitrary. Disabled by default so
+   * existing daemon behaviour is unchanged for users who haven't
+   * opted in. See ADR-072 / #1916.
+   */
+  queenDispatcher?: {
+    enabled: boolean;
+    pollIntervalMs?: number;
+    maxConcurrent?: number;
+    sandbox?: QueenDispatcherConfig['sandbox'];
+    timeoutMs?: number;
+  };
 }
 
 // Worker configuration with staggered offsets to prevent overlap
@@ -132,6 +148,11 @@ export class WorkerDaemon extends EventEmitter {
   // Headless execution support
   private headlessExecutor: HeadlessWorkerExecutor | null = null;
   private headlessAvailable: boolean = false;
+
+  // Queen-dispatcher (opt-in via config.queenDispatcher.enabled).
+  // When set, polls the swarm task store and dispatches assigned
+  // tasks through the headlessExecutor's executeArbitrary path.
+  private queenDispatcher: QueenDispatcher | null = null;
 
   // Preserve the original constructor config so we can detect explicit overrides
   // during state restoration (R1: constructor config takes priority over stale state)
@@ -779,6 +800,35 @@ export class WorkerDaemon extends EventEmitter {
       this.queuePollTimer.unref();
     }
 
+    // ADR-072 / #1916: start the queen-dispatcher when opted in. The
+    // dispatcher polls the canonical swarm task store and routes
+    // assigned tasks through the headlessExecutor's executeArbitrary
+    // path. Opt-in only — existing deployments are unchanged.
+    if (this.config.queenDispatcher?.enabled && this.headlessExecutor) {
+      try {
+        this.queenDispatcher = new QueenDispatcher({
+          projectRoot: this.projectRoot,
+          executor: this.headlessExecutor,
+          pollIntervalMs: this.config.queenDispatcher.pollIntervalMs,
+          maxConcurrent: this.config.queenDispatcher.maxConcurrent,
+          sandbox: this.config.queenDispatcher.sandbox,
+          timeoutMs: this.config.queenDispatcher.timeoutMs,
+        });
+        // Forward the dispatcher's events through the daemon's event
+        // bus so operators / dashboards have one stream to watch.
+        this.queenDispatcher.on('dispatched', (d) => this.emit('queen:dispatched', d));
+        this.queenDispatcher.on('completed', (d) => this.emit('queen:completed', d));
+        this.queenDispatcher.on('failed', (d) => this.emit('queen:failed', d));
+        this.queenDispatcher.on('error', (err) => this.log('warn', `QueenDispatcher error: ${err}`));
+        this.queenDispatcher.start();
+        this.log('info', `QueenDispatcher started (poll: ${this.config.queenDispatcher.pollIntervalMs ?? 5000}ms, maxConcurrent: ${this.config.queenDispatcher.maxConcurrent ?? 2})`);
+      } catch (err) {
+        this.log('warn', `QueenDispatcher failed to start: ${(err as Error).message}`);
+      }
+    } else if (this.config.queenDispatcher?.enabled && !this.headlessExecutor) {
+      this.log('warn', 'QueenDispatcher requested but headlessExecutor unavailable (claude CLI not installed?) — skipped.');
+    }
+
     // Save state
     this.saveState();
 
@@ -861,6 +911,14 @@ export class WorkerDaemon extends EventEmitter {
     if (this.queuePollTimer) {
       clearInterval(this.queuePollTimer);
       this.queuePollTimer = undefined;
+    }
+
+    // Stop the queen-dispatcher (does NOT cancel in-flight executions;
+    // those finish on their own timeline and write their final result
+    // through the dispatcher's completion callback).
+    if (this.queenDispatcher) {
+      this.queenDispatcher.stop();
+      this.queenDispatcher = null;
     }
 
     this.running = false;
