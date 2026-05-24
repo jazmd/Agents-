@@ -435,7 +435,7 @@ export const wasmAgentTools: MCPTool[] = [
 
   {
     name: 'wasm_agent_state',
-    description: 'Get the full internal state of a WASM agent (messages, turn count, config). Useful for orchestrators that need to inspect agent progress mid-task.',
+    description: 'Read the full internal state of a WASM agent (messages, turn count, config, stop status). Use when native Task is wrong because the agent runs in a sandboxed WASM runtime whose internal conversation history is not directly accessible from the host process.',
     inputSchema: {
       type: 'object' as const,
       properties: { agentId: { type: 'string', description: 'WASM agent ID' } },
@@ -454,7 +454,7 @@ export const wasmAgentTools: MCPTool[] = [
   },
   {
     name: 'wasm_agent_todos',
-    description: 'Get the todo list of a WASM agent. Returns the agent\'s current task list as structured JSON.',
+    description: 'Get the structured todo list of a WASM agent as JSON. Use when native Task is wrong because the todo state lives inside the sandboxed WASM runtime and is not visible to the host process.',
     inputSchema: {
       type: 'object' as const,
       properties: { agentId: { type: 'string', description: 'WASM agent ID' } },
@@ -473,7 +473,7 @@ export const wasmAgentTools: MCPTool[] = [
   },
   {
     name: 'wasm_agent_tools',
-    description: 'Get the list of tools available to a WASM agent.',
+    description: 'List the tools registered on a WASM agent sandbox. Use when native Task is wrong because the tool registry lives inside the WASM runtime and cannot be inspected from the host via standard reflection.',
     inputSchema: {
       type: 'object' as const,
       properties: { agentId: { type: 'string', description: 'WASM agent ID' } },
@@ -492,7 +492,7 @@ export const wasmAgentTools: MCPTool[] = [
   },
   {
     name: 'wasm_agent_turn_count',
-    description: 'Get the current turn count of a WASM agent.',
+    description: 'Return the current turn count of a WASM agent. Use when native Task is wrong because turn-limit enforcement and progress tracking must be polled from inside the sandboxed WASM runtime rather than inferred externally.',
     inputSchema: {
       type: 'object' as const,
       properties: { agentId: { type: 'string', description: 'WASM agent ID' } },
@@ -512,7 +512,7 @@ export const wasmAgentTools: MCPTool[] = [
   },
   {
     name: 'wasm_agent_is_stopped',
-    description: 'Check whether a WASM agent has reached its stop condition (max turns, explicit stop, etc.).',
+    description: 'Check whether a WASM agent has reached its stop condition (max turns or explicit stop). Use when native Task is wrong because the stop condition is evaluated inside the WASM runtime and not observable from the host without an explicit query.',
     inputSchema: {
       type: 'object' as const,
       properties: { agentId: { type: 'string', description: 'WASM agent ID' } },
@@ -532,7 +532,7 @@ export const wasmAgentTools: MCPTool[] = [
   },
   {
     name: 'wasm_agent_reset',
-    description: 'Reset a WASM agent state — clears messages and turn count. Useful for reusing an agent across tasks without terminating and re-creating it.',
+    description: 'Reset a WASM agent — clears messages and turn count so it can be reused across tasks. Use when native Task is wrong because the agent lives in a sandboxed WASM runtime that must be explicitly reset rather than simply re-spawned.',
     inputSchema: {
       type: 'object' as const,
       properties: { agentId: { type: 'string', description: 'WASM agent ID' } },
@@ -554,7 +554,7 @@ export const wasmAgentTools: MCPTool[] = [
 
   {
     name: 'wasm_gallery_load_rvf',
-    description: 'Load a gallery template as an RVF container (base64-encoded bytes). Use to get the raw RVF for a named template.',
+    description: 'Load a named gallery template as a base64-encoded RVF container. Use when native Read is wrong because RVF containers are packed inside the WASM gallery store and are not accessible as plain filesystem files.',
     inputSchema: {
       type: 'object' as const,
       properties: { id: { type: 'string', description: 'Gallery template ID' } },
@@ -574,7 +574,7 @@ export const wasmAgentTools: MCPTool[] = [
   },
   {
     name: 'wasm_gallery_configure',
-    description: 'Apply configuration overrides to the active gallery template.',
+    description: 'Apply runtime configuration overrides (e.g. maxTurns, model) to the active WASM gallery template. Use when native Edit is wrong because gallery configuration lives inside the WASM runtime state and cannot be changed via filesystem writes.',
     inputSchema: {
       type: 'object' as const,
       properties: { config: { type: 'object', description: 'Configuration overrides (e.g. {maxTurns: 100})' } },
@@ -592,7 +592,7 @@ export const wasmAgentTools: MCPTool[] = [
   },
   {
     name: 'wasm_gallery_categories',
-    description: 'Get all gallery template categories with template counts.',
+    description: 'Return all WASM gallery template categories with per-category template counts. Use when native Bash/ls is wrong because gallery category metadata is indexed inside the WASM runtime, not on the filesystem.',
     inputSchema: { type: 'object' as const, properties: {} },
     handler: async () => {
       try {
@@ -606,7 +606,7 @@ export const wasmAgentTools: MCPTool[] = [
   },
   {
     name: 'wasm_gallery_list_by_category',
-    description: 'List gallery templates filtered by category.',
+    description: 'List WASM gallery templates filtered to a specific category. Use when native Glob is wrong because gallery templates are stored in the WASM runtime registry, not as individual filesystem files.',
     inputSchema: {
       type: 'object' as const,
       properties: { category: { type: 'string', description: 'Category name' } },
@@ -625,7 +625,7 @@ export const wasmAgentTools: MCPTool[] = [
   },
   {
     name: 'wasm_gallery_add_custom',
-    description: 'Add a custom template to the gallery.',
+    description: 'Add a custom agent template to the WASM gallery registry. Use when native Write is wrong because custom templates must be registered inside the WASM runtime store, not written as plain files.',
     inputSchema: {
       type: 'object' as const,
       properties: { template: { type: 'object', description: 'Template object to add' } },
@@ -643,7 +643,7 @@ export const wasmAgentTools: MCPTool[] = [
   },
   {
     name: 'wasm_gallery_remove_custom',
-    description: 'Remove a custom template from the gallery by ID.',
+    description: 'Remove a custom template from the WASM gallery by ID. Use when native Bash rm is wrong because custom templates exist only inside the WASM runtime registry and cannot be deleted via filesystem operations.',
     inputSchema: {
       type: 'object' as const,
       properties: { id: { type: 'string', description: 'Custom template ID to remove' } },
@@ -712,7 +712,7 @@ export const wasmAgentTools: MCPTool[] = [
   },
   {
     name: 'wasm_gallery_export',
-    description: 'Export all custom templates from the gallery as JSON.',
+    description: 'Export all custom WASM gallery templates as a JSON snapshot. Use when native Read/cat is wrong because custom templates live inside the WASM runtime store and are not persisted as individual files on disk.',
     inputSchema: { type: 'object' as const, properties: {} },
     handler: async () => {
       try {
@@ -726,7 +726,7 @@ export const wasmAgentTools: MCPTool[] = [
   },
   {
     name: 'wasm_gallery_active',
-    description: 'Get the currently active gallery template ID.',
+    description: 'Return the ID of the currently active WASM gallery template. Use when native Bash is wrong because the active-template cursor is tracked inside the WASM runtime state, not in a file you can read directly.',
     inputSchema: { type: 'object' as const, properties: {} },
     handler: async () => {
       try {
@@ -740,7 +740,7 @@ export const wasmAgentTools: MCPTool[] = [
   },
   {
     name: 'wasm_gallery_config',
-    description: 'Get the configuration overrides for the currently active gallery template.',
+    description: 'Get the runtime configuration overrides applied to the active WASM gallery template. Use when native Read is wrong because gallery config overrides are stored in the WASM runtime state rather than as an editable config file.',
     inputSchema: { type: 'object' as const, properties: {} },
     handler: async () => {
       try {
