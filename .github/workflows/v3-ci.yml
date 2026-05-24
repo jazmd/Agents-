@@ -1100,15 +1100,23 @@ jobs:
         with:
           version: 8
 
-      - name: Install workspace deps (pnpm — handles `workspace:*` protocol)
+      - name: Install root deps (sql.js for the smoke fixture)
+        # The smoke creates a `.swarm/memory.db` fixture using `sql.js`
+        # imported from the repo root. Root has no `workspace:*` deps,
+        # so plain npm works here.
+        run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
+
+      - name: Install workspace deps (pnpm — `workspace:*` protocol lives in v3/)
         # `cd v3/@claude-flow/cli && npm install` errors with
         # `EUNSUPPORTEDPROTOCOL: Unsupported URL Type "workspace:"` because
-        # npm doesn't understand the workspace protocol used in our
-        # monorepo. pnpm does. Root install is sufficient — it populates
-        # `v3/@claude-flow/cli/node_modules` via the workspace topology.
+        # npm doesn't understand workspace:*. The pnpm workspace root is
+        # `v3/pnpm-workspace.yaml`, not the repo root — so we install from
+        # inside v3/.
+        working-directory: v3
         run: pnpm install --frozen-lockfile=false --ignore-scripts
 
       - name: Build CLI dist
+        working-directory: v3
         run: pnpm --filter @claude-flow/cli build
 
       - name: Run memory stats legacy-DB smoke
