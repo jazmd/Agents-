@@ -120,6 +120,12 @@ export async function createWasmAgent(config: WasmAgentConfig = {}): Promise<Was
   });
 
   const agent = new mod.WasmAgent(configJson);
+
+  // ADR-129 P1 — wire JsModelProvider so the WASM runtime routes prompts
+  // through the v3 provider system instead of returning the echo stub.
+  // attachJsModelProvider is a no-op when no provider keys are set.
+  await attachJsModelProvider(agent, config);
+
   const id = generateId();
 
   const info: WasmAgentInfo = {
@@ -138,18 +144,51 @@ export async function createWasmAgent(config: WasmAgentConfig = {}): Promise<Was
 }
 
 /**
+ * Wire a JsModelProvider to a freshly created WasmAgent so its internal
+ * conversation loop dispatches through the v3 provider system (ADR-129 P1).
+ *
+ * The callback bridges the JsModelProvider JSON contract to
+ * callAnthropicMessages, which already handles Anthropic / OpenRouter /
+ * Ollama routing via RUFLO_PROVIDER + key-presence precedence (#2042).
+ *
+ * Called once at agent-creation time; the provider stays attached for the
+ * agent's lifetime.  No-op (returns false) when no provider keys are
+ * configured so the echo-fallback path below is preserved for keyless
+ * environments.
+ */
+async function attachJsModelProvider(agent: any, config: WasmAgentConfig): Promise<boolean> {
+  const hasAny = !!(process.env.ANTHROPIC_API_KEY || process.env.OPENROUTER_API_KEY || process.env.OLLAMA_API_KEY);
+  if (!hasAny) return false;
+  const mod = await import('@ruvector/rvagent-wasm');
+  const { callAnthropicMessages, resolveAnthropicModel } = await import('../mcp-tools/agent-execute-core.js');
+  const model = resolveAnthropicModel(config.model);
+  const systemPrompt = config.instructions || 'You are a helpful coding assistant running in a Ruflo WASM agent sandbox.';
+
+  const provider = new mod.JsModelProvider(async (messagesJson: string) => {
+    const messages: Array<{ role: string; content: string }> = JSON.parse(messagesJson);
+    const lastUser = [...messages].reverse().find(m => m.role === 'user');
+    const prompt = lastUser?.content ?? messagesJson;
+    const result = await callAnthropicMessages({ prompt, systemPrompt, model, maxTokens: 2048 });
+    if (!result.success) throw new Error(result.error ?? 'provider call failed');
+    return JSON.stringify({ role: 'assistant', content: result.output ?? '' });
+  });
+  agent.set_model_provider(provider);
+  return true;
+}
+
+/**
  * Send a prompt to a WASM agent.
  *
- * ADR-095 G4: the bundled @ruvector/rvagent-wasm doesn't actually run an
- * LLM — its prompt() method echoes input back as `"echo: <input>"`. We
- * detect that stub output and route the prompt through Anthropic's
- * Messages API so users get a real response. The WASM agent's sandbox
- * (virtual filesystem, tool execution) still works for non-LLM ops via
- * executeWasmTool — we're just patching the "talk to a model" hole.
+ * ADR-129 P1: JsModelProvider is now wired at creation time so the WASM
+ * agent's internal conversation loop (multi-turn state, turn_count,
+ * stop conditions) runs against a real LLM.  The echo-stub detection
+ * block is kept as a fallback for keyless environments (CI, sandboxed
+ * test runners) — behaviour is identical to the pre-P1 path when no
+ * provider key is set.
  *
- * If ANTHROPIC_API_KEY is not set, returns the stub output verbatim so
- * the failure mode is obvious to the caller (matches the previous
- * behaviour rather than throwing for users without keys configured).
+ * Billing note: every wasm_agent_prompt call with a provider key
+ * configured makes a billable LLM call.  Use a keyless environment to
+ * get the echo stub for cost-free sandboxing.
  */
 export async function promptWasmAgent(agentId: string, input: string): Promise<string> {
   const entry = agents.get(agentId);
@@ -161,33 +200,34 @@ export async function promptWasmAgent(agentId: string, input: string): Promise<s
     entry.info.state = 'idle';
     syncAgentInfo(entry);
 
-    // Detect the WASM echo stub.
+    // Detect the WASM echo stub (present when no JsModelProvider was
+    // attached, i.e. keyless environments).
     const isEchoStub = typeof wasmResult === 'string' &&
       (wasmResult === `echo: ${input}` || /^echo: /.test(wasmResult.slice(0, 12)));
 
     if (!isEchoStub) {
+      // JsModelProvider routed through the v3 provider system — return
+      // the real response.  turn_count was already incremented by the
+      // WASM runtime.
       return wasmResult;
     }
 
-    // Echo stub detected — route through a real LLM call.
-    if (!process.env.ANTHROPIC_API_KEY) {
-      // No key configured; surface the stub honestly with a hint.
-      return `${wasmResult}\n[NOTE: bundled WASM agent has no LLM; set ANTHROPIC_API_KEY to enable real responses via Anthropic Messages API]`;
+    // Echo stub path (keyless fallback — preserved from pre-P1 behaviour).
+    if (!process.env.ANTHROPIC_API_KEY && !process.env.OPENROUTER_API_KEY && !process.env.OLLAMA_API_KEY) {
+      return `${wasmResult}\n[NOTE: bundled WASM agent has no LLM; set ANTHROPIC_API_KEY (or OPENROUTER_API_KEY / OLLAMA_API_KEY) to enable real responses via the v3 provider system]`;
     }
 
+    // Key present but provider was not attached at creation time (e.g.
+    // agent created before a key was set in the environment).  Fall
+    // through to a direct callAnthropicMessages call as a best-effort
+    // recovery.
     const { callAnthropicMessages, resolveAnthropicModel } = await import('../mcp-tools/agent-execute-core.js');
     const model = resolveAnthropicModel(entry.info.config.model);
     const systemPrompt = entry.info.config.instructions || 'You are a helpful coding assistant running in a Ruflo WASM agent sandbox.';
-    const result = await callAnthropicMessages({
-      prompt: input,
-      systemPrompt,
-      model,
-      maxTokens: 2048,
-    });
+    const result = await callAnthropicMessages({ prompt: input, systemPrompt, model, maxTokens: 2048 });
     if (!result.success) {
-      return `${wasmResult}\n[NOTE: bundled WASM agent has no LLM; Anthropic fallback failed: ${result.error}]`;
+      return `${wasmResult}\n[NOTE: bundled WASM agent has no LLM; provider fallback failed: ${result.error}]`;
     }
-    // Return the real LLM output, not the echo stub.
     return result.output ?? '';
   } catch (err) {
     entry.info.state = 'error';
