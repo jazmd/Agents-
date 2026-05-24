@@ -1,0 +1,306 @@
+{
+  "tag": "sota-matrix",
+  "status": "verified-real-numbers",
+  "capturedAt": "2026-05-24T21:49:30.272Z",
+  "platform": "darwin-arm64",
+  "notes": "Mode A only (stub LLM). All ruflo numbers use real WASM module (isAgentWasmAvailable=true). CrewAI single_turn and N_agent_parallel are proxied by instantiation overhead (LLM required for real dispatch — marked as lower bounds). See sota-workload-spec.md for full methodology.",
+  "workload": {
+    "N": 10,
+    "K": 50,
+    "T": 5,
+    "trials": 7
+  },
+  "frameworks": [
+    {
+      "framework": "ruflo",
+      "version": "3.8.0",
+      "language": "node",
+      "node_version": "v22.22.1",
+      "platform": "darwin-arm64",
+      "mode": "A",
+      "N": 10,
+      "K": 50,
+      "T": 5,
+      "trials": 7,
+      "capturedAt": "2026-05-24T21:49:22.296Z",
+      "measurements": {
+        "cold_start_ms": 3.443,
+        "import_overhead_ms": 3.268,
+        "compose_K_tools": {
+          "K": 50,
+          "medianMs": 0.294,
+          "minMs": 0.285,
+          "maxMs": 0.381
+        },
+        "single_turn_dispatch": {
+          "medianMs": 0.023,
+          "minMs": 0.016,
+          "maxMs": 0.162
+        },
+        "N_agent_parallel_dispatch": {
+          "N": 10,
+          "wall_medianMs": 1.159,
+          "wall_minMs": 1.029,
+          "wall_maxMs": 1.629
+        },
+        "rss_peak_mb": 58.91,
+        "rss_baseline_mb": 54.27
+      },
+      "notes": "Mode A: wasm_agent_compose with MCP tool names only, no real LLM calls. single_turn uses createWasmAgent (keyless stub path) if WASM module available, else falls back to compose proxy. N-agent parallel uses Promise.all."
+    },
+    {
+      "framework": "langgraph",
+      "version": "1.2.1",
+      "language": "python",
+      "python_version": "3.12.13",
+      "platform": "darwin-arm64",
+      "mode": "A",
+      "N": 10,
+      "K": 50,
+      "T": 5,
+      "trials": 7,
+      "capturedAt": "2026-05-24T21:49:26.536451Z",
+      "measurements": {
+        "cold_start_ms": 508.111,
+        "graph_compile_ms": 37.422,
+        "import_overhead_ms": 504.209,
+        "compose_K_tools": {
+          "K": 50,
+          "medianMs": 34.782,
+          "minMs": 33.93,
+          "maxMs": 53.167
+        },
+        "single_turn_dispatch": {
+          "medianMs": 36.413,
+          "minMs": 34.93,
+          "maxMs": 60.577
+        },
+        "N_agent_parallel_dispatch": {
+          "N": 10,
+          "wall_medianMs": 394.922,
+          "wall_minMs": 356.28,
+          "wall_maxMs": 467.458
+        },
+        "rss_peak_mb": 80.52,
+        "rss_baseline_mb": 77.23
+      },
+      "notes": "Mode A: pure-Python stub agent node (no LLM API calls). Uses StateGraph with stateless node that counts AIMessages in history. N-agent parallel uses ThreadPoolExecutor."
+    },
+    {
+      "framework": "autogen",
+      "version": "0.4.9",
+      "language": "python",
+      "python_version": "3.12.13",
+      "platform": "darwin-arm64",
+      "mode": "A",
+      "N": 10,
+      "K": 50,
+      "T": 5,
+      "trials": 7,
+      "capturedAt": "2026-05-24T21:49:27.496182Z",
+      "measurements": {
+        "cold_start_ms": 186.432,
+        "import_overhead_ms": 184.567,
+        "compose_K_tools": {
+          "K": 50,
+          "medianMs": 6.516,
+          "minMs": 6.093,
+          "maxMs": 15.3
+        },
+        "single_turn_dispatch": {
+          "medianMs": 6.731,
+          "minMs": 6.434,
+          "maxMs": 7.054
+        },
+        "N_agent_parallel_dispatch": {
+          "N": 10,
+          "wall_medianMs": 64.214,
+          "wall_minMs": 60.659,
+          "wall_maxMs": 100.758
+        },
+        "rss_peak_mb": 78.53,
+        "rss_baseline_mb": 57.52
+      },
+      "notes": "Mode A: stub model client (0ms delay), no real API calls. Uses asyncio.gather for parallel N-agent dispatch."
+    },
+    {
+      "framework": "crewai",
+      "version": "0.80.0",
+      "language": "python",
+      "python_version": "3.12.13",
+      "platform": "darwin-arm64",
+      "mode": "A",
+      "N": 10,
+      "K": 50,
+      "T": 5,
+      "trials": 7,
+      "capturedAt": "2026-05-24T21:49:29.836025Z",
+      "measurements": {
+        "cold_start_ms": 2239.658,
+        "import_overhead_ms": 2237.959,
+        "compose_K_tools": {
+          "K": 50,
+          "medianMs": 0.115,
+          "minMs": 0.107,
+          "maxMs": 0.202
+        },
+        "single_turn_dispatch": {
+          "medianMs": 0.113,
+          "minMs": 0.106,
+          "maxMs": 0.122,
+          "note": "Proxy: agent instantiation overhead (CrewAI requires real LLM for kickoff — fake-LLM not supported without patching LiteLLM; Mode A measures setup cost only)"
+        },
+        "N_agent_parallel_dispatch": {
+          "N": 10,
+          "wall_medianMs": 0.114,
+          "wall_minMs": 0.107,
+          "wall_maxMs": 0.174,
+          "note": "Proxy: crew instantiation for N agents (no kickoff — LLM would be required)"
+        },
+        "rss_peak_mb": 264.05,
+        "rss_baseline_mb": 264
+      },
+      "notes": "Mode A partial: compose and agent-instantiation overhead measured without LLM calls. single_turn_dispatch and N_agent_parallel are proxied by agent+crew instantiation because CrewAI's kickoff() requires a real LLM provider. These numbers are LOWER bounds — actual dispatch would be higher. Labeled (proxy) in comparator matrix."
+    }
+  ],
+  "errors": [],
+  "comparison": {
+    "cold_start_ms": {
+      "ruflo": 3.443,
+      "langgraph": 508.111,
+      "autogen": 186.432,
+      "crewai": 2239.658
+    },
+    "compose_50_tools_ms": {
+      "ruflo": 0.294,
+      "langgraph": 34.782,
+      "autogen": 6.516,
+      "crewai": 0.115
+    },
+    "single_turn_ms": {
+      "ruflo": 0.023,
+      "langgraph": 36.413,
+      "autogen": 6.731,
+      "crewai": 0.113
+    },
+    "N10_parallel_ms": {
+      "ruflo": 1.159,
+      "langgraph": 394.922,
+      "autogen": 64.214,
+      "crewai": 0.114
+    },
+    "rss_peak_mb": {
+      "ruflo": 58.91,
+      "langgraph": 80.52,
+      "autogen": 78.53,
+      "crewai": 264.05
+    }
+  },
+  "winner_by_dimension": {
+    "cold_start_ms": {
+      "winner": "ruflo",
+      "value": 3.443,
+      "runners_up": [
+        {
+          "fw": "autogen",
+          "v": 186.432,
+          "ratio": 54.15
+        },
+        {
+          "fw": "langgraph",
+          "v": 508.111,
+          "ratio": 147.58
+        },
+        {
+          "fw": "crewai",
+          "v": 2239.658,
+          "ratio": 650.5
+        }
+      ]
+    },
+    "compose_50_tools_ms": {
+      "winner": "crewai",
+      "value": 0.115,
+      "runners_up": [
+        {
+          "fw": "ruflo",
+          "v": 0.294,
+          "ratio": 2.56
+        },
+        {
+          "fw": "autogen",
+          "v": 6.516,
+          "ratio": 56.66
+        },
+        {
+          "fw": "langgraph",
+          "v": 34.782,
+          "ratio": 302.45
+        }
+      ]
+    },
+    "single_turn_ms": {
+      "winner": "ruflo",
+      "value": 0.023,
+      "runners_up": [
+        {
+          "fw": "crewai",
+          "v": 0.113,
+          "ratio": 4.91
+        },
+        {
+          "fw": "autogen",
+          "v": 6.731,
+          "ratio": 292.65
+        },
+        {
+          "fw": "langgraph",
+          "v": 36.413,
+          "ratio": 1583.17
+        }
+      ]
+    },
+    "N10_parallel_ms": {
+      "winner": "crewai",
+      "value": 0.114,
+      "runners_up": [
+        {
+          "fw": "ruflo",
+          "v": 1.159,
+          "ratio": 10.17
+        },
+        {
+          "fw": "autogen",
+          "v": 64.214,
+          "ratio": 563.28
+        },
+        {
+          "fw": "langgraph",
+          "v": 394.922,
+          "ratio": 3464.23
+        }
+      ]
+    },
+    "rss_peak_mb": {
+      "winner": "ruflo",
+      "value": 58.91,
+      "runners_up": [
+        {
+          "fw": "autogen",
+          "v": 78.53,
+          "ratio": 1.33
+        },
+        {
+          "fw": "langgraph",
+          "v": 80.52,
+          "ratio": 1.37
+        },
+        {
+          "fw": "crewai",
+          "v": 264.05,
+          "ratio": 4.48
+        }
+      ]
+    }
+  }
+}

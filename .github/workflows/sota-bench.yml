@@ -1,0 +1,122 @@
+name: SOTA Comparator Benchmarks
+
+on:
+  push:
+    branches:
+      - perf/sota-comparator-benchmarks
+    paths:
+      - 'benchmarks/**'
+      - 'docs/benchmarks/sota-workload-spec.md'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - 'benchmarks/**'
+  workflow_dispatch:
+    inputs:
+      trials:
+        description: 'Number of trials per benchmark'
+        default: '5'
+        required: false
+      N:
+        description: 'Number of parallel agents'
+        default: '10'
+        required: false
+      K:
+        description: 'Number of tools per agent'
+        default: '50'
+        required: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  sota-matrix:
+    name: SOTA Matrix (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install Node dependencies
+        run: |
+          npm ci --ignore-scripts 2>/dev/null || npm install --ignore-scripts
+        working-directory: v3/@claude-flow/cli
+
+      - name: Build @claude-flow/cli
+        run: npm run build
+        working-directory: v3/@claude-flow/cli
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install Python comparator dependencies
+        run: |
+          pip install --quiet langgraph langchain-core autogen-agentchat autogen-core crewai setuptools
+          # Ensure pkg_resources is available for crewai
+          python3 -c "import pkg_resources" 2>/dev/null || \
+            python3 -c "
+import os, sys
+sp = next(p for p in sys.path if 'site-packages' in p)
+shim = os.path.join(sp, 'pkg_resources')
+if not os.path.exists(shim):
+    os.makedirs(shim, exist_ok=True)
+    with open(os.path.join(shim, '__init__.py'), 'w') as f:
+        f.write('''
+def get_distribution(name):
+    class D:
+        version = \"0.0.0\"
+    return D()
+def require(r): pass
+class DistributionNotFound(Exception): pass
+''')
+    print('pkg_resources shim installed')
+"
+
+      - name: Run SOTA comparator matrix
+        id: sota
+        run: |
+          TRIALS="${{ github.event.inputs.trials || '5' }}"
+          N="${{ github.event.inputs.N || '10' }}"
+          K="${{ github.event.inputs.K || '50' }}"
+          node benchmarks/run-sota-matrix.mjs \
+            --trials=$TRIALS \
+            --N=$N \
+            --K=$K \
+            --T=5 \
+            2>&1 | tee /tmp/sota-output.txt
+        env:
+          CI: true
+
+      - name: Upload matrix results
+        uses: actions/upload-artifact@v4
+        with:
+          name: sota-matrix-${{ matrix.os }}-${{ github.sha }}
+          path: docs/benchmarks/sota-matrix.json
+          retention-days: 90
+          if-no-files-found: warn
+
+      - name: Post matrix summary
+        if: always()
+        run: |
+          echo "## SOTA Matrix Results (${{ matrix.os }})" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat /tmp/sota-output.txt | grep -A 20 "SOTA Comparison Matrix" >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
