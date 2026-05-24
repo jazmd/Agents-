@@ -1095,11 +1095,21 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Install root deps (for sql.js + cli imports)
-        run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
+      - name: Setup pnpm (workspace-aware install)
+        uses: pnpm/action-setup@v4
+        with:
+          version: 8
+
+      - name: Install workspace deps (pnpm — handles `workspace:*` protocol)
+        # `cd v3/@claude-flow/cli && npm install` errors with
+        # `EUNSUPPORTEDPROTOCOL: Unsupported URL Type "workspace:"` because
+        # npm doesn't understand the workspace protocol used in our
+        # monorepo. pnpm does. Root install is sufficient — it populates
+        # `v3/@claude-flow/cli/node_modules` via the workspace topology.
+        run: pnpm install --frozen-lockfile=false --ignore-scripts
 
       - name: Build CLI dist
-        run: cd v3/@claude-flow/cli && npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts && npm run build
+        run: pnpm --filter @claude-flow/cli build
 
       - name: Run memory stats legacy-DB smoke
         run: node scripts/smoke-memory-stats-legacy-db.mjs
