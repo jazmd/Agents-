@@ -681,6 +681,10 @@ function generateStatusline() {
   let pkgVersion = '3.6';
   try {
     const home = require('os').homedir();
+    // Resolve global npm prefix so we also cover nvm-style and system-wide
+    // installs (`npm i -g ruflo`). Without this, users on nvm fell through
+    // to the hardcoded fallback even though `ruflo --version` reported correctly.
+    const npmGlobalRoot = safeExec('npm root -g', 1500);
     const pkgPaths = [
       // 1. The plugin's own root (installed via /plugin install).
       path.join(home, '.claude', 'plugins', 'marketplaces', 'ruflo', 'package.json'),
@@ -690,6 +694,11 @@ function generateStatusline() {
       path.join(CWD, 'node_modules', 'ruflo', 'package.json'),
       // 4. Source-checkout location (when developing in this repo).
       path.join(CWD, 'v3', '@claude-flow', 'cli', 'package.json'),
+      // 5. Global npm install (nvm / system) — resolved at runtime.
+      ...(npmGlobalRoot ? [
+        path.join(npmGlobalRoot, 'ruflo', 'package.json'),
+        path.join(npmGlobalRoot, '@claude-flow', 'cli', 'package.json'),
+      ] : []),
     ];
     for (const p of pkgPaths) {
       if (!fs.existsSync(p)) continue;
