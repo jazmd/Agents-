@@ -1937,12 +1937,11 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
           cache-dependency-path: v3/pnpm-lock.yaml
-      - name: Install dependencies
-        working-directory: v3
-        run: pnpm install --frozen-lockfile
-      - name: Build CLI
-        working-directory: v3/@claude-flow/cli
-        run: pnpm run build
+      - name: Install dependencies and build
+        run: |
+          cd v3
+          pnpm install --frozen-lockfile
+          pnpm -r build
       - name: Run graph schema smoke
         run: node scripts/smoke-graph-schema-migration.mjs
 
@@ -1964,12 +1963,11 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
           cache-dependency-path: v3/pnpm-lock.yaml
-      - name: Install dependencies
-        working-directory: v3
-        run: pnpm install --frozen-lockfile
-      - name: Build CLI
-        working-directory: v3/@claude-flow/cli
-        run: pnpm run build
+      - name: Install dependencies and build
+        run: |
+          cd v3
+          pnpm install --frozen-lockfile
+          pnpm -r build
       - name: Run graph query dispatch smoke
         run: node scripts/smoke-graph-query-dispatch.mjs
       - name: Run graph pathfinder smoke
@@ -1993,12 +1991,11 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
           cache-dependency-path: v3/pnpm-lock.yaml
-      - name: Install dependencies
-        working-directory: v3
-        run: pnpm install --frozen-lockfile
-      - name: Build CLI
-        working-directory: v3/@claude-flow/cli
-        run: pnpm run build
+      - name: Install dependencies and build
+        run: |
+          cd v3
+          pnpm install --frozen-lockfile
+          pnpm -r build
       - name: Run trajectory graph edges smoke
         run: node scripts/smoke-trajectory-graph-edges.mjs
 
@@ -2020,12 +2017,11 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
           cache-dependency-path: v3/pnpm-lock.yaml
-      - name: Install dependencies
-        working-directory: v3
-        run: pnpm install --frozen-lockfile
-      - name: Build CLI
-        working-directory: v3/@claude-flow/cli
-        run: pnpm run build
+      - name: Install dependencies and build
+        run: |
+          cd v3
+          pnpm install --frozen-lockfile
+          pnpm -r build
       - name: Run graph plugin adapter smoke
         run: node scripts/smoke-graph-plugin-adapter.mjs
 
@@ -2047,11 +2043,10 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
           cache-dependency-path: v3/pnpm-lock.yaml
-      - name: Install dependencies
-        working-directory: v3
-        run: pnpm install --frozen-lockfile
-      - name: Build CLI
-        working-directory: v3/@claude-flow/cli
-        run: pnpm run build
+      - name: Install dependencies and build
+        run: |
+          cd v3
+          pnpm install --frozen-lockfile
+          pnpm -r build
       - name: Run graph benchmark
         run: node scripts/benchmark-graph.mjs
