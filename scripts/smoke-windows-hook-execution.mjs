@@ -150,6 +150,12 @@ if (postEditCmd) {
     HOME: tmpDir,
     USERPROFILE: tmpDir,   // Windows fallback
     CI: 'true',
+    // The .cjs shim's priority-3 fallback is `npx --prefer-offline --yes
+    // ruflo@latest` — that takes 30+s on a cold CI runner and exceeds
+    // our 30s timeout, producing a spurious failure. We're testing the
+    // shim's exit-0 contract under the original #2132 conditions
+    // (no `/bin/bash` invocation, no exit 126), not the CLI dispatch.
+    RUFLO_HOOK_SKIP_NPX: '1',
   };
 
   let execResult;
