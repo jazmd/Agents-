@@ -1972,11 +1972,23 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
           cache-dependency-path: v3/pnpm-lock.yaml
-      - name: Install dependencies and build
+
+      - name: Install root deps (sql.js for the smoke fixture)
+        # Same pattern as the graph-schema-smoke job — sql.js is a root
+        # transitive dep, not declared in any workspace package.json.
+        run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
+
+      - name: Install v3 workspace deps and build
         run: |
           cd v3
           pnpm install --frozen-lockfile
           pnpm -r build
+
+      - name: Symlink sql.js into v3/node_modules
+        run: |
+          mkdir -p v3/node_modules
+          ln -sfn "$(pwd)/node_modules/sql.js" v3/node_modules/sql.js
+
       - name: Run graph query dispatch smoke
         run: node scripts/smoke-graph-query-dispatch.mjs
       - name: Run graph pathfinder smoke
