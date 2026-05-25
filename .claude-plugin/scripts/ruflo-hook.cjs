@@ -148,8 +148,17 @@ function main() {
     done();
   }
 
-  // Priority 3: npx --prefer-offline fallback (avoids cold registry resolve)
-  invokeHook('npx', ['--prefer-offline', '--yes', 'ruflo@latest'], hookArgs, stdinData);
+  // Priority 3: npx --prefer-offline fallback (avoids cold registry resolve).
+  //
+  // SKIP this when RUFLO_HOOK_SKIP_NPX=1 — used by CI smokes that test
+  // the shim's *control flow* without exercising npm install network paths.
+  // Without the skip, npx can take 30+s on a cold runner (no warm cache,
+  // no offline tarball), exceeding the smoke's 15s timeout and producing
+  // a spurious failure even though the shim itself works correctly.
+  // The bash version doesn't hit this because it backgrounded the work.
+  if (process.env.RUFLO_HOOK_SKIP_NPX !== '1') {
+    invokeHook('npx', ['--prefer-offline', '--yes', 'ruflo@latest'], hookArgs, stdinData);
+  }
 
   done();
 }

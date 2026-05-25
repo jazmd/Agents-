@@ -1648,7 +1648,7 @@ jobs:
         shell: bash
         run: |
           pnpm install --frozen-lockfile
-          pnpm --filter @claude-flow/cli run build
+          pnpm --filter "@claude-flow/cli..." run build
 
       - name: Run init hooks smoke
         shell: bash
@@ -1689,7 +1689,7 @@ jobs:
         shell: bash
         run: |
           pnpm install --frozen-lockfile
-          pnpm --filter @claude-flow/cli run build
+          pnpm --filter "@claude-flow/cli..." run build
 
       - name: Run Windows hook execution smoke
         shell: bash

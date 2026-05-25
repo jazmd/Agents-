@@ -41,6 +41,11 @@ function runShim(subcommand, extraArgs = [], stdinInput = '') {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 15_000,
+      // Skip the npx fallback — we're testing the shim's control flow, not the
+      // CLI dispatch. npx --prefer-offline can take 30+s on a cold CI runner
+      // (no warm cache, registry resolve), which exceeds our timeout above.
+      // The CLI dispatch path is covered by the agent-execute smoke separately.
+      env: { ...process.env, RUFLO_HOOK_SKIP_NPX: '1' },
     }
   );
 }
