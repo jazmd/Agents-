@@ -1938,11 +1938,11 @@ jobs:
           cache: 'pnpm'
           cache-dependency-path: v3/pnpm-lock.yaml
 
-      - name: Install root deps (sql.js for the smoke fixture)
-        # sql.js is not in any workspace package.json — it's a transitive
-        # dep at the repo root. The smoke imports it via createRequire on
-        # v3/package.json, but pnpm install inside v3/ doesn't hoist it.
-        # Same fix pattern as the #2120 memory smoke job.
+      - name: Install root deps (sql.js for smoke scripts)
+        # The smoke scripts use `await import('sql.js')` (bare ESM specifier),
+        # which resolves from root node_modules. pnpm install inside v3/ alone
+        # does not reliably expose sql.js to scripts run from the repo root.
+        # Same pattern as the #2120 memory-stats smoke job.
         run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
 
       - name: Install v3 workspace deps and build
@@ -1950,14 +1950,6 @@ jobs:
           cd v3
           pnpm install --frozen-lockfile
           pnpm -r build
-
-      - name: Symlink sql.js into v3/node_modules
-        # createRequire from v3/package.json needs sql.js in v3/node_modules
-        # or its parent chain. Root npm install put it at /node_modules/sql.js
-        # which is a sibling of v3/, so a symlink avoids duplicate install.
-        run: |
-          mkdir -p v3/node_modules
-          ln -sfn "$(pwd)/node_modules/sql.js" v3/node_modules/sql.js
 
       - name: Run graph schema smoke
         run: node scripts/smoke-graph-schema-migration.mjs
@@ -2008,6 +2000,8 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
           cache-dependency-path: v3/pnpm-lock.yaml
+      - name: Install root deps (sql.js for smoke scripts)
+        run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
       - name: Install dependencies and build
         run: |
           cd v3
@@ -2034,6 +2028,8 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
           cache-dependency-path: v3/pnpm-lock.yaml
+      - name: Install root deps (sql.js for smoke scripts)
+        run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
       - name: Install dependencies and build
         run: |
           cd v3
@@ -2060,6 +2056,8 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
           cache-dependency-path: v3/pnpm-lock.yaml
+      - name: Install root deps (sql.js for smoke scripts)
+        run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
       - name: Install dependencies and build
         run: |
           cd v3

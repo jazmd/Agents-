@@ -14,16 +14,17 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 
-import { createRequire } from 'module';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
 const distBase = path.join(projectRoot, 'v3/@claude-flow/cli/dist/src');
 
-// sql.js is in v3/node_modules (pnpm workspace root). Use v3/package.json as base.
-const _v3Require = createRequire(path.join(projectRoot, 'v3/package.json'));
+// sql.js is available in root node_modules (installed by the CI setup step via
+// `npm install --legacy-peer-deps --ignore-scripts` at the repo root).
+// This matches the pattern used by smoke-memory-stats-legacy-db.mjs which passes CI.
 async function loadSqlJs() {
-  const fn = _v3Require('sql.js');
-  return await (fn.default ?? fn)();
+  const mod = await import('sql.js');
+  const initSqlJs = mod.default ?? mod;
+  return await initSqlJs();
 }
 
 let passed = 0, failed = 0;

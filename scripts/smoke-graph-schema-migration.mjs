@@ -12,7 +12,6 @@
  * Usage: node scripts/smoke-graph-schema-migration.mjs
  */
 
-import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -21,14 +20,13 @@ import * as os from 'os';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
 
-// sql.js is installed in the v3 pnpm workspace root (v3/node_modules/sql.js).
-// Use createRequire scoped to v3/package.json to resolve it from the correct location.
-// This works both locally and in CI where pnpm hoists shared deps to v3/node_modules.
-const v3Require = createRequire(path.join(projectRoot, 'v3/package.json'));
+// sql.js is available in root node_modules (installed by the CI setup step via
+// `npm install --legacy-peer-deps --ignore-scripts` at the repo root).
+// This matches the pattern used by smoke-memory-stats-legacy-db.mjs which passes CI.
 async function loadSqlJs() {
-  const initSqlJsFn = v3Require('sql.js');
-  const SQL = await (initSqlJsFn.default ?? initSqlJsFn)();
-  return SQL;
+  const mod = await import('sql.js');
+  const initSqlJs = mod.default ?? mod;
+  return await initSqlJs();
 }
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
