@@ -19,10 +19,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
 const distBase = path.join(projectRoot, 'v3/@claude-flow/cli/dist/src');
 
-// sql.js lives in the CLI package's node_modules — resolve from there in CI.
-const _cliRequire = createRequire(path.join(distBase, 'memory/memory-initializer.js'));
+// sql.js is in v3/node_modules (pnpm workspace root). Use v3/package.json as base.
+const _v3Require = createRequire(path.join(projectRoot, 'v3/package.json'));
 async function loadSqlJs() {
-  const fn = _cliRequire('sql.js');
+  const fn = _v3Require('sql.js');
   return await (fn.default ?? fn)();
 }
 

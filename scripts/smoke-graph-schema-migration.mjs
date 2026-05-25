@@ -21,13 +21,12 @@ import * as os from 'os';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
 
-// sql.js lives in the CLI package's node_modules, not the repo root.
-// Resolve via createRequire scoped to the CLI dist to avoid "Cannot find package" in CI.
-const cliRequire = createRequire(
-  path.join(projectRoot, 'v3/@claude-flow/cli/dist/src/memory/memory-initializer.js'),
-);
+// sql.js is installed in the v3 pnpm workspace root (v3/node_modules/sql.js).
+// Use createRequire scoped to v3/package.json to resolve it from the correct location.
+// This works both locally and in CI where pnpm hoists shared deps to v3/node_modules.
+const v3Require = createRequire(path.join(projectRoot, 'v3/package.json'));
 async function loadSqlJs() {
-  const initSqlJsFn = cliRequire('sql.js');
+  const initSqlJsFn = v3Require('sql.js');
   const SQL = await (initSqlJsFn.default ?? initSqlJsFn)();
   return SQL;
 }
