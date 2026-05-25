@@ -21,6 +21,17 @@ import * as os from 'os';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
 
+// sql.js lives in the CLI package's node_modules, not the repo root.
+// Resolve via createRequire scoped to the CLI dist to avoid "Cannot find package" in CI.
+const cliRequire = createRequire(
+  path.join(projectRoot, 'v3/@claude-flow/cli/dist/src/memory/memory-initializer.js'),
+);
+async function loadSqlJs() {
+  const initSqlJsFn = cliRequire('sql.js');
+  const SQL = await (initSqlJsFn.default ?? initSqlJsFn)();
+  return SQL;
+}
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 let passed = 0;
@@ -67,8 +78,7 @@ async function testSchemaCreation() {
     assert(result.success, '1a: initializeMemoryDatabase succeeds', JSON.stringify(result));
 
     // Verify graph_edges exists via sql.js
-    const initSqlJs = (await import('sql.js')).default;
-    const SQL = await initSqlJs();
+    const SQL = await loadSqlJs();
     const fileBuffer = fs.readFileSync(dbPath);
     const db = new SQL.Database(fileBuffer);
 
@@ -122,8 +132,7 @@ async function testEdgeInsert() {
     assert(count === 1, `2b: graph_edges has 1 row (found ${count})`);
 
     // Verify embedding_ref is inline-encoded
-    const initSqlJs = (await import('sql.js')).default;
-    const SQL = await initSqlJs();
+    const SQL = await loadSqlJs();
     const fileBuffer = fs.readFileSync(dbPath);
     const db = new SQL.Database(fileBuffer);
 
@@ -168,8 +177,7 @@ async function testLegacyIdPrefix() {
     assert(ok, '3a: insertGraphEdge with mem:-prefixed IDs succeeds');
 
     // Verify row exists with the prefixed IDs
-    const initSqlJs = (await import('sql.js')).default;
-    const SQL = await initSqlJs();
+    const SQL = await loadSqlJs();
     const fileBuffer = fs.readFileSync(dbPath);
     const db = new SQL.Database(fileBuffer);
 
@@ -236,8 +244,7 @@ async function testTableAutoCreate() {
   const oldDbPath = path.join(tmpDir, 'old-memory.db');
   try {
     // Create a DB without graph_edges
-    const initSqlJs = (await import('sql.js')).default;
-    const SQL = await initSqlJs();
+    const SQL = await loadSqlJs();
     const db = new SQL.Database();
     db.run(`CREATE TABLE IF NOT EXISTS memory_entries (id TEXT PRIMARY KEY, key TEXT, content TEXT)`);
     const data = db.export();

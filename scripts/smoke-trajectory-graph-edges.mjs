@@ -14,9 +14,17 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 
+import { createRequire } from 'module';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(__dirname, '..');
 const distBase = path.join(projectRoot, 'v3/@claude-flow/cli/dist/src');
+
+// sql.js lives in the CLI package's node_modules — resolve from there in CI.
+const _cliRequire = createRequire(path.join(distBase, 'memory/memory-initializer.js'));
+async function loadSqlJs() {
+  const fn = _cliRequire('sql.js');
+  return await (fn.default ?? fn)();
+}
 
 let passed = 0, failed = 0;
 function pass(l) { console.log(`  PASS  ${l}`); passed++; }
@@ -44,8 +52,7 @@ async function countEdgesByRelation(relation) {
   // Read directly from file without resetting the module cache
   // (resetting during an in-flight write would break flushDb)
   try {
-    const initSqlJs = (await import('sql.js')).default;
-    const SQL = await initSqlJs();
+    const SQL = await loadSqlJs();
     if (!fs.existsSync(dbPath)) return 0;
     const fileBuffer = fs.readFileSync(dbPath);
     const db = new SQL.Database(fileBuffer);
