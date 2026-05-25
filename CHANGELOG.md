@@ -5,6 +5,16 @@ All notable changes to the Ruflo project (formerly Claude Flow) are documented h
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.0-alpha.73] - 2026-05-25
+
+### Fixed
+- CLAUDE.md: Aligned heading "Ruflo v3.5" to match version banner "Ruflo v3.6" (cosmetic)
+
+### Changed
+- Bump version `3.7.0-alpha.71` → `3.7.0-alpha.73`
+
+---
+
 ## [3.5.0] - 2026-02-27
 
 ### Ruflo v3.5 — First Major Stable Release
@@ -233,3 +243,5 @@ This release marks the official rebranding from **Claude Flow** to **Ruflo** and
 | Guidance Control Plane | v3.0.0-alpha.100 | 2026-01 | WASM policy kernel, ContinueGate |
 | AgentDB v3 | v3.1.0-alpha.55 | 2026-02 | 8 controllers, MutationGuard |
 | **Ruflo v3.5** | **v3.5.0** | **2026-02-27** | **First stable release, rebranding** |
+| **Ruflo v3.6** | **v3.6.10** | **2026-04-29** | **Agent federation, comms-first coordination** |
+| **Ruflo v3.7-alpha.73** | **v3.7.0-alpha.73** | **2026-05-25** | **Version alignment, CLAUDE.md fix** |
