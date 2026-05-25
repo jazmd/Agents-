@@ -1495,6 +1495,13 @@ jobs:
           cache: 'pnpm'
           cache-dependency-path: v3/pnpm-lock.yaml
 
+      - name: Install root deps (semver for audit-wrapper-dep-ranges)
+        # The audit-wrapper-dep-ranges.mjs script imports `semver` from the
+        # repo root node_modules. Run a root npm install BEFORE the audit
+        # job's main install/build step.
+        shell: bash
+        run: npm install --legacy-peer-deps --no-audit --no-fund --ignore-scripts
+
       - name: Install workspace + build plugins (so check D — exports-exist-after-build — is live)
         working-directory: v3
         shell: bash
