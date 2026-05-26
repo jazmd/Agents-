@@ -1179,14 +1179,18 @@ jobs:
           version: 8
 
       - name: Install workspace deps (pnpm — @claude-flow/memory pulled in workspace:* deps)
-        # Comment used to say "no workspace deps" — that's no longer true.
-        # The package now depends on sibling workspace packages (e.g. @claude-flow/shared)
-        # via workspace:* protocol, so npm install fails with EUNSUPPORTEDPROTOCOL.
-        # Use the v3-rooted pnpm install + recursive build pattern.
+        # @claude-flow/memory now depends on sibling workspace packages via
+        # workspace:* protocol, so plain npm install fails with
+        # EUNSUPPORTEDPROTOCOL. We MUST run install scripts (no --ignore-scripts)
+        # because the smoke runs `npm test` which opens better-sqlite3 via
+        # native bindings — the .node addon comes from better-sqlite3's
+        # prebuild-install postinstall step.
         working-directory: v3
         run: |
-          pnpm install --frozen-lockfile=false --ignore-scripts
+          pnpm install --frozen-lockfile=false
           pnpm --recursive --no-bail run build || true
+          # Belt-and-suspenders: explicit rebuild in case prebuild-install was skipped
+          pnpm rebuild better-sqlite3 || true
 
       - name: Run memory no-stray-db smoke
         run: node scripts/smoke-memory-no-stray-db.mjs
