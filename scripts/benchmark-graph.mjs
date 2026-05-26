@@ -22,7 +22,7 @@
  * Usage: node scripts/benchmark-graph.mjs [--json]
  */
 
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -35,6 +35,10 @@ const jsonMode = process.argv.includes('--json');
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'adr130-bench-'));
 const dbPath = path.join(tmpDir, 'memory.db');
 process.env.CLAUDE_FLOW_MEMORY_PATH = tmpDir;
+
+function distModule(relativePath) {
+  return pathToFileURL(path.join(distBase, relativePath)).href;
+}
 
 function percentile(sorted, p) {
   const idx = Math.ceil((p / 100) * sorted.length) - 1;
@@ -57,6 +61,12 @@ async function cleanup() {
   try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
 }
 
+async function exitAfterOutput() {
+  await new Promise(resolve => process.stdout.write('', resolve));
+  await new Promise(resolve => process.stderr.write('', resolve));
+  process.exit(0);
+}
+
 if (!jsonMode) console.log('\n[ADR-130 benchmark] Phase 6 — graph write/query throughput\n');
 
 const results = {};
@@ -68,10 +78,10 @@ const results = {};
 // the practical throughput for fire-and-forget writes in the system.
 
 async function benchWrite() {
-  const { initializeMemoryDatabase } = await import(path.join(distBase, 'memory/memory-initializer.js'));
+  const { initializeMemoryDatabase } = await import(distModule('memory/memory-initializer.js'));
   await initializeMemoryDatabase({ dbPath, force: true });
 
-  const { insertGraphEdge, _resetBridgeDb, getBridgeDb } = await import(path.join(distBase, 'memory/graph-edge-writer.js'));
+  const { insertGraphEdge, _resetBridgeDb, getBridgeDb } = await import(distModule('memory/graph-edge-writer.js'));
   // Open the db ONCE — stay in a single session so flush overhead is not
   // included in the per-insert measurement.
   _resetBridgeDb();
@@ -119,11 +129,11 @@ async function benchWrite() {
 // ─── BENCHMARK 2: k-hop query latency ────────────────────────────────────────
 
 async function benchKHop() {
-  const mod = await import(path.join(distBase, 'mcp-tools/agentdb-tools.js'));
+  const mod = await import(distModule('mcp-tools/agentdb-tools.js'));
   const tool = mod.agentdbGraphQuery ?? mod.agentdbTools?.find(t => t.name === 'agentdb_graph-query');
   if (!tool) { if (!jsonMode) console.log('  SKIP: agentdb_graph-query not found'); return; }
 
-  const { _resetBridgeDb } = await import(path.join(distBase, 'memory/graph-edge-writer.js'));
+  const { _resetBridgeDb } = await import(distModule('memory/graph-edge-writer.js'));
 
   if (!jsonMode) console.log('\n  k-hop query latency (5 iterations each):');
   const kHopResults = {};
@@ -150,7 +160,7 @@ async function benchKHop() {
 // ─── BENCHMARK 3: PQ encode/decode latency ───────────────────────────────────
 
 async function benchPQ() {
-  const { encodeEmbedding, decodeEmbedding } = await import(path.join(distBase, 'memory/embedding-quantization.js'));
+  const { encodeEmbedding, decodeEmbedding } = await import(distModule('memory/embedding-quantization.js'));
 
   if (!jsonMode) console.log('\n  PQ encode/decode latency (100 iterations each):');
 
@@ -182,7 +192,7 @@ async function benchPQ() {
   }
 
   // Test cosine fidelity
-  const { inlineCosine } = await import(path.join(distBase, 'memory/embedding-quantization.js'));
+  const { inlineCosine } = await import(distModule('memory/embedding-quantization.js'));
   const refA = encodeEmbedding(embedding);
   const selfSim = inlineCosine(refA, refA);
   if (!jsonMode) {
@@ -199,11 +209,11 @@ async function benchPQ() {
 // ─── BENCHMARK 4: pathfinder latency ─────────────────────────────────────────
 
 async function benchPathfinder() {
-  const mod = await import(path.join(distBase, 'mcp-tools/agentdb-tools.js'));
+  const mod = await import(distModule('mcp-tools/agentdb-tools.js'));
   const tool = mod.agentdbGraphPathfinder ?? mod.agentdbTools?.find(t => t.name === 'agentdb_graph-pathfinder');
   if (!tool) { if (!jsonMode) console.log('\n  SKIP: agentdb_graph-pathfinder not found'); return; }
 
-  const { _resetBridgeDb } = await import(path.join(distBase, 'memory/graph-edge-writer.js'));
+  const { _resetBridgeDb } = await import(distModule('memory/graph-edge-writer.js'));
 
   if (!jsonMode) console.log('\n  pathfinder latency (3 iterations each algorithm):');
   const pfResults = {};
@@ -259,3 +269,8 @@ if (jsonMode) {
   checks.forEach(([label, ok]) => console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${label}`));
   console.log(`\nTargets: ${pass}/${total} met`);
 }
+
+// Some imported graph/embedding modules keep background handles alive after the
+// benchmark has reported. Treat the benchmark output as the contract and exit
+// explicitly so CI does not wait for the job timeout.
+await exitAfterOutput();
