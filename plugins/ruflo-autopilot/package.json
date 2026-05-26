@@ -1,0 +1,11 @@
+{
+  "name": "ruflo-autopilot",
+  "version": "0.1.0-alpha.1",
+  "description": "Autonomous /loop-driven task completion with learning, prediction, and progress tracking",
+  "type": "module",
+  "license": "MIT",
+  "claude-flow": {
+    "agents": ["agents/autopilot.md"],
+    "commands": ["commands/autopilot.md", "commands/loop.md"]
+  }
+}
