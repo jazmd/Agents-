@@ -41,7 +41,7 @@
 | `@claude-flow/cli` | `v3/@claude-flow/cli/` | CLI entry point (26 commands) |
 | `@claude-flow/codex` | `v3/@claude-flow/codex/` | Dual-mode Claude + Codex collaboration |
 | `@claude-flow/guidance` | `v3/@claude-flow/guidance/` | Governance control plane |
-| `@claude-flow/hooks` | `v3/@claude-flow/hooks/` | 17 hooks + 12 workers |
+| `@claude-flow/hooks` | `v3/@claude-flow/hooks/` | 33 hook subcommands + 11 workers |
 | `@claude-flow/memory` | `v3/@claude-flow/memory/` | AgentDB + HNSW search |
 | `@claude-flow/security` | `v3/@claude-flow/security/` | Input validation, CVE remediation |
 
@@ -343,7 +343,7 @@ This project is configured with Claude Flow V3 (Anti-Drift Defaults):
 - **HNSW Indexing**: Enabled (150x-12,500x faster)
 - **Neural Learning**: Enabled (SONA)
 
-## V3 CLI Commands (26 Commands, 140+ Subcommands)
+## V3 CLI Commands (40 Commands, 140+ Subcommands)
 
 ### Core Commands
 
@@ -701,7 +701,7 @@ npx claude-flow@v3alpha hooks task-completed -i task-123 --train-patterns true
 6. **Graceful shutdown** — send `{ type: "shutdown_request" }` before TeamDelete
 7. **Lead synthesizes** — when agents complete, review ALL results before responding to user
 
-## V3 Hooks System (17 Hooks + 12 Workers)
+## V3 Hooks System (33 Hook Subcommands + 11 Workers)
 
 ### Hook Categories
 
@@ -713,22 +713,23 @@ npx claude-flow@v3alpha hooks task-completed -i task-123 --train-patterns true
 | **Learning** | `intelligence` (trajectory-start/step/end, pattern-store/search, stats, attention) | Reinforcement |
 | **Agent Teams** | `teammate-idle`, `task-completed` | Multi-agent coordination |
 
-### 12 Background Workers
+### 11 Background Workers
 
-| Worker | Priority | Description |
-|--------|----------|-------------|
-| `ultralearn` | normal | Deep knowledge acquisition |
-| `optimize` | high | Performance optimization |
-| `consolidate` | low | Memory consolidation |
-| `predict` | normal | Predictive preloading |
-| `audit` | critical | Security analysis |
-| `map` | normal | Codebase mapping |
-| `preload` | low | Resource preloading |
-| `deepdive` | normal | Deep code analysis |
-| `document` | normal | Auto-documentation |
-| `refactor` | normal | Refactoring suggestions |
-| `benchmark` | normal | Performance benchmarking |
-| `testgaps` | normal | Test coverage analysis |
+Registered in `v3/@claude-flow/hooks/src/workers/index.ts`.
+
+| Worker | Description |
+|--------|-------------|
+| `performance` | Performance profiling and bottleneck detection |
+| `health` | System health and dependency checks |
+| `swarm` | Swarm coordination and topology analysis |
+| `git` | Git activity and history analysis |
+| `learning` | Pattern learning and consolidation |
+| `adr` | Architecture decision record tracking |
+| `ddd` | DDD bounded-context auditing |
+| `security` | Security scanning |
+| `patterns` | Code pattern detection |
+| `cache` | Cache management |
+| `v3progress` | V3 implementation progress tracking |
 
 ### Essential Hook Commands
 
@@ -760,17 +761,17 @@ npx claude-flow@v3alpha hooks worker status
 ## Intelligence System (RuVector)
 
 V3 includes the RuVector Intelligence System:
-- **SONA**: Self-Optimizing Neural Architecture (<0.05ms adaptation)
+- **SONA**: Self-Optimizing Neural Architecture (upstream `@ruvector/sona` claims <1ms; no end-to-end ruflo benchmark for the <0.05ms figure)
 - **MoE**: Mixture of Experts for specialized routing
-- **HNSW**: 150x-12,500x faster pattern search
-- **EWC++**: Elastic Weight Consolidation (prevents forgetting)
-- **Flash Attention**: 2.49x-7.47x speedup
+- **HNSW**: 150x faster on the committed 10k-vector bench (`v3/@claude-flow/memory/benchmarks/results/`); 12,500x is a projection at scale, not measured
+- **EWC++**: STUB — `FlashAttention` class shipped, but `SonaManager` Fisher-info maps are never populated; consolidation is a no-op. Do not rely on for catastrophic-forgetting prevention.
+- **Flash Attention**: `FlashAttention` class shipped with internal `benchmark()`; the "2.49x-7.47x" figure is a projection — no committed benchmark result file proves it end-to-end yet.
 
 The 4-step intelligence pipeline:
 1. **RETRIEVE** — Fetch relevant patterns via HNSW
 2. **JUDGE** — Evaluate with verdicts (success/failure)
 3. **DISTILL** — Extract key learnings via LoRA
-4. **CONSOLIDATE** — Prevent catastrophic forgetting via EWC++
+4. **CONSOLIDATE** — Memory pruning (note: EWC++ catastrophic-forgetting prevention is a stub in `SonaManager`; Fisher-info maps are never populated)
 
 ## Embeddings Package (v3.0.0-alpha.12)
 
@@ -804,7 +805,7 @@ Features:
 | HNSW Search | 150x-12,500x faster | **Implemented** (persistent) |
 | Memory Reduction | 50-75% with quantization | **Implemented** (3.92x Int8) |
 | SONA Integration | Pattern learning | **Implemented** (ReasoningBank) |
-| Flash Attention | 2.49x-7.47x speedup | In progress |
+| Flash Attention | 2.49x-7.47x speedup (projection) | Class shipped; integration wiring + reproducible bench result still pending |
 | MCP Response | <100ms | Achieved |
 | CLI Startup | <500ms | Achieved |
 | SONA Adaptation | <0.05ms | In progress |
