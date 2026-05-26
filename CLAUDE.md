@@ -1,4 +1,4 @@
-# Claude Code Configuration - Ruflo v3.5
+# Claude Code Configuration - Ruflo v3.6
 
 > **Ruflo v3.6** (2026-04-29) — Stable release with agent federation and comms-first coordination.
 > 6,000+ commits, 314 MCP tools, 16 agent roles + custom types, 19 AgentDB controllers, 21 native plugins.
@@ -37,7 +37,7 @@
 ### Key Packages
 
 | Package | Path | Purpose |
-|---------|------|---------|
+|---------|------|----------|
 | `@claude-flow/cli` | `v3/@claude-flow/cli/` | CLI entry point (26 commands) |
 | `@claude-flow/codex` | `v3/@claude-flow/codex/` | Dual-mode Claude + Codex collaboration |
 | `@claude-flow/guidance` | `v3/@claude-flow/guidance/` | Governance control plane |
@@ -73,7 +73,7 @@
 ### 3-Tier Model Routing (ADR-026)
 
 | Tier | Handler | Latency | Cost | Use Cases |
-|------|---------|---------|------|-----------|
+|------|---------|---------|------|----------|
 | **1** | Agent Booster (WASM) | <1ms | $0 | Simple transforms (var→const, add types, etc.) — **Skip LLM entirely** |
 | **2** | Haiku | ~500ms | $0.0002 | Simple tasks, low complexity (<30%) |
 | **3** | Sonnet/Opus | 2-5s | $0.003-0.015 | Complex reasoning, architecture, security (>30%) |
@@ -449,7 +449,7 @@ wait  # Wait for all to complete
 # With results captured
 SECURITY=$(claude -p "Security audit of auth module" &)
 TESTS=$(claude -p "Generate test coverage report" &)
-PERF=$(claude -p "Profile memory usage in workers" &)
+PEEF=$(claude -p "Profile memory usage in workers" &)
 wait
 echo "$SECURITY" "$TESTS" "$PERF"
 ```
@@ -469,7 +469,7 @@ claude -p --resume "abc-123" --fork-session "Try approach B: CQRS pattern"
 ### Key Flags
 
 | Flag | Purpose |
-|------|---------|
+|------|----------|
 | `-p, --print` | Non-interactive mode, print and exit |
 | `--model <model>` | Select model (haiku, sonnet, opus) |
 | `--output-format <fmt>` | Output: text, json, stream-json |
@@ -682,7 +682,7 @@ Task({
 ### Agent Teams Hooks
 
 | Hook | Trigger | Purpose |
-|------|---------|---------|
+|------|---------|----------|
 | `TeammateIdle` | Teammate finishes turn | Auto-assign pending tasks via SendMessage |
 | `TaskCompleted` | Task marked complete | Train patterns, notify lead via SendMessage |
 
@@ -706,7 +706,7 @@ npx claude-flow@v3alpha hooks task-completed -i task-123 --train-patterns true
 ### Hook Categories
 
 | Category | Hooks | Purpose |
-|----------|-------|---------|
+|----------|-------|----------|
 | **Core** | `pre-edit`, `post-edit`, `pre-command`, `post-command`, `pre-task`, `post-task` | Tool lifecycle |
 | **Session** | `session-start`, `session-end`, `session-restore`, `notify` | Context management |
 | **Intelligence** | `route`, `explain`, `pretrain`, `build-agents`, `transfer` | Neural learning |
