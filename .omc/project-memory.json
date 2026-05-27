@@ -1,0 +1,300 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1779891406759,
+  "projectRoot": "/home/drdave/_work/repos/_forks/ruflo/.devfleet-worktrees/session-d0aab521",
+  "techStack": {
+    "languages": [
+      {
+        "name": "JavaScript/TypeScript",
+        "version": ">=20.0.0",
+        "confidence": "high",
+        "markers": [
+          "package.json"
+        ]
+      },
+      {
+        "name": "TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "tsconfig.json"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "vitest",
+        "version": "1.0.0",
+        "category": "testing"
+      }
+    ],
+    "packageManager": "pnpm",
+    "runtime": "Node.js 20.0.0"
+  },
+  "build": {
+    "buildCommand": "pnpm build",
+    "testCommand": "pnpm test",
+    "lintCommand": "pnpm lint",
+    "devCommand": "pnpm dev",
+    "scripts": {
+      "dev": "tsx watch src/index.ts",
+      "build": "tsc",
+      "build:ts": "cd v3/@claude-flow/cli && npm run build || true",
+      "test": "vitest",
+      "test:ui": "vitest --ui",
+      "test:security": "vitest run v3/__tests__/security/",
+      "lint": "cd v3/@claude-flow/cli && npm run lint || true",
+      "security:audit": "npm audit --audit-level high",
+      "security:fix": "npm audit fix",
+      "security:test": "npm run test:security",
+      "v3:domains": "npm run build:domains",
+      "v3:swarm": "npm run start:swarm",
+      "v3:security": "npm run security:audit && npm run security:test"
+    }
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": "*.test.ts",
+    "fileOrganization": null
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "bin",
+      "docs",
+      "scripts",
+      "tests"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "bin": {
+      "path": "bin",
+      "purpose": "Executable scripts",
+      "fileCount": 3,
+      "lastAccessed": 1779891406753,
+      "keyFiles": [
+        "cli.js",
+        "npx-repair.js",
+        "npx-safe-launch.js"
+      ]
+    },
+    "data": {
+      "path": "data",
+      "purpose": "Data files",
+      "fileCount": 3,
+      "lastAccessed": 1779891406754,
+      "keyFiles": [
+        "clone-data.ledger.json",
+        "clone-data.proof.json",
+        "clone-data.rvf"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 7,
+      "lastAccessed": 1779891406756,
+      "keyFiles": [
+        "IMPROVEMENT-ROADMAP.md",
+        "QUALITY-SWEEP.md",
+        "STATUS.md",
+        "TEAM-GATEWAY-CHECKLIST.md",
+        "USERGUIDE.md"
+      ]
+    },
+    "plugin": {
+      "path": "plugin",
+      "purpose": null,
+      "fileCount": 0,
+      "lastAccessed": 1779891406756,
+      "keyFiles": []
+    },
+    "plugins": {
+      "path": "plugins",
+      "purpose": null,
+      "fileCount": 1,
+      "lastAccessed": 1779891406757,
+      "keyFiles": [
+        "README.md"
+      ]
+    },
+    "ruflo": {
+      "path": "ruflo",
+      "purpose": null,
+      "fileCount": 5,
+      "lastAccessed": 1779891406757,
+      "keyFiles": [
+        "README.md",
+        "docker-compose.yml",
+        "package.json",
+        "rvf.manifest.json"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 58,
+      "lastAccessed": 1779891406757,
+      "keyFiles": [
+        "audit-cli-mcp-tools.mjs",
+        "audit-codex-integration.mjs",
+        "audit-env-var-precedence.mjs",
+        "audit-fix-invariants.mjs",
+        "audit-hook-commands.mjs"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 8,
+      "lastAccessed": 1779891406757,
+      "keyFiles": [
+        "context-persistence-hook.test.mjs",
+        "rvf-backend.test.ts",
+        "rvf-capability-verify.test.ts",
+        "rvf-embeddings.test.ts",
+        "rvf-event-log.test.ts"
+      ]
+    },
+    "v3": {
+      "path": "v3",
+      "purpose": null,
+      "fileCount": 15,
+      "lastAccessed": 1779891406758,
+      "keyFiles": [
+        "CHANGELOG.md",
+        "CLAUDE.md",
+        "README.md",
+        "bunfig.toml",
+        "index.ts"
+      ]
+    },
+    "verification": {
+      "path": "verification",
+      "purpose": null,
+      "fileCount": 7,
+      "lastAccessed": 1779891406758,
+      "keyFiles": [
+        "CAPABILITIES.md",
+        "README.md",
+        "cli-mcp-tool-baseline.json",
+        "inventory.json",
+        "mcp-tool-baseline.json"
+      ]
+    },
+    "plugin/scripts": {
+      "path": "plugin/scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 2,
+      "lastAccessed": 1779891406758,
+      "keyFiles": [
+        "ruflo-hook.cjs",
+        "ruflo-hook.sh"
+      ]
+    },
+    "ruflo/assets": {
+      "path": "ruflo/assets",
+      "purpose": "Static assets",
+      "fileCount": 2,
+      "lastAccessed": 1779891406758,
+      "keyFiles": [
+        "ruFlo.png",
+        "ruflo-small.jpeg"
+      ]
+    },
+    "ruflo/bin": {
+      "path": "ruflo/bin",
+      "purpose": "Executable scripts",
+      "fileCount": 1,
+      "lastAccessed": 1779891406759,
+      "keyFiles": [
+        "ruflo.js"
+      ]
+    },
+    "ruflo/docs": {
+      "path": "ruflo/docs",
+      "purpose": "Documentation",
+      "fileCount": 4,
+      "lastAccessed": 1779891406759,
+      "keyFiles": [
+        "AUTH.md",
+        "DOCKER.md",
+        "MODELS.md"
+      ]
+    },
+    "ruflo/src": {
+      "path": "ruflo/src",
+      "purpose": "Source code",
+      "fileCount": 1,
+      "lastAccessed": 1779891406759,
+      "keyFiles": []
+    },
+    "scripts/__tests__": {
+      "path": "scripts/__tests__",
+      "purpose": "Test files",
+      "fileCount": 1,
+      "lastAccessed": 1779891406759,
+      "keyFiles": [
+        "audit-supply-chain.test.mjs"
+      ]
+    },
+    "v3/__tests__": {
+      "path": "v3/__tests__",
+      "purpose": "Test files",
+      "fileCount": 1,
+      "lastAccessed": 1779891406759,
+      "keyFiles": [
+        "setup.ts"
+      ]
+    },
+    "v3/docs": {
+      "path": "v3/docs",
+      "purpose": "Documentation",
+      "fileCount": 1,
+      "lastAccessed": 1779891406759,
+      "keyFiles": [
+        "CLAUDE-FLOW-VS-TEAMMATE-TOOL-COMPARISON.md"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "v3/@claude-flow/cli/.claude/skills/hooks-automation/SKILL.md",
+      "accessCount": 7,
+      "lastAccessed": 1779891756941,
+      "type": "file"
+    },
+    {
+      "path": ".claude/skills/hooks-automation/SKILL.md",
+      "accessCount": 4,
+      "lastAccessed": 1779891871084,
+      "type": "file"
+    },
+    {
+      "path": ".agents/skills/hooks-automation/SKILL.md",
+      "accessCount": 4,
+      "lastAccessed": 1779891882090,
+      "type": "file"
+    },
+    {
+      "path": "v3/@claude-flow/cli/.claude/commands/hooks/setup.md",
+      "accessCount": 3,
+      "lastAccessed": 1779891663186,
+      "type": "file"
+    },
+    {
+      "path": "v3/@claude-flow/mcp/.claude/commands/hooks/setup.md",
+      "accessCount": 3,
+      "lastAccessed": 1779891699985,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}
