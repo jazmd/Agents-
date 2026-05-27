@@ -104,8 +104,8 @@ export interface GaiaAgentResult {
   totalInputTokens: number;
   totalOutputTokens: number;
   wallMs: number;
-  /** Number of planning-checkpoint injections during this run. */
-  replanCount: number;
+  /** Number of planning-checkpoint injections during this run (0 when planning is disabled). */
+  replanCount?: number;
   timedOut?: boolean;
   error?: string;
 }
