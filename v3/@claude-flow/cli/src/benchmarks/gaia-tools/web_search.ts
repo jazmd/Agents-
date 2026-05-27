@@ -1,34 +1,43 @@
 /**
- * GAIA Tool: web_search — ADR-133-PR2
+ * GAIA Tool: web_search — ADR-133-PR2 / ADR-135
  *
- * Scrapes DuckDuckGo HTML search results for a query string and returns
- * the top-N snippet titles + URLs as a plain-text block.  No API key
- * required; uses DDG's HTML endpoint which is publicly accessible.
+ * Multi-backend web search with Google Custom Search as the primary engine.
  *
- * Design notes:
- * - Uses native Node.js https/http (no external fetch polyfill).
- * - Follows the DDG Lite HTML endpoint: https://html.duckduckgo.com/html/?q=…
- * - Parses result titles + URLs via a simple regex (no DOM parser dependency).
- * - Rate-limit aware: 1-second back-off between calls is the caller's
- *   responsibility (the agent loop enforces this in PR-3).
- * - PDF / binary detection is handled by file_read.ts, not here.
+ * Backend priority (iter 30 finding — HAL uses Google, JoyAgent shows +16pp Google vs Bing):
+ *   1. Google Custom Search API  — best quality, needs GOOGLE_CUSTOM_SEARCH_API_KEY + _CX
+ *   2. Wikipedia REST API        — reliable structured fallback for factual queries
+ *   3. DuckDuckGo HTML scrape    — zero-creds fallback (original iter-21 backend)
  *
- * Refs: ADR-133, #2156
+ * Credential resolution for Google (in order):
+ *   a. GOOGLE_CUSTOM_SEARCH_API_KEY + GOOGLE_CUSTOM_SEARCH_CX env vars
+ *   b. gcloud secrets versions access (ruv-dev project) — async exec, non-blocking
+ *   c. If either is absent → skip Google, fall through to Wikipedia
+ *
+ * Fallback semantics:
+ *   - If Google credentials are missing → silently skip, no warning
+ *   - If Google returns 0 results or throws → warn + fall through to Wikipedia
+ *   - If Wikipedia returns 0 results or throws → fall through to DDG
+ *   - If DDG throws → propagate error to caller
+ *
+ * Backend selection is logged to stderr so L1 run logs show which engine served each query.
+ *
+ * Refs: ADR-133, ADR-135, iter 30 research, #2156
  */
 
 import * as https from 'node:https';
-import * as http from 'node:http';
 import { GaiaTool, ToolDefinition } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const DDG_HTML_URL = 'https://html.duckduckgo.com/html/';
 const DEFAULT_MAX_RESULTS = 5;
 const REQUEST_TIMEOUT_MS = 20_000;
+const GOOGLE_CSE_BASE = 'https://customsearch.googleapis.com/customsearch/v1';
+const WIKIPEDIA_SEARCH_BASE = 'https://en.wikipedia.org/w/api.php';
+const DDG_HTML_URL = 'https://html.duckduckgo.com/html/';
 
-// User-Agent that DDG accepts (plain browser UA).
+/** User-Agent accepted by DDG and Wikipedia. */
 const UA =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
 
@@ -42,14 +51,142 @@ export interface SearchResult {
   snippet: string;
 }
 
+export interface GoogleCseCredentials {
+  apiKey: string;
+  cx: string;
+}
+
 // ---------------------------------------------------------------------------
-// HTML fetch helper
+// Google Custom Search — credential resolution
 // ---------------------------------------------------------------------------
 
 /**
- * POST to DuckDuckGo's HTML search endpoint and return the raw HTML string.
- * DDG blocks GET for automated scrapers but accepts POST form submissions.
+ * Resolve Google Custom Search credentials.
+ *
+ * Returns null when credentials are unavailable — callers must fall through.
+ * Never throws (all errors are caught and collapsed to null).
  */
+export async function resolveGoogleCustomSearchCredentials(): Promise<GoogleCseCredentials | null> {
+  // 1. Env vars — fastest path, used in test mocks
+  const envKey = process.env['GOOGLE_CUSTOM_SEARCH_API_KEY'];
+  const envCx = process.env['GOOGLE_CUSTOM_SEARCH_CX'];
+  if (envKey && envCx) {
+    return { apiKey: envKey, cx: envCx };
+  }
+
+  // 2. GCP Secrets Manager fallback (matches existing resolveApiKey pattern in gaia-bench.ts)
+  //    execSync in a try/catch so missing gcloud binary or missing secret → return null
+  try {
+    const { execSync } = await import('node:child_process');
+    const apiKey = execSync(
+      'gcloud secrets versions access latest --secret=GOOGLE_CUSTOM_SEARCH_API_KEY --project=ruv-dev 2>/dev/null',
+      { encoding: 'utf-8', timeout: 5_000 },
+    ).trim();
+    const cx = execSync(
+      'gcloud secrets versions access latest --secret=GOOGLE_CUSTOM_SEARCH_CX --project=ruv-dev 2>/dev/null',
+      { encoding: 'utf-8', timeout: 5_000 },
+    ).trim();
+    if (apiKey && cx) {
+      return { apiKey, cx };
+    }
+  } catch {
+    // gcloud not installed, project unreachable, or secrets not yet created → fall through
+  }
+
+  return null; // Signal: Google not configured — use fallback chain
+}
+
+// ---------------------------------------------------------------------------
+// Backend 1: Google Custom Search
+// ---------------------------------------------------------------------------
+
+interface GoogleCseItem {
+  title: string;
+  link: string;
+  snippet?: string;
+}
+
+interface GoogleCseResponse {
+  items?: GoogleCseItem[];
+  error?: { message: string; code: number };
+}
+
+/**
+ * Search via Google Custom Search JSON API.
+ *
+ * Throws on HTTP errors or API-level errors so caller can fall through.
+ */
+export async function searchGoogleCustomSearch(
+  query: string,
+  creds: GoogleCseCredentials,
+  maxResults: number,
+  timeoutMs: number,
+): Promise<SearchResult[]> {
+  const url =
+    `${GOOGLE_CSE_BASE}?key=${encodeURIComponent(creds.apiKey)}` +
+    `&cx=${encodeURIComponent(creds.cx)}` +
+    `&q=${encodeURIComponent(query)}` +
+    `&num=${Math.min(maxResults, 10)}`;
+
+  const resp = await fetchJson<GoogleCseResponse>(url, timeoutMs);
+
+  if (resp.error) {
+    throw new Error(`Google CSE API error ${resp.error.code}: ${resp.error.message}`);
+  }
+
+  return (resp.items ?? []).map((item) => ({
+    title: item.title,
+    url: item.link,
+    snippet: item.snippet ?? '',
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Backend 2: Wikipedia REST Search
+// ---------------------------------------------------------------------------
+
+interface WikipediaSearchResult {
+  title: string;
+  pageid: number;
+  snippet: string;
+}
+
+interface WikipediaSearchResponse {
+  query?: {
+    search?: WikipediaSearchResult[];
+  };
+}
+
+/**
+ * Search Wikipedia via the MediaWiki action API.
+ * Returns snippet-level results (not full article text).
+ */
+export async function searchWikipedia(
+  query: string,
+  maxResults: number,
+  timeoutMs: number,
+): Promise<SearchResult[]> {
+  const url =
+    `${WIKIPEDIA_SEARCH_BASE}?action=query&list=search` +
+    `&srsearch=${encodeURIComponent(query)}` +
+    `&srlimit=${maxResults}` +
+    `&format=json&origin=*`;
+
+  const resp = await fetchJson<WikipediaSearchResponse>(url, timeoutMs);
+  const hits = resp.query?.search ?? [];
+
+  return hits.map((hit) => ({
+    title: hit.title,
+    url: `https://en.wikipedia.org/wiki/${encodeURIComponent(hit.title.replace(/ /g, '_'))}`,
+    snippet: stripHtml(hit.snippet),
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Backend 3: DuckDuckGo HTML scrape (original iter-21 backend, preserved)
+// ---------------------------------------------------------------------------
+
+/** POST to DDG's HTML search endpoint and return the raw HTML string. */
 async function fetchDdgHtml(query: string): Promise<string> {
   const body = `q=${encodeURIComponent(query)}&b=&kl=&df=`;
   const bodyBytes = Buffer.from(body, 'utf-8');
@@ -69,7 +206,6 @@ async function fetchDdgHtml(query: string): Promise<string> {
     };
 
     const req = https.request(options, (res) => {
-      // Follow a single redirect if needed (DDG occasionally redirects to /html/)
       if (
         res.statusCode !== undefined &&
         res.statusCode >= 300 &&
@@ -78,7 +214,6 @@ async function fetchDdgHtml(query: string): Promise<string> {
       ) {
         const loc = res.headers.location;
         res.resume();
-        // Simple follow — only handle absolute https redirects
         if (loc.startsWith('https://')) {
           https
             .get(loc, { headers: { 'User-Agent': UA } }, (r2) => {
@@ -116,24 +251,16 @@ async function fetchDdgHtml(query: string): Promise<string> {
   });
 }
 
-// ---------------------------------------------------------------------------
-// HTML parser (regex-based, no DOM)
-// ---------------------------------------------------------------------------
-
 /**
  * Extract up to `maxResults` search results from DDG HTML.
  *
  * DDG's HTML result structure (stable as of 2026):
  *   <a class="result__a" href="URL">TITLE</a>
  *   <a class="result__snippet">SNIPPET</a>
- *
- * We parse with regex to avoid adding an htmlparser2 dependency.
  */
 function parseDdgHtml(html: string, maxResults: number): SearchResult[] {
   const results: SearchResult[] = [];
 
-  // Match result blocks — DDG wraps each result in <div class="result …">
-  // We extract title+url from the result__a anchor, and snippet from result__snippet.
   const resultBlockRe =
     /<a[^>]+class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?(?:<a[^>]+class="result__snippet"[^>]*>([\s\S]*?)<\/a>)?/g;
 
@@ -143,7 +270,6 @@ function parseDdgHtml(html: string, maxResults: number): SearchResult[] {
     const rawTitle = match[2] ?? '';
     const rawSnippet = match[3] ?? '';
 
-    // DDG wraps URLs in //duckduckgo.com/l/?uddg=ENCODED_URL
     const url = decodeRawUrl(rawUrl);
     const title = stripHtml(rawTitle).trim();
     const snippet = stripHtml(rawSnippet).trim();
@@ -172,10 +298,13 @@ function decodeRawUrl(raw: string): string {
       }
     }
   }
-  // Direct URL (some results skip the redirect)
   if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
   return raw;
 }
+
+// ---------------------------------------------------------------------------
+// Shared utilities
+// ---------------------------------------------------------------------------
 
 /** Strip HTML tags and decode common entities. */
 function stripHtml(html: string): string {
@@ -191,20 +320,180 @@ function stripHtml(html: string): string {
     .trim();
 }
 
+/**
+ * Fetch a JSON endpoint via native https.get, with a timeout.
+ * Follows a single redirect if needed.
+ */
+function fetchJson<T>(url: string, timeoutMs: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const req = https.get(
+      url,
+      {
+        headers: {
+          'User-Agent': UA,
+          Accept: 'application/json',
+        },
+      },
+      (res) => {
+        // Follow one redirect
+        if (
+          res.statusCode !== undefined &&
+          res.statusCode >= 300 &&
+          res.statusCode < 400 &&
+          res.headers.location
+        ) {
+          res.resume();
+          const loc = res.headers.location;
+          if (loc.startsWith('https://')) {
+            fetchJson<T>(loc, timeoutMs).then(resolve, reject);
+          } else {
+            reject(new Error(`fetchJson unexpected redirect: ${loc}`));
+          }
+          return;
+        }
+
+        if (res.statusCode !== 200) {
+          const chunks: Buffer[] = [];
+          res.on('data', (c: Buffer) => chunks.push(c));
+          res.on('end', () =>
+            reject(
+              new Error(
+                `HTTP ${res.statusCode}: ${Buffer.concat(chunks).toString('utf-8').slice(0, 200)}`,
+              ),
+            ),
+          );
+          return;
+        }
+
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(Buffer.concat(chunks).toString('utf-8')) as T);
+          } catch (e) {
+            reject(new Error(`fetchJson JSON parse error: ${String(e)}`));
+          }
+        });
+        res.on('error', reject);
+      },
+    );
+
+    req.on('error', reject);
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error(`fetchJson timeout after ${timeoutMs}ms`));
+    });
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Format output for Claude
 // ---------------------------------------------------------------------------
 
-function formatResults(results: SearchResult[]): string {
+function formatResults(results: SearchResult[], backend: string): string {
   if (results.length === 0) {
     return 'No results found.';
   }
-  return results
+  const header = `[web_search backend: ${backend}]`;
+  const body = results
     .map(
       (r, i) =>
         `[${i + 1}] ${r.title}\n    URL: ${r.url}${r.snippet ? '\n    ' + r.snippet : ''}`,
     )
     .join('\n\n');
+  return `${header}\n\n${body}`;
+}
+
+// ---------------------------------------------------------------------------
+// Test hooks — allow smoke tests to inject stub backends without module patching.
+// These are only used when set; production code leaves them undefined.
+// ---------------------------------------------------------------------------
+
+/**
+ * Mutable backend overrides for smoke testing.
+ *
+ * Set these before calling `tool.execute()` in tests, then restore to `undefined`.
+ * Example:
+ *   webSearchTestHooks.googleSearch = async () => [{ title:'T', url:'U', snippet:'S' }];
+ *   webSearchTestHooks.credentialResolver = async () => ({ apiKey:'k', cx:'c' });
+ *   // ... after test ...
+ *   delete webSearchTestHooks.googleSearch;
+ */
+export const webSearchTestHooks: {
+  credentialResolver?: () => Promise<GoogleCseCredentials | null>;
+  googleSearch?: (
+    query: string,
+    creds: GoogleCseCredentials,
+    maxResults: number,
+    timeoutMs: number,
+  ) => Promise<SearchResult[]>;
+  wikipediaSearch?: (
+    query: string,
+    maxResults: number,
+    timeoutMs: number,
+  ) => Promise<SearchResult[]>;
+  ddgFetch?: (query: string) => Promise<string>;
+} = {};
+
+// ---------------------------------------------------------------------------
+// Orchestrated search: try backends in priority order
+// ---------------------------------------------------------------------------
+
+/**
+ * Execute a web search using the best available backend.
+ *
+ * Priority:
+ *   1. Google Custom Search (if GOOGLE_CUSTOM_SEARCH_API_KEY + _CX available)
+ *   2. Wikipedia REST Search
+ *   3. DuckDuckGo HTML scrape
+ *
+ * Each backend failure (0 results or exception) is logged to stderr and
+ * falls through to the next. DDG is the final backend and propagates errors.
+ *
+ * In test environments, set `webSearchTestHooks.*` to inject stub backends
+ * without any module-level monkey-patching.
+ */
+async function executeWebSearch(query: string, maxResults: number): Promise<string> {
+  const resolveCredsFn = webSearchTestHooks.credentialResolver ?? resolveGoogleCustomSearchCredentials;
+  const googleSearchFn = webSearchTestHooks.googleSearch ?? searchGoogleCustomSearch;
+  const wikipediaSearchFn = webSearchTestHooks.wikipediaSearch ?? searchWikipedia;
+  const ddgFetchFn = webSearchTestHooks.ddgFetch ?? fetchDdgHtml;
+
+  // --- Backend 1: Google Custom Search ---
+  const googleCreds = await resolveCredsFn();
+  if (googleCreds) {
+    try {
+      const results = await googleSearchFn(query, googleCreds, maxResults, REQUEST_TIMEOUT_MS);
+      if (results.length > 0) {
+        process.stderr.write(`[web_search] backend=google query=${JSON.stringify(query)}\n`);
+        return formatResults(results, 'google-cse');
+      }
+      process.stderr.write(`[web_search] Google CSE returned 0 results, falling back\n`);
+    } catch (err) {
+      process.stderr.write(
+        `[web_search] Google CSE failed: ${(err as Error).message}, falling back to wikipedia\n`,
+      );
+    }
+  }
+
+  // --- Backend 2: Wikipedia ---
+  try {
+    const results = await wikipediaSearchFn(query, maxResults, REQUEST_TIMEOUT_MS);
+    if (results.length > 0) {
+      process.stderr.write(`[web_search] backend=wikipedia query=${JSON.stringify(query)}\n`);
+      return formatResults(results, 'wikipedia');
+    }
+    process.stderr.write(`[web_search] Wikipedia returned 0 results, falling back to ddg\n`);
+  } catch (err) {
+    process.stderr.write(
+      `[web_search] Wikipedia failed: ${(err as Error).message}, falling back to ddg\n`,
+    );
+  }
+
+  // --- Backend 3: DuckDuckGo (original iter-21 backend) ---
+  process.stderr.write(`[web_search] backend=ddg query=${JSON.stringify(query)}\n`);
+  const html = await ddgFetchFn(query);
+  const results = parseDdgHtml(html, maxResults);
+  return formatResults(results, 'ddg');
 }
 
 // ---------------------------------------------------------------------------
@@ -217,7 +506,9 @@ export class WebSearchTool implements GaiaTool {
   readonly definition: ToolDefinition = {
     name: 'web_search',
     description:
-      'Search the web using DuckDuckGo and return the top results (title, URL, snippet). ' +
+      'Search the web and return the top results (title, URL, snippet). ' +
+      'Uses Google Custom Search when credentials are available (best quality), ' +
+      'otherwise falls back to Wikipedia or DuckDuckGo. ' +
       'Use this when you need current information, external facts, or to verify claims.',
     input_schema: {
       type: 'object',
@@ -244,9 +535,7 @@ export class WebSearchTool implements GaiaTool {
       10,
     );
 
-    const html = await fetchDdgHtml(query);
-    const results = parseDdgHtml(html, maxResults);
-    return formatResults(results);
+    return executeWebSearch(query, maxResults);
   }
 }
 
