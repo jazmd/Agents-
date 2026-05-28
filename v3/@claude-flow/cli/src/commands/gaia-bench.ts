@@ -159,8 +159,8 @@ const runCommand: Command = {
     {
       name: 'max-turns',
       type: 'number',
-      description: 'Maximum agent turns per question (default: 12). Overridden per-question when --hardness-routing is enabled.',
-      default: '12',
+      description: 'Maximum agent turns per question (default: 24). Overridden per-question when --hardness-routing is enabled.',
+      default: '24',
     },
     {
       name: 'judge-model',
@@ -251,7 +251,7 @@ const runCommand: Command = {
       ctx.flags['smoke-only'] === true || ctx.flags['smoke-only'] === 'true';
     // Parser converts --max-turns to maxTurns, --judge-model to judgeModel, --voting-attempts to votingAttempts
     // NOTE: default must match DEFAULT_MAX_TURNS in benchmarks/gaia-agent.ts
-    const maxTurns = parseInt(String(ctx.flags['maxTurns'] ?? ctx.flags['max-turns'] ?? '12'), 10);
+    const maxTurns = parseInt(String(ctx.flags['maxTurns'] ?? ctx.flags['max-turns'] ?? '24'), 10);
     const judgeModel = String(ctx.flags['judgeModel'] ?? ctx.flags['judge-model'] ?? 'claude-sonnet-4-6');
     // votingAttempts=1 means no voting (backward-compat default).  N>1 routes through runGaiaAgentWithVoting.
     const votingAttempts = parseInt(String(ctx.flags['votingAttempts'] ?? ctx.flags['voting-attempts'] ?? '1'), 10);

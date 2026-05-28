@@ -34,7 +34,7 @@ Run GAIA benchmark questions through the ruflo agent loop.
 | `--enable-critic` | off | Track D: adversarial critic reviews answer before submission (+3-5pp; skipped when voting-attempts > 1) |
 | `--decompose` | off | Track E: decompose multi-step questions into sub-questions (+5-10pp on ~30-40% of L1 set) |
 | `--planning-interval` | `4` | Track B: inject planning checkpoint every N turns (0=disable; based on smolagents finding) |
-| `--max-turns` | `12` | Max agent turns per question (overridden by hardness router) |
+| `--max-turns` | `24` | Max agent turns per question (overridden by hardness router) |
 | `--judge-model` | `claude-sonnet-4-6` | Model used for LLM-as-judge scoring |
 | `--smoke-only` | off | Use 5-question fixture (CI / no HF token) |
 | `--output` | `text` | `text` or `json` |

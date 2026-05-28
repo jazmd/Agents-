@@ -53,7 +53,7 @@ import {
 const ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
 const ANTHROPIC_API_VERSION = '2023-06-01';
 const DEFAULT_MODEL = 'claude-haiku-4-5';
-const DEFAULT_MAX_TURNS = 8;
+const DEFAULT_MAX_TURNS = 24; // iter-51 A3: raised from 8 to 24 to eliminate turn-budget starvation (~12q failed at turn 1 per iter-49 analysis)
 const DEFAULT_MAX_TOKENS_PER_TURN = 2048;
 const DEFAULT_PER_TURN_TIMEOUT_MS = 60_000;
 
