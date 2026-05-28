@@ -407,10 +407,8 @@ export async function runGaiaAgent(
   let totalOutputTokens = 0;
   let replanCount = 0;
 
-  // Build initial user message — include attachment context if available (iter-53b)
-  const initialContent = buildInitialContent(question);
   const messages: MessageParam[] = [
-    { role: 'user', content: initialContent },
+    { role: 'user', content: buildUserMessage(question.question) },
   ];
 
   let turns = 0;
