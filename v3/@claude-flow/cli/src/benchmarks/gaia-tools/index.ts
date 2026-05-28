@@ -1,5 +1,5 @@
 /**
- * gaia-tools barrel — ADR-133-PR2 / ADR-138 iter 54
+ * gaia-tools barrel — ADR-133-PR2 / ADR-138 iter 54 / iter-57
  *
  * Exports all tool implementations + shared types so that gaia-agent.ts
  * (PR-3) and gaia-codeagent.ts (ADR-138) can import from a single entry point.
@@ -10,7 +10,15 @@
  *
  * iter-54 adds: visit_webpage, python_exec, pdf_read (HAL tool parity).
  *
- * Refs: ADR-133, ADR-135, ADR-138, #2156
+ * iter-57 upgrades visit_webpage:
+ *   - max_chars parameter (50k default, was 8k hardcoded)
+ *   - visitWebpageTestHooks for unit testing without live HTTP
+ *   - Link extraction (up to 30 links)
+ *   - AIDefence PII gate (optional)
+ *   - Structured VisitWebpageResult type
+ *   - visit_webpage added to createDefaultToolCatalogue() (previously CodeAgent-only)
+ *
+ * Refs: ADR-133, ADR-135, ADR-138, iter-57, #2156
  */
 
 export * from './types.js';
@@ -32,15 +40,22 @@ import type { GaiaToolCatalogue } from './types.js';
 /**
  * Returns the default tool catalogue for a GAIA Level-1 run (ToolCallingAgent).
  *
- * PR-2 catalogue: web_search + file_read
- * iter-33 adds:   grounded_query (Gemini 2.5 Flash grounding — pre-synthesised answer + citations)
+ * PR-2 catalogue:  web_search + file_read
+ * iter-33 adds:    grounded_query (Gemini 2.5 Flash grounding — pre-synthesised answer)
+ * iter-57 adds:    visit_webpage (full page text — HAL parity, highest remaining lift)
  *
- * Both web_search and grounded_query are registered so the agent can choose:
- *   - grounded_query: for factoid questions needing a clean answer with citations (1 call)
- *   - web_search: for questions needing raw snippets or source page reading (multi-backend)
+ * Agent tool selection guide:
+ *   - grounded_query: factoid questions needing a clean answer with citations (1 call)
+ *   - web_search:     raw snippets when source URLs are needed for follow-up
+ *   - visit_webpage:  read the FULL content of a specific URL (Wikipedia, docs, etc.)
  */
 export function createDefaultToolCatalogue(): GaiaToolCatalogue {
-  return [createWebSearchTool(), createFileReadTool(), createGroundedQueryTool()];
+  return [
+    createWebSearchTool(),
+    createFileReadTool(),
+    createGroundedQueryTool(),
+    createVisitWebpageTool(),
+  ];
 }
 
 /**
