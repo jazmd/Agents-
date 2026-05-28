@@ -1,7 +1,7 @@
 ---
 name: gaia-run
 description: Execute a GAIA benchmark run — shells out to gaia-bench run, streams progress, and writes JSON results
-argument-hint: "[--level=1] [--limit=53] [--models=haiku,sonnet] [--concurrency=3] [--voting-attempts=1] [--hardness-routing] [--enable-critic] [--decompose] [--planning-interval=4]"
+argument-hint: "[--level=1] [--limit=53] [--models=haiku,sonnet] [--concurrency=3] [--voting-attempts=1] [--hardness-routing] [--enable-critic] [--decompose] [--planning-interval=4] [--enable-cse]"
 ---
 
 # /gaia run
@@ -38,6 +38,27 @@ Run GAIA benchmark questions through the ruflo agent loop.
 | `--judge-model` | `claude-sonnet-4-6` | Model used for LLM-as-judge scoring |
 | `--smoke-only` | off | Use 5-question fixture (CI / no HF token) |
 | `--output` | `text` | `text` or `json` |
+| `--enable-cse` | auto | Use Google Custom Search Engine as primary web_search backend. Default: on when `GOOGLE_AI_API_KEY` + `GOOGLE_CUSTOM_SEARCH_CX` are present (env or GCP Secret Manager). Pass `--enable-cse=false` to force DDG-only for ablation measurement. Set `DISABLE_CSE=1` to suppress CSE globally. |
+
+## web_search backend chain (iter-50)
+
+`web_search` now uses a 4-backend fallback:
+1. **Google CSE** (primary, requires `GOOGLE_AI_API_KEY` + `GOOGLE_CUSTOM_SEARCH_CX`) — JoyAgent benchmark shows +16pp over Bing.
+2. **Wikipedia REST API** — zero-key, exact-match fact retrieval.
+3. **Brave Search** — requires `BRAVE_API_KEY`.
+4. **DuckDuckGo HTML** — zero-key scrape fallback.
+
+Each backend logs `[web_search] backend=<name> results=<n>` to stderr for per-question analysis.
+
+To ablate the CSE lift (iter 50 measurement):
+```bash
+# With CSE (default when credentials present):
+/gaia run --level=1 --limit=53 --enable-cse
+
+# Without CSE (DDG baseline):
+/gaia run --level=1 --limit=53 --enable-cse=false
+# or: DISABLE_CSE=1 /gaia run ...
+```
 
 ## Flag precedence
 

@@ -1,9 +1,20 @@
 /**
- * GAIA Tool: web_search — ADR-133-PR2
+ * GAIA Tool: web_search — ADR-133-PR2 / iter-50 (CSE primary backend)
  *
- * Scrapes DuckDuckGo HTML search results for a query string and returns
- * the top-N snippet titles + URLs as a plain-text block.  No API key
- * required; uses DDG's HTML endpoint which is publicly accessible.
+ * 4-backend fallback chain (in priority order):
+ *   1. Google Custom Search Engine (CSE) — highest quality; 16pp lift over Bing
+ *      per JoyAgent finding (Google=75.2% vs Bing=58.8% on web-search tasks).
+ *      Requires GOOGLE_AI_API_KEY + GOOGLE_CUSTOM_SEARCH_CX.
+ *   2. Wikipedia REST API — exact-match fact retrieval; no key required.
+ *   3. Brave Search API — requires BRAVE_API_KEY.
+ *   4. DuckDuckGo HTML scrape — no key; public DDG HTML endpoint.
+ *
+ * Each backend falls through to the next on missing credentials, HTTP error,
+ * or timeout.  The `source` field on SearchResult records which backend served.
+ *
+ * CLI flag --enable-cse (default: auto — true when both CSE credentials are
+ * present, false otherwise).  Setting DISABLE_CSE=1 in env forces CSE off for
+ * ablation.
  *
  * Design notes:
  * - Uses native Node.js https/http (no external fetch polyfill).
@@ -13,20 +24,20 @@
  *   responsibility (the agent loop enforces this in PR-3).
  * - PDF / binary detection is handled by file_read.ts, not here.
  *
- * Refs: ADR-133, #2156
+ * Refs: ADR-133, ADR-135, #2156
  */
 
 import * as https from 'node:https';
-import * as http from 'node:http';
+import { execSync } from 'node:child_process';
 import { GaiaTool, ToolDefinition } from './types.js';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
-const DDG_HTML_URL = 'https://html.duckduckgo.com/html/';
 const DEFAULT_MAX_RESULTS = 5;
 const REQUEST_TIMEOUT_MS = 20_000;
+const CSE_TIMEOUT_MS = 10_000;
 
 // User-Agent that DDG accepts (plain browser UA).
 const UA =
@@ -40,10 +51,221 @@ export interface SearchResult {
   title: string;
   url: string;
   snippet: string;
+  /** Which backend served this result. */
+  source?: string;
 }
 
 // ---------------------------------------------------------------------------
-// HTML fetch helper
+// Secret resolution helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve a secret value from env var first, then GCP Secret Manager fallback.
+ * Never logs the value — returns empty string if unavailable.
+ */
+function resolveSecret(envVar: string, gcpSecretName: string): string {
+  const envVal = process.env[envVar];
+  if (envVal && envVal.trim()) return envVal.trim();
+
+  try {
+    const out = execSync(
+      `gcloud secrets versions access latest --secret=${gcpSecretName} --project=ruv-dev 2>/dev/null`,
+      { encoding: 'utf-8', timeout: 10_000 },
+    ).trim();
+    if (out) {
+      // Cache in env for subsequent calls within this process.
+      process.env[envVar] = out;
+      return out;
+    }
+  } catch {
+    /* secret not available — fall through */
+  }
+
+  return '';
+}
+
+// ---------------------------------------------------------------------------
+// Backend 1: Google Custom Search Engine
+// ---------------------------------------------------------------------------
+
+/**
+ * True when CSE credentials are present and DISABLE_CSE is not set.
+ * Evaluated lazily on first call.
+ */
+let _cseAvailable: boolean | null = null;
+
+export function isCseAvailable(): boolean {
+  if (_cseAvailable !== null) return _cseAvailable;
+  if (process.env.DISABLE_CSE === '1') {
+    _cseAvailable = false;
+    return false;
+  }
+  // Use GOOGLE_CUSTOM_SEARCH_API_KEY (dedicated CSE key) with fallback to GOOGLE_AI_API_KEY.
+  // The CSE key must belong to a project with Custom Search JSON API access
+  // (set up via programmablesearchengine.google.com, not just gcloud services enable).
+  const apiKey =
+    resolveSecret('GOOGLE_CUSTOM_SEARCH_API_KEY', 'GOOGLE_CUSTOM_SEARCH_API_KEY') ||
+    resolveSecret('GOOGLE_AI_API_KEY', 'GOOGLE_AI_API_KEY');
+  const cx = resolveSecret('GOOGLE_CUSTOM_SEARCH_CX', 'GOOGLE_CUSTOM_SEARCH_CX');
+  _cseAvailable = Boolean(apiKey && cx);
+  return _cseAvailable;
+}
+
+/** Reset the cached availability flag (used in tests). */
+export function resetCseAvailabilityCache(): void {
+  _cseAvailable = null;
+}
+
+async function googleCustomSearch(
+  query: string,
+  opts: { maxResults?: number } = {},
+): Promise<SearchResult[]> {
+  const apiKey =
+    resolveSecret('GOOGLE_CUSTOM_SEARCH_API_KEY', 'GOOGLE_CUSTOM_SEARCH_API_KEY') ||
+    resolveSecret('GOOGLE_AI_API_KEY', 'GOOGLE_AI_API_KEY');
+  const cx = resolveSecret('GOOGLE_CUSTOM_SEARCH_CX', 'GOOGLE_CUSTOM_SEARCH_CX');
+  if (!apiKey || !cx) return [];
+
+  const num = Math.min(opts.maxResults ?? 5, 10);
+  const params = new URLSearchParams({ key: apiKey, cx, q: query, num: String(num) });
+  const urlStr = `https://www.googleapis.com/customsearch/v1?${params.toString()}`;
+
+  const data = await fetchJsonWithTimeout(urlStr, CSE_TIMEOUT_MS);
+  const items: Array<{ title?: string; link?: string; snippet?: string }> =
+    (data as any).items ?? [];
+
+  return items.map((item) => ({
+    title: item.title ?? '',
+    url: item.link ?? '',
+    snippet: item.snippet ?? '',
+    source: 'google-cse',
+  }));
+}
+
+/** Minimal JSON fetch with abort-signal timeout (no extra deps). */
+function fetchJsonWithTimeout(urlStr: string, timeoutMs: number): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const url = new URL(urlStr);
+    const req = https.get(
+      {
+        hostname: url.hostname,
+        path: url.pathname + url.search,
+        headers: { Accept: 'application/json', 'User-Agent': UA },
+      },
+      (res) => {
+        if (res.statusCode !== 200) {
+          res.resume();
+          reject(new Error(`Google CSE HTTP ${res.statusCode}`));
+          return;
+        }
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(Buffer.concat(chunks).toString('utf-8')));
+          } catch (e) {
+            reject(e);
+          }
+        });
+        res.on('error', reject);
+      },
+    );
+    req.on('error', reject);
+    req.setTimeout(timeoutMs, () => {
+      req.destroy(new Error(`Google CSE timeout after ${timeoutMs}ms`));
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Backend 2: Wikipedia REST API
+// ---------------------------------------------------------------------------
+
+async function wikipediaSearch(
+  query: string,
+  opts: { maxResults?: number } = {},
+): Promise<SearchResult[]> {
+  const limit = Math.min(opts.maxResults ?? 5, 10);
+  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  const urlStr = `https://en.wikipedia.org/w/rest.php/v1/search/page?${params.toString()}`;
+
+  const data = await fetchJsonWithTimeout(urlStr, REQUEST_TIMEOUT_MS);
+  const pages: Array<{ title?: string; key?: string; description?: string; excerpt?: string }> =
+    (data as any).pages ?? [];
+
+  return pages.map((p) => ({
+    title: p.title ?? p.key ?? '',
+    url: `https://en.wikipedia.org/wiki/${encodeURIComponent(p.key ?? p.title ?? '')}`,
+    snippet: p.description ?? p.excerpt ?? '',
+    source: 'wikipedia',
+  }));
+}
+
+// ---------------------------------------------------------------------------
+// Backend 3: Brave Search API
+// ---------------------------------------------------------------------------
+
+async function braveSearch(
+  query: string,
+  opts: { maxResults?: number } = {},
+): Promise<SearchResult[]> {
+  const apiKey = process.env.BRAVE_API_KEY;
+  if (!apiKey) return [];
+
+  const count = Math.min(opts.maxResults ?? 5, 10);
+  const params = new URLSearchParams({ q: query, count: String(count) });
+  const urlStr = `https://api.search.brave.com/res/v1/web/search?${params.toString()}`;
+
+  return new Promise((resolve, _reject) => {
+    const url = new URL(urlStr);
+    const req = https.get(
+      {
+        hostname: url.hostname,
+        path: url.pathname + url.search,
+        headers: {
+          Accept: 'application/json',
+          'Accept-Encoding': 'gzip',
+          'X-Subscription-Token': apiKey,
+        },
+      },
+      (res) => {
+        if (res.statusCode !== 200) {
+          res.resume();
+          resolve([]);
+          return;
+        }
+        const chunks: Buffer[] = [];
+        res.on('data', (c: Buffer) => chunks.push(c));
+        res.on('end', () => {
+          try {
+            const parsed = JSON.parse(Buffer.concat(chunks).toString('utf-8'));
+            const hits: Array<{ title?: string; url?: string; description?: string }> =
+              parsed?.web?.results ?? [];
+            resolve(
+              hits.map((h) => ({
+                title: h.title ?? '',
+                url: h.url ?? '',
+                snippet: h.description ?? '',
+                source: 'brave',
+              })),
+            );
+          } catch {
+            resolve([]);
+          }
+        });
+        res.on('error', () => resolve([]));
+      },
+    );
+    req.on('error', () => resolve([]));
+    req.setTimeout(REQUEST_TIMEOUT_MS, () => {
+      req.destroy();
+      resolve([]);
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Backend 4: DuckDuckGo HTML scrape (original; no-key fallback)
 // ---------------------------------------------------------------------------
 
 /**
@@ -149,7 +371,7 @@ function parseDdgHtml(html: string, maxResults: number): SearchResult[] {
     const snippet = stripHtml(rawSnippet).trim();
 
     if (url && title) {
-      results.push({ title, url, snippet });
+      results.push({ title, url, snippet, source: 'ddg' });
     }
   }
 
@@ -192,6 +414,61 @@ function stripHtml(html: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// 4-backend fallback chain
+// ---------------------------------------------------------------------------
+
+/**
+ * Run the 4-backend fallback chain: CSE → Wikipedia → Brave → DDG.
+ * Returns results from the first backend that produces a non-empty list.
+ */
+async function searchWithFallback(
+  query: string,
+  maxResults: number,
+  enableCse: boolean,
+): Promise<SearchResult[]> {
+  // Backend 1: Google CSE (primary when available and enabled)
+  if (enableCse && isCseAvailable()) {
+    try {
+      const results = await googleCustomSearch(query, { maxResults });
+      if (results.length > 0) {
+        console.error(`[web_search] backend=google-cse results=${results.length}`);
+        return results;
+      }
+    } catch (err) {
+      console.error(`[web_search] google-cse failed: ${(err as Error).message}`);
+    }
+  }
+
+  // Backend 2: Wikipedia
+  try {
+    const results = await wikipediaSearch(query, { maxResults });
+    if (results.length > 0) {
+      console.error(`[web_search] backend=wikipedia results=${results.length}`);
+      return results;
+    }
+  } catch (err) {
+    console.error(`[web_search] wikipedia failed: ${(err as Error).message}`);
+  }
+
+  // Backend 3: Brave
+  try {
+    const results = await braveSearch(query, { maxResults });
+    if (results.length > 0) {
+      console.error(`[web_search] backend=brave results=${results.length}`);
+      return results;
+    }
+  } catch (err) {
+    console.error(`[web_search] brave failed: ${(err as Error).message}`);
+  }
+
+  // Backend 4: DuckDuckGo (original no-key fallback)
+  const html = await fetchDdgHtml(query);
+  const results = parseDdgHtml(html, maxResults);
+  console.error(`[web_search] backend=ddg results=${results.length}`);
+  return results;
+}
+
+// ---------------------------------------------------------------------------
 // Format output for Claude
 // ---------------------------------------------------------------------------
 
@@ -214,10 +491,21 @@ function formatResults(results: SearchResult[]): string {
 export class WebSearchTool implements GaiaTool {
   readonly name = 'web_search';
 
+  /**
+   * Whether to use the Google CSE backend.
+   * Defaults to `isCseAvailable()` — overridden by `--enable-cse` flag.
+   */
+  private readonly enableCse: boolean;
+
+  constructor(opts: { enableCse?: boolean } = {}) {
+    this.enableCse = opts.enableCse ?? isCseAvailable();
+  }
+
   readonly definition: ToolDefinition = {
     name: 'web_search',
     description:
-      'Search the web using DuckDuckGo and return the top results (title, URL, snippet). ' +
+      'Search the web and return the top results (title, URL, snippet). ' +
+      'Uses a 4-backend fallback chain: Google CSE → Wikipedia → Brave → DuckDuckGo. ' +
       'Use this when you need current information, external facts, or to verify claims.',
     input_schema: {
       type: 'object',
@@ -244,8 +532,7 @@ export class WebSearchTool implements GaiaTool {
       10,
     );
 
-    const html = await fetchDdgHtml(query);
-    const results = parseDdgHtml(html, maxResults);
+    const results = await searchWithFallback(query, maxResults, this.enableCse);
     return formatResults(results);
   }
 }
@@ -254,6 +541,12 @@ export class WebSearchTool implements GaiaTool {
 // Convenience factory
 // ---------------------------------------------------------------------------
 
-export function createWebSearchTool(): WebSearchTool {
-  return new WebSearchTool();
+/**
+ * Create a WebSearchTool instance.
+ *
+ * @param opts.enableCse  Set true/false to force CSE on/off for ablation.
+ *                        Defaults to auto-detection (CSE on if credentials present).
+ */
+export function createWebSearchTool(opts: { enableCse?: boolean } = {}): WebSearchTool {
+  return new WebSearchTool(opts);
 }
