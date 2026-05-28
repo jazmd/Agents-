@@ -32,7 +32,7 @@
  *   --voting-attempts > 1 takes precedence over --enable-critic (cost containment).
  *   --decompose works independently; sub-question answers feed into voting/critic/plain.
  *
- * Refs: ADR-133, ADR-135, ADR-136, #2165, iter 28/34/36/37/39
+ * Refs: ADR-133, ADR-135, ADR-136, #2165, iter 28/34/36/37/39/49.5
  */
 
 import type { Command, CommandContext, CommandResult } from '../types.js';
@@ -92,6 +92,14 @@ interface HardnessDist {
   hard: number;
 }
 
+interface ContrastiveSummary {
+  memorySearchCalls: number;
+  memorySearchHits: number;
+  memoryStoreCount: number;
+  trajectoryCount: number;
+  totalPatternsInjected: number;
+}
+
 interface BenchRunOutput {
   level: number;
   model: string;
@@ -104,6 +112,8 @@ interface BenchRunOutput {
     meanWallMs: number;
     /** ADR-136 Track Q: distribution of predicted difficulty classes (present when --hardness-routing). */
     hardnessDist?: HardnessDist;
+    /** iter 49.5: ruflo intelligence contrastive stats (present when --enable-ruflo-intelligence). */
+    contrastive?: ContrastiveSummary;
   };
   results: QuestionResult[];
 }
@@ -204,6 +214,12 @@ const runCommand: Command = {
       description: 'ADR-135 Track B: inject a planning checkpoint every N tool_use turns (default: 4, set 0 to disable). Based on smolagents finding — prevents tunnel-vision on bad strategies.',
       default: '4',
     },
+    {
+      name: 'enable-ruflo-intelligence',
+      type: 'boolean',
+      description: 'iter 49.5: wire ruflo intelligence hooks (memory_search before, trajectory during, memory_store after each question). Measures whether AgentDB/HNSW/SONA provides a measurable lift on GAIA L1. Does NOT enable ADR-135 tracks.',
+      default: 'false',
+    },
   ],
   examples: [
     {
@@ -271,6 +287,9 @@ const runCommand: Command = {
     const enableDecompose = ctx.flags['decompose'] === true || ctx.flags['decompose'] === 'true';
     // ADR-135 Track B: planning interval (passed through to runGaiaAgent via agentOpts).
     const planningInterval = parseInt(String(ctx.flags['planningInterval'] ?? ctx.flags['planning-interval'] ?? '4'), 10);
+    // iter 49.5: ruflo intelligence contrastive hooks.
+    const enableRufloIntelligence = ctx.flags['enableRufloIntelligence'] === true || ctx.flags['enableRufloIntelligence'] === 'true' ||
+      ctx.flags['enable-ruflo-intelligence'] === true || ctx.flags['enable-ruflo-intelligence'] === 'true';
 
     // Dynamic imports to avoid loading at startup.
     // NOTE: gaia-*.ts sources are pre-compiled under dist/src/benchmarks/ only --
@@ -325,6 +344,18 @@ const runCommand: Command = {
       // If < 10 examples: cold-start (medium for all) -- documented fallback.
     }
 
+    // iter 49.5: ruflo contrastive wrapper (only imported when --enable-ruflo-intelligence).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let runGaiaAgentContrastive: any = null;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let createContrastiveStats: any = null;
+    if (enableRufloIntelligence) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const contrastiveMod = (await import(benchmarksBase + 'gaia-agent-contrastive.js')) as any;
+      runGaiaAgentContrastive = contrastiveMod.runGaiaAgentContrastive;
+      createContrastiveStats = contrastiveMod.createContrastiveStats;
+    }
+
     // Only print to stderr so stdout stays clean for JSON consumers
     const log = (msg: string) => {
       if (outputFormat !== 'json') {
@@ -358,6 +389,9 @@ const runCommand: Command = {
         : 'cold-start (no training data -> all medium)';
       log(`Hardness: ADR-136 Track Q enabled -- ${trainedStatus}`);
       log('          easy=Haiku/4t/1-attempt  medium=Sonnet/8t/1-attempt  hard=Sonnet/12t/3-vote');
+    }
+    if (enableRufloIntelligence) {
+      log('Ruflo   : iter 49.5 contrastive -- memory_search + trajectory + memory_store enabled');
     }
     log('');
 
@@ -398,6 +432,9 @@ const runCommand: Command = {
 
       // ADR-136 Track Q: hardness distribution tracking.
       const hardnessDist: HardnessDist = { easy: 0, medium: 0, hard: 0 };
+      // iter 49.5: contrastive stats (reset per model).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const contrastiveStats: any = enableRufloIntelligence && createContrastiveStats ? createContrastiveStats() : null;
 
       // Process questions in batches of `concurrency`
       for (let i = 0; i < questions.length; i += concurrency) {
@@ -499,6 +536,11 @@ const runCommand: Command = {
                   });
                   const cr = agentResult as { criticVerdict?: string };
                   log(`    critic-verdict=${cr.criticVerdict ?? '?'}`);
+                } else if (enableRufloIntelligence && runGaiaAgentContrastive && contrastiveStats) {
+                  // iter 49.5: ruflo intelligence contrastive wrapper.
+                  agentResult = await runGaiaAgentContrastive(sq, agentOpts, contrastiveStats);
+                  const ri = agentResult as { patternsInjected?: number };
+                  log(`    ruflo-patterns=${ri.patternsInjected ?? 0} injected`);
                 } else {
                   agentResult = await runGaiaAgent(sq, agentOpts);
                 }
@@ -608,6 +650,7 @@ const runCommand: Command = {
           meanTurns: total > 0 ? totalTurns / total : 0,
           meanWallMs: total > 0 ? totalWallMs / total : 0,
           ...(hardnessRouting ? { hardnessDist } : {}),
+          ...(enableRufloIntelligence && contrastiveStats ? { contrastive: { ...contrastiveStats } } : {}),
         },
         results,
       };
@@ -621,6 +664,12 @@ const runCommand: Command = {
       log(`  Mean time : ${(modelOutput.summary.meanWallMs / 1000).toFixed(1)}s per question`);
       if (hardnessRouting) {
         log(`  Hardness  : easy=${hardnessDist.easy} medium=${hardnessDist.medium} hard=${hardnessDist.hard}`);
+      }
+      if (enableRufloIntelligence && contrastiveStats) {
+        const cs = contrastiveStats;
+        log(`  Ruflo memory_search: ${cs.memorySearchCalls} calls, ${cs.memorySearchHits} hits (${cs.totalPatternsInjected} patterns injected)`);
+        log(`  Ruflo trajectories: ${cs.trajectoryCount} recorded`);
+        log(`  Ruflo memory_store: ${cs.memoryStoreCount} entries written`);
       }
       log('');
     }
