@@ -34,6 +34,9 @@ let _dbInitializing = false;
  * Creates the graph_edges table if it is absent (idempotent).
  * Returns null if sql.js is not available or db cannot be opened.
  */
+// sql.js Database — `any` here is intentional. sql.js ships ambient types that
+// don't expose `Database` cleanly through dynamic ESM import; callers use only
+// `db.run`/`db.exec`/`db.prepare` which are stable across versions.
 export async function getBridgeDb(customDbPath?: string): Promise<any | null> {
   const dbPath = customDbPath ?? path.join(getMemoryRoot(), 'memory.db');
 
