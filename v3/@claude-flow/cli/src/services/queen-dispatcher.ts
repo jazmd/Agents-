@@ -190,11 +190,24 @@ export class QueenDispatcher extends EventEmitter {
 
     // Persist the in_progress + startedAt transition immediately so a
     // crashed/restarted dispatcher doesn't re-fire from `pending`.
+    // Re-read rather than writing back the snapshot we loaded at the top
+    // of this tick — another writer (task_create / task_cancel / a
+    // concurrent assign) may have touched a *different* row in the
+    // meantime, and writing the stale full snapshot would clobber it.
+    const fresh = this.loadTaskStore();
+    let mutated = false;
     for (const { task } of toFire) {
-      task.status = 'in_progress';
-      if (!task.startedAt) task.startedAt = new Date().toISOString();
+      const live = fresh.tasks[task.taskId];
+      if (!live) continue; // task vanished mid-tick — skip its persist
+      if (live.status === 'cancelled') continue; // honor a user cancel
+      live.status = 'in_progress';
+      if (!live.startedAt) live.startedAt = new Date().toISOString();
+      // keep the in-memory snapshot consistent for completeTask's reads
+      task.status = live.status;
+      task.startedAt = live.startedAt;
+      mutated = true;
     }
-    this.saveTaskStore(taskStore);
+    if (mutated) this.saveTaskStore(fresh);
 
     // Fire all selected in parallel; the executor's own pool/queue
     // throttles to its maxConcurrent.
@@ -210,6 +223,12 @@ export class QueenDispatcher extends EventEmitter {
     const headroom = Math.max(0, this.cfg.maxConcurrent - this.inflightByTask.size);
     if (headroom === 0) return out;
 
+    // Agents already claimed within THIS pass. `inflightByAgent` is only
+    // updated by pollOnce() *after* selection completes, so without this
+    // local set two tasks assigned to the same agent in one tick would
+    // both be picked — violating the one-task-per-agent invariant.
+    const claimedAgents = new Set<string>();
+
     for (const task of Object.values(taskStore.tasks)) {
       if (out.length >= headroom) break;
       if (task.status !== 'pending' && task.status !== 'in_progress') continue;
@@ -217,16 +236,20 @@ export class QueenDispatcher extends EventEmitter {
       if (this.inflightByTask.has(task.taskId)) continue;
 
       // Pick the first assigned agent that exists in the registry and
-      // isn't currently busy with another dispatched task.
+      // isn't currently busy with another dispatched task — whether that
+      // task is in-flight from a prior tick (inflightByAgent) or already
+      // claimed earlier in this same pass (claimedAgents).
       const agentId = task.assignedTo.find((id) => {
         const agent = agentStore.agents[id];
         if (!agent) return false;
         if (agent.status === 'terminated') return false;
         if (this.inflightByAgent.has(id)) return false;
+        if (claimedAgents.has(id)) return false;
         return true;
       });
       if (!agentId) continue;
 
+      claimedAgents.add(agentId);
       const agent = agentStore.agents[agentId];
       out.push({ task, agent });
     }
