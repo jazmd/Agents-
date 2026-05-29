@@ -147,6 +147,16 @@ let ruvectorModule: RuVectorModule | null = null;
 let loadAttempted = false;
 let isAvailable = false;
 
+function uniqueStoragePath(): string {
+  // Use os.tmpdir() so each adapter instance gets its own file and never
+  // contends with daemons that hold a lock on the default "agentdb.rvf" path.
+  const os = require('os');
+  const path = require('path');
+  const crypto = require('crypto');
+  const rand = crypto.randomBytes(8).toString('hex');
+  return path.join(os.tmpdir(), `ruvector-${process.pid}-${rand}.rvf`);
+}
+
 // ============================================================================
 // Public API
 // ============================================================================
@@ -172,7 +182,7 @@ export async function loadRuVector(): Promise<boolean> {
       const VectorDBClass = ruvector.VectorDB || ruvector.VectorDb;
       ruvectorModule = {
         createVectorDB: async (dimensions: number): Promise<VectorDB> => {
-          const db = new VectorDBClass({ dimensions });
+          const db = new VectorDBClass({ dimensions, storagePath: uniqueStoragePath() });
           // Wrap ruvector's VectorDB to match our interface
           return {
             insert: (embedding: Float32Array, id: string, metadata?: Record<string, unknown>) => {
@@ -248,8 +258,8 @@ export async function createVectorDB(dimensions: number = 768): Promise<VectorDB
   if (ruvectorModule && typeof ruvectorModule.createVectorDB === 'function') {
     try {
       return await ruvectorModule.createVectorDB(dimensions);
-    } catch {
-      // Fall back to simple implementation
+    } catch (err) {
+      console.warn('[vector-db] HNSW init failed, using brute-force fallback:', (err as Error).message);
     }
   }
 
