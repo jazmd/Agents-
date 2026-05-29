@@ -373,11 +373,15 @@ export class TransformersEmbeddingService extends BaseEmbeddingService {
   readonly provider: EmbeddingProvider = 'transformers';
   private pipeline: any = null;
   private readonly modelName: string;
+  private readonly modelPath?: string;
+  private readonly localFilesOnly: boolean;
   private initialized = false;
 
   constructor(config: TransformersEmbeddingConfig) {
     super(config);
     this.modelName = config.model ?? 'Xenova/all-MiniLM-L6-v2';
+    this.modelPath = config.modelPath;
+    this.localFilesOnly = config.localFilesOnly ?? false;
   }
 
   private async initialize(): Promise<void> {
@@ -395,7 +399,11 @@ export class TransformersEmbeddingService extends BaseEmbeddingService {
           'or @xenova/transformers to enable ONNX embeddings.',
         );
       }
-      this.pipeline = await handle.pipeline('feature-extraction', this.modelName);
+      const options = this.modelPath ? {
+        cache_dir: this.modelPath,
+        local_files_only: this.localFilesOnly,
+      } : undefined;
+      this.pipeline = await handle.pipeline('feature-extraction', this.modelName, options);
       this.initialized = true;
     } catch (error) {
       throw new Error(`Failed to initialize transformers pipeline: ${error}`);
@@ -910,6 +918,10 @@ export interface AutoEmbeddingConfig {
   modelId?: string;
   /** Model name for transformers */
   model?: string;
+  /** Transformers.js cache/model directory */
+  modelPath?: string;
+  /** Force local files only for transformers */
+  localFilesOnly?: boolean;
   /** Dimensions */
   dimensions?: number;
   /** Cache size */
@@ -983,6 +995,8 @@ export async function createEmbeddingServiceAsync(
       const service = new TransformersEmbeddingService({
         provider: 'transformers',
         model: rest.model ?? 'Xenova/all-MiniLM-L6-v2',
+        modelPath: rest.modelPath,
+        localFilesOnly: rest.localFilesOnly,
         cacheSize: rest.cacheSize,
       });
       // Validate it can initialize
@@ -1014,6 +1028,8 @@ export async function createEmbeddingServiceAsync(
         return new TransformersEmbeddingService({
           provider: 'transformers',
           model: rest.model ?? 'Xenova/all-MiniLM-L6-v2',
+          modelPath: rest.modelPath,
+          localFilesOnly: rest.localFilesOnly,
           cacheSize: rest.cacheSize,
         });
       case 'openai':

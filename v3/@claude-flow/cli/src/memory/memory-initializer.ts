@@ -1631,9 +1631,93 @@ interface EmbeddingModel {
   model: unknown;
   tokenizer: unknown;
   dimensions: number;
+  modelName: string;
+  modelPath?: string;
 }
 
 let embeddingModelState: EmbeddingModel | null = null;
+
+interface EmbeddingRuntimeOptions {
+  modelName: string;
+  modelPath?: string;
+  dimensions: number;
+}
+
+function normalizeEmbeddingModelName(model?: string): string {
+  const value = model?.trim() || 'Xenova/all-MiniLM-L6-v2';
+  return value.includes('/') ? value : `Xenova/${value}`;
+}
+
+function inferEmbeddingDimensions(modelName: string, configured?: unknown): number {
+  if (typeof configured === 'number' && configured > 0) return configured;
+  return modelName.toLowerCase().includes('mpnet') ? 768 : 384;
+}
+
+/**
+ * Load the embedding runtime configuration written by `embeddings init`.
+ * MCP tools also write the same file, so all embedding entry points must
+ * resolve model/cache options through this helper before touching ONNX.
+ */
+export function resolveEmbeddingRuntimeOptions(options?: {
+  modelPath?: string;
+  modelName?: string;
+  dimensions?: number;
+}): EmbeddingRuntimeOptions {
+  let config: Record<string, unknown> = {};
+  const configPath = path.resolve(process.cwd(), '.claude-flow', 'embeddings.json');
+
+  if (fs.existsSync(configPath)) {
+    try {
+      config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as Record<string, unknown>;
+    } catch {
+      config = {};
+    }
+  }
+
+  const rawModel = options?.modelName
+    ?? (typeof config.model === 'string' ? config.model : undefined)
+    ?? 'Xenova/all-MiniLM-L6-v2';
+  const modelName = normalizeEmbeddingModelName(rawModel);
+
+  const rawPath = options?.modelPath
+    ?? (typeof config.modelPath === 'string' ? config.modelPath : undefined)
+    ?? process.env.CLAUDE_FLOW_EMBEDDING_MODEL_PATH
+    ?? process.env.TRANSFORMERS_CACHE;
+  const modelPath = rawPath && rawPath.trim().length > 0 ? path.resolve(rawPath) : undefined;
+
+  return {
+    modelName,
+    modelPath,
+    dimensions: inferEmbeddingDimensions(modelName, options?.dimensions ?? config.dimension),
+  };
+}
+
+/** Reset the lazily loaded model after embedding configuration changes. */
+export function resetEmbeddingModelState(): void {
+  embeddingModelState = null;
+}
+
+export const _resetEmbeddingModelStateForTests = resetEmbeddingModelState;
+
+function configureTransformersEnv(mod: Record<string, unknown>, modelPath?: string): void {
+  if (!modelPath) return;
+
+  const env = mod.env as Record<string, unknown> | undefined;
+  if (!env || typeof env !== 'object') return;
+
+  env.cacheDir = modelPath;
+  env.localModelPath = modelPath;
+  env.allowLocalModels = true;
+}
+
+function getTransformersPipelineOptions(modelPath?: string): Record<string, unknown> | undefined {
+  if (!modelPath) return undefined;
+
+  return {
+    cache_dir: modelPath,
+    local_files_only: process.env.CLAUDE_FLOW_EMBEDDINGS_LOCAL_ONLY === '1',
+  };
+}
 
 /**
  * Lazy load ONNX embedding model
@@ -1641,6 +1725,8 @@ let embeddingModelState: EmbeddingModel | null = null;
  */
 export async function loadEmbeddingModel(options?: {
   modelPath?: string;
+  modelName?: string;
+  dimensions?: number;
   verbose?: boolean;
 }): Promise<{
   success: boolean;
@@ -1650,31 +1736,43 @@ export async function loadEmbeddingModel(options?: {
   error?: string;
 }> {
   const { verbose = false } = options || {};
+  const runtime = resolveEmbeddingRuntimeOptions(options);
   const startTime = Date.now();
 
   // Already loaded
-  if (embeddingModelState?.loaded) {
+  if (
+    embeddingModelState?.loaded
+    && embeddingModelState.modelName === runtime.modelName
+    && embeddingModelState.modelPath === runtime.modelPath
+  ) {
     return {
       success: true,
       dimensions: embeddingModelState.dimensions,
-      modelName: 'cached',
+      modelName: embeddingModelState.modelName,
       loadTime: 0
     };
   }
 
-  // ADR-053: Try AgentDB v3 bridge first
-  const bridge = await getBridge();
-  if (bridge) {
-    const bridgeResult = await bridge.bridgeLoadEmbeddingModel();
-    if (bridgeResult && bridgeResult.success) {
-      // Mark local state as loaded too so subsequent calls use cache
-      embeddingModelState = {
-        loaded: true,
-        model: null, // Bridge handles embedding
-        tokenizer: null,
-        dimensions: bridgeResult.dimensions
-      };
-      return bridgeResult;
+  // ADR-053: Try AgentDB v3 bridge first only when the user has not
+  // initialized an explicit Transformers.js model cache. The bridge does not
+  // currently expose cache/modelPath wiring, so using it here can mask an
+  // AgentDB mock fallback as a successful real embedding provider.
+  if (!runtime.modelPath) {
+    const bridge = await getBridge();
+    if (bridge) {
+      const bridgeResult = await bridge.bridgeLoadEmbeddingModel();
+      if (bridgeResult && bridgeResult.success) {
+        // Mark local state as loaded too so subsequent calls use cache
+        embeddingModelState = {
+          loaded: true,
+          model: null, // Bridge handles embedding
+          tokenizer: null,
+          dimensions: bridgeResult.dimensions,
+          modelName: bridgeResult.modelName,
+          modelPath: runtime.modelPath,
+        };
+        return bridgeResult;
+      }
     }
   }
 
@@ -1685,7 +1783,7 @@ export async function loadEmbeddingModel(options?: {
     // avoid a circular optional-dep at install time; the logic mirrors
     // @claude-flow/embeddings/src/transformers-loader.ts.
     let transformersSource: '@huggingface/transformers' | '@xenova/transformers' | null = null;
-    let pipelineFn: ((task: string, model?: string) => Promise<unknown>) | null = null;
+    let pipelineFn: ((task: string, model?: string, options?: Record<string, unknown>) => Promise<unknown>) | null = null;
 
     {
       const tryLoad = async (specifier: string): Promise<Record<string, unknown> | null> => {
@@ -1694,34 +1792,43 @@ export async function loadEmbeddingModel(options?: {
       };
       const hf = await tryLoad('@huggingface/transformers');
       if (hf && typeof hf.pipeline === 'function') {
-        pipelineFn = hf.pipeline as (t: string, m?: string) => Promise<unknown>;
+        pipelineFn = hf.pipeline as (t: string, m?: string, o?: Record<string, unknown>) => Promise<unknown>;
         transformersSource = '@huggingface/transformers';
+        configureTransformersEnv(hf, runtime.modelPath);
       } else {
         const xen = await tryLoad('@xenova/transformers');
         if (xen && typeof xen.pipeline === 'function') {
-          pipelineFn = xen.pipeline as (t: string, m?: string) => Promise<unknown>;
+          pipelineFn = xen.pipeline as (t: string, m?: string, o?: Record<string, unknown>) => Promise<unknown>;
           transformersSource = '@xenova/transformers';
+          configureTransformersEnv(xen, runtime.modelPath);
         }
       }
     }
 
     if (pipelineFn && transformersSource) {
       if (verbose) {
-        console.log(`Loading ONNX embedding model via ${transformersSource} (all-MiniLM-L6-v2)...`);
+        const pathHint = runtime.modelPath ? ` from ${runtime.modelPath}` : '';
+        console.log(`Loading ONNX embedding model via ${transformersSource} (${runtime.modelName})${pathHint}...`);
       }
-      const embedder = await pipelineFn('feature-extraction', 'Xenova/all-MiniLM-L6-v2');
+      const embedder = await pipelineFn(
+        'feature-extraction',
+        runtime.modelName,
+        getTransformersPipelineOptions(runtime.modelPath),
+      );
 
       embeddingModelState = {
         loaded: true,
         model: embedder,
         tokenizer: null,
-        dimensions: 384 // MiniLM-L6 produces 384-dim vectors
+        dimensions: runtime.dimensions,
+        modelName: runtime.modelName,
+        modelPath: runtime.modelPath,
       };
 
       return {
         success: true,
-        dimensions: 384,
-        modelName: 'Xenova/all-MiniLM-L6-v2',
+        dimensions: runtime.dimensions,
+        modelName: runtime.modelName,
         loadTime: Date.now() - startTime
       };
     }
@@ -1738,7 +1845,9 @@ export async function loadEmbeddingModel(options?: {
         loaded: true,
         model: { embed: reasoningBank.computeEmbedding },
         tokenizer: null,
-        dimensions: 768
+        dimensions: 768,
+        modelName: 'agentic-flow/reasoningbank',
+        modelPath: runtime.modelPath,
       };
 
       return {
@@ -1772,7 +1881,9 @@ export async function loadEmbeddingModel(options?: {
               loaded: true,
               model: (text: string) => onnxEmb.embed(text),
               tokenizer: null,
-              dimensions: probe.length || 384
+              dimensions: probe.length || 384,
+              modelName: 'ruvector/onnx',
+              modelPath: runtime.modelPath,
             };
             return {
               success: true,
@@ -1799,7 +1910,9 @@ export async function loadEmbeddingModel(options?: {
         loaded: true,
         model: (agenticFlow as any).embeddings,
         tokenizer: null,
-        dimensions: 768
+        dimensions: 768,
+        modelName: 'agentic-flow',
+        modelPath: runtime.modelPath,
       };
 
       return {
@@ -1815,7 +1928,9 @@ export async function loadEmbeddingModel(options?: {
       loaded: true,
       model: null, // Will use simple hash-based fallback
       tokenizer: null,
-      dimensions: 128 // Smaller fallback dimensions
+      dimensions: 128, // Smaller fallback dimensions
+      modelName: 'hash-fallback',
+      modelPath: runtime.modelPath,
     };
 
     return {
@@ -1843,16 +1958,29 @@ export async function generateEmbedding(text: string): Promise<{
   dimensions: number;
   model: string;
 }> {
-  // ADR-053: Try AgentDB v3 bridge first
-  const bridge = await getBridge();
-  if (bridge) {
-    const bridgeResult = await bridge.bridgeGenerateEmbedding(text);
-    if (bridgeResult) return bridgeResult;
+  const runtime = resolveEmbeddingRuntimeOptions();
+
+  // ADR-053: Try AgentDB v3 bridge first only when no explicit local model
+  // cache is configured; see the matching guard in loadEmbeddingModel().
+  if (!runtime.modelPath) {
+    const bridge = await getBridge();
+    if (bridge) {
+      const bridgeResult = await bridge.bridgeGenerateEmbedding(text);
+      if (bridgeResult) return bridgeResult;
+    }
   }
 
   // Ensure model is loaded
-  if (!embeddingModelState?.loaded) {
-    await loadEmbeddingModel();
+  if (
+    !embeddingModelState?.loaded
+    || embeddingModelState.modelName !== runtime.modelName
+    || embeddingModelState.modelPath !== runtime.modelPath
+  ) {
+    await loadEmbeddingModel({
+      modelName: runtime.modelName,
+      modelPath: runtime.modelPath,
+      dimensions: runtime.dimensions,
+    });
   }
 
   const state = embeddingModelState!;
@@ -1869,7 +1997,25 @@ export async function generateEmbedding(text: string): Promise<{
         return {
           embedding,
           dimensions: embedding.length,
-          model: 'onnx'
+          model: state.modelName
+        };
+      }
+    } catch {
+      // Fall through to fallback
+    }
+  }
+
+  if (state.model && typeof (state.model as any).embed === 'function') {
+    try {
+      const output = await (state.model as any).embed(text);
+      const embedding = Array.isArray(output)
+        ? output
+        : output instanceof Float32Array ? Array.from(output) : null;
+      if (embedding) {
+        return {
+          embedding,
+          dimensions: embedding.length,
+          model: state.modelName,
         };
       }
     } catch {
@@ -1882,7 +2028,7 @@ export async function generateEmbedding(text: string): Promise<{
   return {
     embedding,
     dimensions: state.dimensions,
-    model: 'hash-fallback'
+    model: state.modelName
   };
 }
 
