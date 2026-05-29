@@ -1,0 +1,45 @@
+{
+  "request_id": "20260520_222735_objetivo_el_repositorio_ruflo_tiene_660_errores_",
+  "request_dir_path": "/home/jsanchhi/sovereign_fabric/working/ruflo_repo/v3/working/product_owner_requests/20260520_222735_objetivo_el_repositorio_ruflo_tiene_660_errores_",
+  "started_at": "2026-05-20T22:27:35.159936+00:00",
+  "phase_started_at": "2026-05-20T22:30:53.953532+00:00",
+  "current_phase": "human_intervention_required",
+  "phase_durations_seconds": {
+    "request_created": 0.0,
+    "planning": 72.0,
+    "plan_saved": 0.0,
+    "platform_preflight": 0.0,
+    "platform_preflight_passed": 0.0,
+    "shadow_worktree_setup": 8.0,
+    "shadow_worktree_ready": 0.0,
+    "task_ready": 0.0,
+    "executor_running": 118.0,
+    "failure_classified": 0.0,
+    "doctor_review": 0.0,
+    "scope_review": 0.0
+  },
+  "counters": {
+    "executor_attempts": 3,
+    "task_retries": 3,
+    "doctor_reviews": 3,
+    "scope_blocks": 0,
+    "adjacent_safe_fixes": 0,
+    "autofix_runs": 0,
+    "preflight_task_skips": 0,
+    "plan_pre_satisfied_tasks": 0,
+    "no_progress_stops": 0,
+    "task_prompt_chars": 271892,
+    "task_prompt_tokens_estimate": 67973,
+    "targeted_pytest_runs": 0,
+    "dependency_targeted_tests": 0,
+    "full_suite_runs": 0,
+    "validation_cache_hits": 0,
+    "planner_local_runs": 0
+  },
+  "last_state_update_at": "2026-05-20T22:30:53.953532+00:00",
+  "planning_mode": "agent",
+  "execution_lane": "high_risk",
+  "semantic_surfaces": [
+    "workflows"
+  ]
+}

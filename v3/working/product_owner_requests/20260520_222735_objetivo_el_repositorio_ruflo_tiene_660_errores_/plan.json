@@ -1,0 +1,236 @@
+{
+  "is_ambiguous": false,
+  "clarification_question": "",
+  "alternatives": [
+    {
+      "approach_name": "Opción 1: Ejecución Orbital Dirigida",
+      "recommendation_use_case": "Elígelo si confías en la ejecución autónoma para resolver la deuda técnica de forma masiva y desbloquear el repositorio Ruflo.",
+      "pros": [
+        "Aborda la totalidad de la deuda técnica de tipos de forma masiva y programática.",
+        "Desbloquea el desarrollo y la capacidad de desplegar nuevas versiones de Ruflo.",
+        "Valida la capacidad de Sovereign Fabric para realizar refactorizaciones orbitales complejas en repositorios de terceros."
+      ],
+      "risks": [
+        {
+          "structural_risk": "La inyección masiva y automática de código puede introducir errores lógicos sutiles que los chequeos de tipo de TypeScript no detectan.",
+          "mitigation_strategy": "Utilizar el log de errores de `tsc` como la única fuente de verdad para las modificaciones. Cada cambio debe resolver un error específico del log. Ejecutar la batería de tests del repositorio de destino (si existe) tras la corrección.",
+          "second_order_impact": "El proceso puede ser computacionalmente intensivo. Si no existe una suite de tests robusta en el repositorio de destino, la confianza en la corrección funcional es baja.",
+          "reversibility": "Two-Way Door",
+          "mitigation_effort": "Medium",
+          "confidence_score": "High"
+        },
+        {
+          "structural_risk": "Purgar código interpretado como 'muerto' podría eliminar lógica de negocio que se usa de forma indirecta (ej. a través de reflexión o carga dinámica).",
+          "mitigation_strategy": "Ser extremadamente conservador con la purga. Solo eliminar código si se puede probar que su importación falla porque la librería fue eliminada y no hay otra referencia a él en la base de código.",
+          "second_order_impact": "Podríamos dejar algo de código muerto inofensivo en el repositorio para evitar eliminar algo importante por error, asumiendo una pequeña cantidad de deuda técnica.",
+          "reversibility": "Two-Way Door",
+          "mitigation_effort": "Small",
+          "confidence_score": "High"
+        }
+      ],
+      "refused": false,
+      "refusal_reason": "",
+      "request_title": "Refactorización Orbital del repositorio Ruflo para eliminar ~660 errores de TypeScript",
+      "mission_type": "refactor",
+      "target_namespace": null,
+      "branch_name": "refactor/ruflo-orbital-fix-tsc-errors",
+      "pr_title": "Refactor (Orbital): Corregir errores de TypeScript en Ruflo",
+      "commit_title": "refactor(ruflo): Fix ~660 tsc errors via orbital injection",
+      "risk_level": "high",
+      "problem": "El repositorio 'Ruflo' presenta aproximadamente 660 errores de compilación de TypeScript después de una migración a Event Sourcing, lo que impide la compilación, los tests y el despliegue.",
+      "value_expected": "Restaurar la integridad de la base de código de 'Ruflo' eliminando los errores de TypeScript, permitiendo que el proyecto vuelva a compilar, pasar los tests y funcionar correctamente.",
+      "in_scope": [
+        "Ejecución de `tsc` sobre el repositorio externo 'Ruflo'.",
+        "Análisis del log de errores resultante.",
+        "Modificación de archivos `.ts` y `.tsx` para añadir métodos faltantes e interfaces.",
+        "Eliminación de código muerto asociado a dependencias rotas."
+      ],
+      "out_of_scope": [
+        "Intervención humana para analizar los errores de `tsc`.",
+        "Modificaciones en la lógica de negocio que no estén directamente relacionadas con un error de tipo.",
+        "Actualización de dependencias o infraestructura del repositorio 'Ruflo'."
+      ],
+      "source_of_truth": [
+        "La salida del comando `npx pnpm --config.ignore-scripts=false exec tsc --noEmit`."
+      ],
+      "invariants": [
+        "Todos los cambios de código deben estar justificados por uno o más errores del log de `tsc`.",
+        "No se debe introducir nueva funcionalidad.",
+        "El número total de errores de `tsc` debe reducirse a cero o a un mínimo aceptable."
+      ],
+      "validation_plan": [
+        "Ejecutar `tsc --noEmit` al final del proceso y verificar que no devuelve errores.",
+        "Si el repositorio 'Ruflo' tiene tests, ejecutarlos y verificar que todos pasan."
+      ],
+      "execution_lane": "high_risk",
+      "semantic_surfaces": [
+        "workflows"
+      ],
+      "runtime_memory_hints": "",
+      "planning_mode": "agent",
+      "preflight_risk": {
+        "lane": "high_risk",
+        "request_length": 803,
+        "semantic_surfaces": [
+          "workflows"
+        ],
+        "risk_factors": [
+          "workflows"
+        ],
+        "task_count": 3,
+        "pre_satisfied_task_count": 0
+      },
+      "tasks": [
+        {
+          "id": "task-01-discovery",
+          "title": "Descubrimiento y Análisis Topológico de Errores TypeScript",
+          "objective": "Ejecutar el compilador de TypeScript para generar un log completo de todos los errores de tipo y guardarlo para su posterior análisis.",
+          "in_scope": [
+            "Ejecutar el comando `npx pnpm --config.ignore-scripts=false exec tsc --noEmit > ts_errors.log` dentro del entorno de ejecución del repositorio Ruflo.",
+            "Analizar el archivo `ts_errors.log` para categorizar los errores (ej. métodos faltantes, tipos incorrectos, importaciones rotas)."
+          ],
+          "source_of_truth": [
+            "La salida estándar del comando `tsc`."
+          ],
+          "invariants": [
+            "El comando se ejecuta hasta completarse.",
+            "El archivo `ts_errors.log` contiene todos los errores reportados."
+          ],
+          "validation": [
+            "Verificar que el archivo `ts_errors.log` no está vacío y contiene patrones de error de TypeScript reconocibles."
+          ],
+          "semantic_surfaces": []
+        },
+        {
+          "id": "task-02-ast-mutation",
+          "title": "Inyección Semántica de Métodos Faltantes",
+          "objective": "Basado en el análisis de errores, modificar las clases e interfaces para añadir los métodos faltantes como `setIdle` y `activate`.",
+          "in_scope": [
+            "Identificar los archivos `.ts` y `.tsx` que contienen clases o interfaces con métodos faltantes según el log de errores.",
+            "Utilizar operaciones de modificación de código (AST o reemplazo de texto con regex de alta precisión) para inyectar las signaturas de los métodos requeridos.",
+            "Añadir implementaciones mínimas o `stubs` para los nuevos métodos (ej. `setIdle() { /* NOOP */ }`)."
+          ],
+          "source_of_truth": [
+            "El archivo `ts_errors.log` generado en la tarea anterior."
+          ],
+          "invariants": [
+            "Cada modificación de archivo debe corresponder a uno o más errores del log.",
+            "No se debe modificar código que no esté directamente relacionado con un error de tipo."
+          ],
+          "validation": [
+            "Ejecutar `tsc --noEmit` de nuevo después de las modificaciones y verificar que el número de errores relacionados con métodos faltantes ha disminuido."
+          ],
+          "semantic_surfaces": []
+        },
+        {
+          "id": "task-03-purge-dead-code",
+          "title": "Purga de Código Muerto y Dependencias Rotas",
+          "objective": "Eliminar el código que depende de librerías que ya no existen en el proyecto.",
+          "in_scope": [
+            "Identificar los errores de importación en `ts_errors.log` (ej. 'Cannot find module...').",
+            "Rastrear el uso de los módulos importados. Si el código que los usa no tiene otras dependencias y su eliminación resuelve el error de importación sin causar nuevos errores en cascada, proceder a eliminarlo."
+          ],
+          "source_of_truth": [
+            "El archivo `ts_errors.log` y el `package.json` del repositorio Ruflo."
+          ],
+          "invariants": [
+            "Solo se eliminará código si se puede probar que es inalcanzable debido a una dependencia faltante."
+          ],
+          "validation": [
+            "Ejecutar `tsc --noEmit` de nuevo y confirmar que los errores de 'Cannot find module...' se han resuelto sin introducir un número mayor de nuevos errores."
+          ],
+          "semantic_surfaces": []
+        }
+      ]
+    },
+    {
+      "approach_name": "Opción 2: Auditoría y Reporte de Deuda Técnica",
+      "recommendation_use_case": "Elígelo si prefieres tener una visión completa del problema y aprobar manualmente la estrategia de solución, en lugar de una ejecución autónoma.",
+      "pros": [
+        "Proporciona máxima visibilidad y control al equipo humano.",
+        "Reduce el riesgo de introducir errores lógicos al evitar modificaciones automáticas.",
+        "Permite una planificación de la corrección por fases, priorizando lo más crítico."
+      ],
+      "risks": [
+        {
+          "structural_risk": "Retrasa la solución del problema, ya que requiere intervención humana para analizar el reporte y decidir los siguientes pasos.",
+          "mitigation_strategy": "Entregar un reporte claro y categorizado que facilite la toma de decisiones.",
+          "second_order_impact": "Consume tiempo del equipo de desarrollo que podría dedicarse a otras tareas de producto.",
+          "reversibility": "Two-Way Door",
+          "mitigation_effort": "Small",
+          "confidence_score": "High"
+        }
+      ],
+      "refused": false,
+      "refusal_reason": "",
+      "request_title": "Auditoría de Errores TypeScript en Repositorio Ruflo",
+      "mission_type": "refactor",
+      "target_namespace": null,
+      "branch_name": "refactor/ruflo-audit-tsc-errors",
+      "pr_title": "Docs (Orbital): Auditar y reportar errores de TypeScript en Ruflo",
+      "commit_title": "docs(ruflo): Audit and report tsc errors",
+      "risk_level": "low",
+      "problem": "El repositorio 'Ruflo' presenta una gran cantidad de errores de TypeScript que impiden su compilación, y se necesita un análisis detallado antes de proceder con la corrección.",
+      "value_expected": "Un reporte detallado y categorizado de todos los errores de TypeScript, que permita al equipo de desarrollo planificar una estrategia de corrección informada.",
+      "in_scope": [
+        "Ejecución de `tsc` para generar el log de errores.",
+        "Análisis y categorización de los errores.",
+        "Generación de un reporte en formato Markdown con los hallazgos."
+      ],
+      "out_of_scope": [
+        "Modificación de cualquier archivo de código.",
+        "Corrección de los errores."
+      ],
+      "source_of_truth": [
+        "La salida del comando `npx pnpm --config.ignore-scripts=false exec tsc --noEmit`."
+      ],
+      "invariants": [
+        "No se modifica el código del repositorio 'Ruflo'.",
+        "El reporte final refleja de forma precisa el estado del código."
+      ],
+      "validation_plan": [
+        "Verificar que el reporte en Markdown se ha generado y contiene un resumen cuantitativo y cualitativo de los errores."
+      ],
+      "execution_lane": "standard",
+      "semantic_surfaces": [
+        "workflows"
+      ],
+      "runtime_memory_hints": "",
+      "planning_mode": "agent",
+      "preflight_risk": {
+        "lane": "standard",
+        "request_length": 803,
+        "semantic_surfaces": [
+          "workflows"
+        ],
+        "risk_factors": [
+          "workflows"
+        ],
+        "task_count": 1,
+        "pre_satisfied_task_count": 0
+      },
+      "tasks": [
+        {
+          "id": "task-01-discovery-and-report",
+          "title": "Generar, Analizar y Presentar Reporte de Errores TypeScript",
+          "objective": "Ejecutar `tsc`, analizar y categorizar los errores, y presentar un informe estructurado al Product Owner para su revisión.",
+          "in_scope": [
+            "Ejecutar `npx pnpm --config.ignore-scripts=false exec tsc --noEmit > ts_errors.log`.",
+            "Procesar `ts_errors.log` para agrupar errores por tipo (métodos faltantes, importaciones rotas, etc.) y por archivo.",
+            "Generar un documento en formato Markdown con el resumen de los hallazgos y un plan de acción sugerido."
+          ],
+          "source_of_truth": [
+            "La salida del compilador de TypeScript."
+          ],
+          "invariants": [
+            "El reporte refleja fielmente el estado de la base de código."
+          ],
+          "validation": [
+            "El reporte en Markdown es generado y contiene un resumen cuantitativo de los errores."
+          ],
+          "semantic_surfaces": []
+        }
+      ]
+    }
+  ]
+}
