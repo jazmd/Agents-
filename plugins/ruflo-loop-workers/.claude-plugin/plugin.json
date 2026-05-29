@@ -1,7 +1,7 @@
 {
   "name": "ruflo-loop-workers",
-  "description": "Cache-aware /loop workers and CronCreate background automation — wraps 5 hooks_worker-* MCP tools (list/dispatch/status/detect/cancel) and exposes 12 background worker triggers (ultralearn, optimize, consolidate, predict, audit, map, preload, deepdive, document, refactor, benchmark, testgaps)",
-  "version": "0.2.0",
+  "description": "Cache-aware /loop workers and CronCreate background automation — wraps 5 hooks_worker-* MCP tools (list/dispatch/status/detect/cancel), exposes 12 background worker triggers (ultralearn, optimize, consolidate, predict, audit, map, preload, deepdive, document, refactor, benchmark, testgaps), and registers consumer-defined custom workers from a YAML manifest",
+  "version": "0.3.0",
   "author": {
     "name": "ruvnet",
     "url": "https://github.com/ruvnet"
@@ -17,6 +17,7 @@
     "mcp",
     "background-workers",
     "cache-aware",
-    "schedule-wakeup"
+    "schedule-wakeup",
+    "custom-workers"
   ]
 }
