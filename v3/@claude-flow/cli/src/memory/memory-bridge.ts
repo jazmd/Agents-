@@ -531,6 +531,19 @@ function getDb(registry: any): any | null {
   return { db, agentdb };
 }
 
+/**
+ * Flush both AgentDB databases to disk (sql.js uses in-memory SQLite).
+ * Must be called after every write operation to persist data.
+ */
+function flushDb(ctx: any): void {
+  try {
+    if (ctx?.db?.save) ctx.db.save();
+  } catch { /* db.save() not available (e.g. better-sqlite3) */ }
+  try {
+    if (ctx?.agentdb?.save) ctx.agentdb.save();
+  } catch { /* agentdb.save() not available */ }
+}
+
 // ===== Bridge functions — match memory-initializer.ts signatures =====
 
 /**
@@ -635,6 +648,7 @@ export async function bridgeStoreEntry(options: {
       now, now,
       ttl ? now + (ttl * 1000) : null
     );
+    flushDb(ctx);
 
     // Phase 2: Write-through to TieredCache
     const safeNs = String(namespace).replace(/:/g, '_');
@@ -970,6 +984,7 @@ export async function bridgeGetEntry(options: {
       ctx.db.prepare(
         `UPDATE memory_entries SET access_count = access_count + 1, last_accessed_at = ? WHERE id = ?`
       ).run(Date.now(), row.id);
+      flushDb(ctx);
     } catch {
       // Non-fatal
     }
@@ -1040,6 +1055,7 @@ export async function bridgeDeleteEntry(options: {
         SET status = 'deleted', updated_at = ?
         WHERE key = ? AND namespace = ? AND status = 'active'
       `).run(Date.now(), key, namespace);
+      flushDb(ctx);
       changes = result?.changes ?? 0;
     } catch {
       return null;
@@ -1766,6 +1782,7 @@ export async function bridgeDeleteHierarchical(options: {
           SET status = 'deleted', updated_at = ?
           WHERE key = ? AND namespace LIKE 'hierarchical%' AND status = 'active'
         `).run(Date.now(), key);
+        flushDb(ctx);
         const changes = result?.changes ?? 0;
         if (changes > 0) {
           await logAttestation(registry, 'delete', key, { namespace: 'hierarchical', tier });
@@ -1859,6 +1876,7 @@ export async function bridgeDeleteCausalEdge(options: {
           SET status = 'deleted', updated_at = ?
           WHERE key = ? AND namespace = 'causal-edges' AND status = 'active'
         `).run(Date.now(), edgeKey);
+        flushDb(ctx);
         const changes = result?.changes ?? 0;
         if (changes > 0) {
           await logAttestation(registry, 'delete', edgeKey, { namespace: 'causal-edges', relation });
@@ -1947,6 +1965,7 @@ export async function bridgeDeleteCausalNode(options: {
           AND status = 'active'
           AND (key LIKE ? OR key LIKE ?)
       `).run(Date.now(), `${nodeId}→%`, `%→${nodeId}`);
+      flushDb(ctx);
       deletedEdges = edgeResult?.changes ?? 0;
 
       const nodeResult = ctx.db.prepare(`
@@ -1954,6 +1973,7 @@ export async function bridgeDeleteCausalNode(options: {
         SET status = 'deleted', updated_at = ?
         WHERE key = ? AND status = 'active'
       `).run(Date.now(), nodeId);
+      flushDb(ctx);
       deletedNode = (nodeResult?.changes ?? 0) > 0;
 
       await logAttestation(registry, 'delete', nodeId, { namespace: 'causal-nodes', deletedEdges });
