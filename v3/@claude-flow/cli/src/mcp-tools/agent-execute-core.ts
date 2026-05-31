@@ -132,15 +132,16 @@ export async function callAnthropicMessages(input: AnthropicCallInput): Promise<
     return {
       success: false,
       error:
-        'No LLM provider configured. Set ANTHROPIC_API_KEY (Tier-3), OPENROUTER_API_KEY (#2042), or OLLAMA_API_KEY (Tier-2 — #1725).',
+        'No LLM provider configured. Set ANTHROPIC_API_KEY (Tier-3), OPENROUTER_API_KEY (#2042), OLLAMA_API_KEY (Tier-2), or ANTHROPIC_BASE_URL with a compatible key.',
     };
   }
   const model = input.model || DEFAULT_ANTHROPIC_MODEL;
+  const baseUrl = (process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/+$/, '');
   const startedAt = Date.now();
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), input.timeoutMs || 60000);
-    const res = await fetch('https://api.anthropic.com/v1/messages', {
+    const res = await fetch(`${baseUrl}/v1/messages`, {
       method: 'POST',
       headers: {
         'x-api-key': anthropicKey,
