@@ -35,7 +35,7 @@ Orchestrate 100+ specialized AI agents across machines, teams, and trust boundar
 
 ### What Ruflo Does
 
-One `npx ruvflo init` gives Claude Code a nervous system: agents self-organize into swarms, learn from every task, remember across sessions, and — with federation — securely talk to agents on other machines without leaking data. You keep writing code. Ruflo handles the coordination.
+One `npx ruflo init` gives Claude Code a nervous system: agents self-organize into swarms, learn from every task, remember across sessions, and — with federation — securely talk to agents on other machines without leaking data. You keep writing code. Ruflo handles the coordination.
 
 ```
 Self-Learning / Self-Optimizing Agent Architecture
