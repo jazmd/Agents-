@@ -168,12 +168,12 @@ describe('Provider Integration Tests', () => {
   describe('MiniMax Provider', () => {
     const apiKey = process.env.MINIMAX_API_KEY;
 
-    it.skipIf(!apiKey)('should complete request with MiniMax-M2.5', async () => {
+    it.skipIf(!apiKey)('should complete request with MiniMax-M3', async () => {
       const provider = new MiniMaxProvider({
         config: {
           provider: 'minimax',
           apiKey,
-          model: 'MiniMax-M2.5',
+          model: 'MiniMax-M3',
           maxTokens: 100,
         },
         logger: consoleLogger,
@@ -181,7 +181,7 @@ describe('Provider Integration Tests', () => {
 
       await provider.initialize();
 
-      const response = await provider.complete(createTestRequest('MiniMax-M2.5'));
+      const response = await provider.complete(createTestRequest('MiniMax-M3'));
 
       console.log('MiniMax Response:', response.content);
       console.log('Usage:', response.usage);
@@ -199,7 +199,7 @@ describe('Provider Integration Tests', () => {
         config: {
           provider: 'minimax',
           apiKey,
-          model: 'MiniMax-M2.5',
+          model: 'MiniMax-M3',
           maxTokens: 100,
         },
         logger: consoleLogger,
@@ -208,7 +208,7 @@ describe('Provider Integration Tests', () => {
       await provider.initialize();
 
       const chunks: string[] = [];
-      for await (const event of provider.streamComplete(createTestRequest('MiniMax-M2.5'))) {
+      for await (const event of provider.streamComplete(createTestRequest('MiniMax-M3'))) {
         if (event.type === 'content' && event.delta?.content) {
           chunks.push(event.delta.content);
           process.stdout.write(event.delta.content);
@@ -226,7 +226,7 @@ describe('Provider Integration Tests', () => {
         config: {
           provider: 'minimax',
           apiKey,
-          model: 'MiniMax-M2.5',
+          model: 'MiniMax-M3',
           maxTokens: 100,
         },
         logger: consoleLogger,
@@ -235,11 +235,13 @@ describe('Provider Integration Tests', () => {
       await provider.initialize();
 
       const models = await provider.listModels();
-      expect(models).toContain('MiniMax-M2.5');
-      expect(models).toContain('MiniMax-M2.5-highspeed');
+      expect(models).toContain('MiniMax-M3');
+      expect(models).toContain('MiniMax-M2.7');
+      expect(models).toContain('MiniMax-M2.7-highspeed');
+      expect(models[0]).toBe('MiniMax-M3');
 
-      const modelInfo = await provider.getModelInfo('MiniMax-M2.5');
-      expect(modelInfo.contextLength).toBe(204800);
+      const modelInfo = await provider.getModelInfo('MiniMax-M3');
+      expect(modelInfo.contextLength).toBe(512000);
 
       provider.destroy();
     }, 30000);

@@ -1,8 +1,8 @@
 /**
  * V3 MiniMax Provider
  *
- * Supports MiniMax-M2.5 and MiniMax-M2.5-highspeed models via
- * MiniMax's OpenAI-compatible API.
+ * Supports MiniMax-M3 (default), MiniMax-M2.7, and MiniMax-M2.7-highspeed
+ * models via MiniMax's OpenAI-compatible API.
  *
  * API Documentation: https://platform.minimax.io/docs/api-reference/text-openai-api
  *
@@ -83,21 +83,24 @@ export class MiniMaxProvider extends BaseProvider {
   readonly name: LLMProvider = 'minimax';
   readonly capabilities: ProviderCapabilities = {
     supportedModels: [
-      'MiniMax-M2.5',
-      'MiniMax-M2.5-highspeed',
+      'MiniMax-M3',
+      'MiniMax-M2.7',
+      'MiniMax-M2.7-highspeed',
     ],
     maxContextLength: {
-      'MiniMax-M2.5': 204800,
-      'MiniMax-M2.5-highspeed': 204800,
+      'MiniMax-M3': 512000,
+      'MiniMax-M2.7': 204800,
+      'MiniMax-M2.7-highspeed': 204800,
     },
     maxOutputTokens: {
-      'MiniMax-M2.5': 192000,
-      'MiniMax-M2.5-highspeed': 192000,
+      'MiniMax-M3': 128000,
+      'MiniMax-M2.7': 192000,
+      'MiniMax-M2.7-highspeed': 192000,
     },
     supportsStreaming: true,
     supportsToolCalling: true,
     supportsSystemMessages: true,
-    supportsVision: false,
+    supportsVision: true,
     supportsAudio: false,
     supportsFineTuning: false,
     supportsEmbeddings: false,
@@ -108,12 +111,17 @@ export class MiniMaxProvider extends BaseProvider {
       concurrentRequests: 100,
     },
     pricing: {
-      'MiniMax-M2.5': {
+      'MiniMax-M3': {
+        promptCostPer1k: 0.0006,
+        completionCostPer1k: 0.0024,
+        currency: 'USD',
+      },
+      'MiniMax-M2.7': {
         promptCostPer1k: 0.0003,
         completionCostPer1k: 0.0012,
         currency: 'USD',
       },
-      'MiniMax-M2.5-highspeed': {
+      'MiniMax-M2.7-highspeed': {
         promptCostPer1k: 0.0006,
         completionCostPer1k: 0.0024,
         currency: 'USD',
@@ -272,16 +280,17 @@ export class MiniMaxProvider extends BaseProvider {
 
   async getModelInfo(model: LLMModel): Promise<ModelInfo> {
     const descriptions: Record<string, string> = {
-      'MiniMax-M2.5': 'Peak Performance. Ultimate Value. Master the Complex',
-      'MiniMax-M2.5-highspeed': 'Same performance, faster and more agile',
+      'MiniMax-M3': 'Latest MiniMax flagship with 512K context, 128K output, and image input',
+      'MiniMax-M2.7': 'Previous generation MiniMax model',
+      'MiniMax-M2.7-highspeed': 'Previous generation low-latency variant',
     };
 
     return {
       model,
       name: model,
       description: descriptions[model] || 'MiniMax language model',
-      contextLength: this.capabilities.maxContextLength[model] || 204800,
-      maxOutputTokens: this.capabilities.maxOutputTokens[model] || 192000,
+      contextLength: this.capabilities.maxContextLength[model] || 512000,
+      maxOutputTokens: this.capabilities.maxOutputTokens[model] || 128000,
       supportedFeatures: [
         'chat',
         'completion',
