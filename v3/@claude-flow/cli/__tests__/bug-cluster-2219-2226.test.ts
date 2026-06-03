@@ -45,6 +45,23 @@ describe('#2221 — statusline version probe covers global npm installs', () => 
     expect(SCRIPT).toContain("'marketplaces', 'ruflo', 'package.json'");
     expect(SCRIPT).toContain("'node_modules', 'ruflo', 'package.json'");
   });
+
+  // process.execPath is the *resolved* node path; on Homebrew it points into the
+  // versioned Cellar, not the prefix where global packages live — so the
+  // execPath-relative probe alone misses `npm i -g ruflo`. Probe known prefixes.
+  it('probes well-known global prefixes so Homebrew/global installs resolve', () => {
+    expect(SCRIPT).toContain('/opt/homebrew/lib/node_modules');
+    expect(SCRIPT).toContain('/usr/local/lib/node_modules');
+  });
+
+  // The installed CLI is what the user actually runs and upgrades via `npm i -g`;
+  // the marketplace checkout lags releases, so it must be a fallback, not first.
+  it('prefers an installed CLI over the lagging plugin marketplace checkout', () => {
+    const localProbe = SCRIPT.indexOf("'node_modules', 'ruflo', 'package.json'");
+    const marketProbe = SCRIPT.indexOf("'marketplaces', 'ruflo', 'package.json'");
+    expect(localProbe).toBeGreaterThanOrEqual(0);
+    expect(marketProbe).toBeGreaterThan(localProbe);
+  });
 });
 
 describe('#2215 — system_info and hooks_intelligence agree on flashAttention', () => {
