@@ -63,7 +63,12 @@ beforeEach(() => {
 
 afterEach(() => {
   rmSync(workdir, { recursive: true, force: true });
-  process.env = { ...savedEnv };
+  // Restore env by mutating the existing process.env object (not replacing it):
+  // delete keys added during the test, then re-apply the snapshot.
+  for (const key of Object.keys(process.env)) {
+    if (!(key in savedEnv)) delete process.env[key];
+  }
+  Object.assign(process.env, savedEnv);
 });
 
 // ---------------------------------------------------------------------------
@@ -182,6 +187,15 @@ describe('getUsage caching', () => {
     await expect(
       getUsage({ token: 't', version: '1', cwd: workdir, fetchImpl: fakeFetch(429, {}), now: 1 }),
     ).rejects.toMatchObject({ code: 'rate_limited' });
+  });
+
+  it('rethrows unauthenticated errors instead of masking them with stale cache', async () => {
+    // Seed a cache, then a refresh that 401s must NOT serve stale data —
+    // a revoked/expired token has to surface so the caller can re-auth.
+    await getUsage({ token: 't', version: '1', cwd: workdir, fetchImpl: fakeFetch(200, SAMPLE), now: 1_000_000 });
+    await expect(
+      getUsage({ token: 't', version: '1', cwd: workdir, refresh: true, fetchImpl: fakeFetch(401, {}), now: 1_000_000 + 5_000 }),
+    ).rejects.toMatchObject({ code: 'unauthenticated' });
   });
 });
 

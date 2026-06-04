@@ -177,7 +177,11 @@ export async function getUsage(opts: GetUsageOptions): Promise<UsageResult> {
     writeCache(cwd, { fetchedAt: now, data });
     return { data, fetchedAt: now, stale: false, source: 'live' };
   } catch (err) {
-    if (cache) {
+    // Only fall back to cache for transient failures (network / rate-limit).
+    // Auth and other HTTP/parse errors must surface so the caller can prompt
+    // re-authentication instead of showing stale usage after a revoked token.
+    const transient = err instanceof UsageError && (err.code === 'network' || err.code === 'rate_limited');
+    if (transient && cache) {
       return { data: cache.data, fetchedAt: cache.fetchedAt, stale: true, source: 'cache' };
     }
     throw err;

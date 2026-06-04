@@ -60,11 +60,12 @@ function readFromKeychain(): ResolvedToken | null {
   if (process.platform !== 'darwin') return null;
   try {
     const account = process.env.USER || process.env.LOGNAME || '';
-    const out = execFileSync(
-      'security',
-      ['find-generic-password', '-s', 'Claude Code-credentials', '-a', account, '-w'],
-      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] },
-    );
+    const args = ['find-generic-password', '-s', 'Claude Code-credentials'];
+    // Omit the -a account filter when the username is unavailable (launchd, some
+    // CI shells); otherwise `-a ""` fails to match the real stored account.
+    if (account) args.push('-a', account);
+    args.push('-w');
+    const out = execFileSync('security', args, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
     return parseCredentialsJson(out.trim(), 'keychain');
   } catch {
     // Not present in the Keychain, or `security` unavailable — fall through.
