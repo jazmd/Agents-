@@ -25,6 +25,7 @@ import {
   type UsageData,
 } from '../src/usage/client.js';
 import {
+  usageCommand,
   buildPanelLines,
   renderRow,
   formatResetIn,
@@ -196,6 +197,57 @@ describe('getUsage caching', () => {
     await expect(
       getUsage({ token: 't', version: '1', cwd: workdir, refresh: true, fetchImpl: fakeFetch(401, {}), now: 1_000_000 + 5_000 }),
     ).rejects.toMatchObject({ code: 'unauthenticated' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// commands/usage.ts — runUsage action wiring
+// ---------------------------------------------------------------------------
+
+describe('usageCommand action', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ctx = (flags: Record<string, unknown> = {}): any =>
+    ({ args: [], flags, cwd: workdir, interactive: false });
+
+  function seedFreshCache() {
+    mkdirSync(join(workdir, '.claude-flow', 'usage'), { recursive: true });
+    writeFileSync(
+      join(workdir, '.claude-flow', 'usage', 'cache.json'),
+      JSON.stringify({ fetchedAt: Date.now(), data: SAMPLE }),
+      'utf-8',
+    );
+  }
+
+  it('returns exitCode 1 with a friendly result when not logged in', async () => {
+    if (process.platform === 'darwin') return; // Keychain may hold a real token
+    const res = await usageCommand.action!(ctx());
+    expect(res).toMatchObject({ success: false, exitCode: 1 });
+  });
+
+  it('returns exitCode 1 when the resolved token is expired', async () => {
+    if (process.platform === 'darwin') return; // Keychain precedes the file on macOS
+    const path = credentialsFilePath();
+    mkdirSync(join(path, '..'), { recursive: true });
+    writeFileSync(path, JSON.stringify({ claudeAiOauth: { accessToken: 'x', expiresAt: 1 } }), 'utf-8');
+    const res = await usageCommand.action!(ctx());
+    expect(res).toMatchObject({ success: false, exitCode: 1 });
+  });
+
+  it('renders from fresh cache when authenticated — no network', async () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'valid-env-token';
+    seedFreshCache();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = (await usageCommand.action!(ctx())) as any;
+    expect(res.success).toBe(true);
+    expect((res.data as UsageData).five_hour?.utilization).toBe(21);
+  });
+
+  it('succeeds with --json (served from cache)', async () => {
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = 'valid-env-token';
+    seedFreshCache();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const res = (await usageCommand.action!(ctx({ json: true }))) as any;
+    expect(res.success).toBe(true);
   });
 });
 

@@ -37,7 +37,7 @@ if [ -n "$pm" ] && grep -q '"test"' package.json 2>/dev/null; then
     pnpm) pnpm test 2>&1 ;;
     yarn) yarn test 2>&1 ;;
   esac | tail -n 60 || echo "FAIL: test script errored (see above)"
-elif have pytest && ls *.py **/*.py >/dev/null 2>&1; then
+elif have pytest && find . -path ./node_modules -prune -o -name '*.py' -print 2>/dev/null | grep -q .; then
   pytest -q 2>&1 | tail -n 60
 elif have go && ls go.mod >/dev/null 2>&1; then
   go test ./... 2>&1 | tail -n 60
