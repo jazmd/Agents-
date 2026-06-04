@@ -362,30 +362,48 @@ function getCostFromStdin() {
 }
 
 // Read package version from the first package.json we find.
+// Precedence: the ruflo the user actually runs (project-local install, then a
+// global 'npm i -g' install) wins over the plugin marketplace checkout, which
+// lags npm releases and only refreshes on 'claude plugin marketplace update'.
 function getPkgVersion() {
   let ver = '3.6';
   try {
     const home = os.homedir();
     const pkgPaths = [
-      path.join(home, '.claude', 'plugins', 'marketplaces', 'ruflo', 'package.json'),
+      // 1. Project-local install — what THIS project resolves.
       path.join(CWD, 'node_modules', '@claude-flow', 'cli', 'package.json'),
       path.join(CWD, 'node_modules', 'ruflo', 'package.json'),
-      path.join(CWD, 'v3', '@claude-flow', 'cli', 'package.json'),
     ];
-    // #2221: global installs (npm i -g ruflo) live outside CWD/node_modules, so the
-    // probes above all miss and the version falls back to the hard-coded default.
-    // Derive the global node_modules dir from the running node binary (no npm spawn —
-    // statusline renders often). Covers nvm/mise (bin/../lib/node_modules) and Windows
-    // (bin/node_modules) layouts.
+    // 2. Global install (npm i -g ruflo) — lives outside CWD/node_modules. Probe
+    // known global roots without spawning npm (statusline renders often). #2221
+    // probed only execPath-relative dirs, but process.execPath is the *resolved*
+    // node path, so on Homebrew it points into the versioned Cellar
+    // (…/Cellar/node/<v>/bin) while global packages live at the prefix
+    // (/opt/homebrew/lib/node_modules). List the well-known prefixes explicitly in
+    // addition to the execPath-relative layouts (nvm/mise/asdf/volta, Windows).
     try {
       const binDir = path.dirname(process.execPath);
-      for (const gm of [path.join(binDir, '..', 'lib', 'node_modules'), path.join(binDir, 'node_modules')]) {
+      const globalRoots = [
+        path.join(binDir, '..', 'lib', 'node_modules'), // *nix prefix (nvm/mise/asdf/volta/linux)
+        path.join(binDir, 'node_modules'),              // Windows
+        '/opt/homebrew/lib/node_modules',               // Homebrew (Apple Silicon)
+        '/usr/local/lib/node_modules',                  // Homebrew (Intel) / common Unix
+        '/usr/lib/node_modules',                        // some Linux distros
+      ];
+      if (process.env.npm_config_prefix) globalRoots.push(path.join(process.env.npm_config_prefix, 'lib', 'node_modules'));
+      if (process.env.APPDATA) globalRoots.push(path.join(process.env.APPDATA, 'npm', 'node_modules')); // Windows npm prefix
+      for (const gm of globalRoots) {
         pkgPaths.push(
           path.join(gm, 'ruflo', 'package.json'),
           path.join(gm, '@claude-flow', 'cli', 'package.json'),
         );
       }
     } catch { /* ignore */ }
+    // 3. Fallbacks: plugin marketplace checkout, then in-repo source checkout.
+    pkgPaths.push(
+      path.join(home, '.claude', 'plugins', 'marketplaces', 'ruflo', 'package.json'),
+      path.join(CWD, 'v3', '@claude-flow', 'cli', 'package.json'),
+    );
     for (const p of pkgPaths) {
       if (!fs.existsSync(p)) continue;
       try {
