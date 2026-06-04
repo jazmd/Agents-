@@ -130,6 +130,7 @@ export function buildPanelLines(result: UsageResult, now: number = Date.now()): 
 // ============================================================================
 
 let cachedVersion: string | null = null;
+/** Resolve the CLI's package version (for the User-Agent), cached after first read. */
 function resolveCliVersion(): string {
   if (cachedVersion) return cachedVersion;
   try {
@@ -156,6 +157,11 @@ function resolveCliVersion(): string {
 // Command action
 // ============================================================================
 
+/**
+ * `usage` command action: resolve the Claude token, fetch (or read cached)
+ * usage, and print either a formatted panel or JSON. Maps failures to
+ * user-facing messages and a non-zero exit code.
+ */
 async function runUsage(ctx: CommandContext): Promise<CommandResult> {
   const asJson = ctx.flags.json === true || ctx.flags.format === 'json';
   const refresh = ctx.flags.refresh === true;

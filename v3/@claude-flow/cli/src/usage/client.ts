@@ -21,6 +21,7 @@ const OAUTH_BETA = 'oauth-2025-04-20';
 /** Endpoint rate-limits hard; do not poll faster than this. */
 export const DEFAULT_TTL_MS = 180_000;
 
+/** One usage window (e.g. the 5-hour session or a weekly limit). */
 export interface UsageWindow {
   /** Percentage of the window consumed, 0-100. */
   utilization: number;
@@ -28,6 +29,7 @@ export interface UsageWindow {
   resets_at: string;
 }
 
+/** The full "Plan usage limits" payload returned by the usage endpoint. */
 export interface UsageData {
   /** "Current session" (rolling 5-hour window). */
   five_hour?: UsageWindow | null;
@@ -45,8 +47,10 @@ export interface UsageData {
   } | null;
 }
 
+/** Classification of a usage-fetch failure, used to decide fallback behavior. */
 export type UsageErrorCode = 'unauthenticated' | 'rate_limited' | 'network' | 'http';
 
+/** Error thrown by the usage client, tagged with a {@link UsageErrorCode}. */
 export class UsageError extends Error {
   constructor(message: string, public readonly code: UsageErrorCode) {
     super(message);
@@ -54,6 +58,7 @@ export class UsageError extends Error {
   }
 }
 
+/** A usage lookup result plus freshness metadata (live vs cached). */
 export interface UsageResult {
   data: UsageData;
   /** Epoch ms the data was fetched. */
@@ -68,14 +73,17 @@ interface CacheFile {
   data: UsageData;
 }
 
+/** Directory that holds the usage cache for a given working directory. */
 function cacheDir(cwd: string): string {
   return join(cwd, '.claude-flow', 'usage');
 }
 
+/** Absolute path to the usage cache file. */
 function cachePath(cwd: string): string {
   return join(cacheDir(cwd), 'cache.json');
 }
 
+/** Read and validate the cache file, returning null when missing or corrupt. */
 function readCache(cwd: string): CacheFile | null {
   const p = cachePath(cwd);
   if (!existsSync(p)) return null;
@@ -90,6 +98,7 @@ function readCache(cwd: string): CacheFile | null {
   return null;
 }
 
+/** Persist the usage response to the cache (best-effort; never throws). */
 function writeCache(cwd: string, cache: CacheFile): void {
   try {
     mkdirSync(cacheDir(cwd), { recursive: true });
@@ -99,11 +108,13 @@ function writeCache(cwd: string, cache: CacheFile): void {
   }
 }
 
+/** Build the User-Agent string the endpoint requires (must be claude-code/*). */
 function userAgent(version: string): string {
   // The endpoint 429s without a claude-code/* User-Agent.
   return `claude-code/${version}`;
 }
 
+/** Options for a single low-level usage fetch. */
 export interface FetchUsageOptions {
   version: string;
   /** Injectable for tests. */
@@ -147,6 +158,7 @@ export async function fetchClaudeUsage(token: string, opts: FetchUsageOptions): 
   }
 }
 
+/** Options for the high-level cached usage accessor {@link getUsage}. */
 export interface GetUsageOptions extends FetchUsageOptions {
   token: string;
   cwd?: string;

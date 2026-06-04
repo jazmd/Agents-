@@ -344,9 +344,17 @@ function getCostFromStdin() {
 // (used_percentage + resets_at epoch seconds, v2.1.80+); (2) fallback to the
 // cache written by 'ruflo usage' at .claude-flow/usage/cache.json. No network
 // call happens here — the statusline must stay fast.
+
+// Unix timestamps in seconds are ~1.7e9; in milliseconds ~1.7e12. Values below
+// this threshold are treated as seconds and scaled up to milliseconds.
+const RESET_MS_THRESHOLD = 1e12;
+const USAGE_BAR_WIDTH = 20;   // characters per usage bar
+const USAGE_PCT_HIGH = 75;    // >= this => red
+const USAGE_PCT_MED = 50;     // >= this => yellow (else green)
+
 function parseResetMs(v) {
   if (v == null) return 0;
-  if (typeof v === 'number') return v < 1e12 ? v * 1000 : v;
+  if (typeof v === 'number') return v < RESET_MS_THRESHOLD ? v * 1000 : v;
   const t = Date.parse(v);
   return isNaN(t) ? 0 : t;
 }
@@ -413,10 +421,10 @@ function getUsageWindows() {
 }
 
 function usageBar(pct) {
-  const width = 20;
+  const width = USAGE_BAR_WIDTH;
   const clamped = Math.max(0, Math.min(100, pct || 0));
   const filled = Math.round((clamped / 100) * width);
-  const col = clamped >= 75 ? c.brightRed : clamped >= 50 ? c.brightYellow : c.brightGreen;
+  const col = clamped >= USAGE_PCT_HIGH ? c.brightRed : clamped >= USAGE_PCT_MED ? c.brightYellow : c.brightGreen;
   return '[' + col + '█'.repeat(filled) + c.reset + c.dim + '░'.repeat(width - filled) + c.reset + ']';
 }
 
