@@ -379,7 +379,19 @@ function getPkgVersion() {
     // (bin/node_modules) layouts.
     try {
       const binDir = path.dirname(process.execPath);
-      for (const gm of [path.join(binDir, '..', 'lib', 'node_modules'), path.join(binDir, 'node_modules')]) {
+      // Homebrew symlinks /opt/homebrew/bin/node (or /usr/local/bin/node) into a Cellar
+      // path, so process.execPath resolves to .../Cellar/node/<v>/bin/node and the derived
+      // bin/../lib/node_modules points INSIDE the Cellar — where global packages do not
+      // live. Add the canonical prefix-based global dirs so Homebrew (Apple Silicon +
+      // Intel) and standard Linux global installs resolve too.
+      const globalDirs = [
+        path.join(binDir, '..', 'lib', 'node_modules'),
+        path.join(binDir, 'node_modules'),
+        '/opt/homebrew/lib/node_modules',
+        '/usr/local/lib/node_modules',
+        '/usr/lib/node_modules',
+      ];
+      for (const gm of globalDirs) {
         pkgPaths.push(
           path.join(gm, 'ruflo', 'package.json'),
           path.join(gm, '@claude-flow', 'cli', 'package.json'),
