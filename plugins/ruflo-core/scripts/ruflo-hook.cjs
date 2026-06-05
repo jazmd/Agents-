@@ -75,15 +75,28 @@ function invokeHook(bin, binArgs, hookArgs, stdinData) {
 /**
  * Output PreCompact guidance text for the given mode.
  * Mirrors the echo calls that were previously in hooks.json /bin/bash -c blocks.
+ * In 'manual' mode, also reads stdin for custom_instructions (matching old bash behaviour).
  */
 function preCompact(mode) {
   if (mode === 'manual') {
+    // Read stdin for custom_instructions (mirrors old bash: INPUT=$(cat); CUSTOM=$(echo "$INPUT" | jq -r ".custom_instructions // \"\"")`)
+    let custom = '';
+    try {
+      const raw = fs.readFileSync(0, 'utf8').trim();
+      if (raw) {
+        const payload = JSON.parse(raw);
+        custom = (payload && payload.custom_instructions) ? String(payload.custom_instructions).trim() : '';
+      }
+    } catch { /* best-effort */ }
     console.log('🔄 PreCompact Guidance:');
     console.log('📋 IMPORTANT: Review CLAUDE.md in project root for:');
     console.log('   • 54 available agents and concurrent usage patterns');
     console.log('   • Swarm coordination strategies (hierarchical, mesh, adaptive)');
     console.log('   • SPARC methodology workflows with batchtools optimization');
     console.log('   • Critical concurrent execution rules (GOLDEN RULE: 1 MESSAGE = ALL OPERATIONS)');
+    if (custom) {
+      console.log('🎯 Custom compact instructions: ' + custom);
+    }
     console.log('✅ Ready for compact operation');
   } else {
     // auto (and default fallback)
@@ -157,7 +170,9 @@ function main() {
   let hookArgs;
   let stdinData = '';
 
-  // post-command and post-edit have specialised arg extraction
+  // post-command and post-edit have specialised arg extraction from stdin,
+  // then merge any extra flags passed on the command line (e.g. --train-patterns,
+  // --track-metrics, --store-results) so plugin/hooks/hooks.json can add them.
   if (subcommand === 'post-command') {
     const payload = parseStdinPayload();
     if (!payload) { done(); }
@@ -166,12 +181,16 @@ function main() {
     const exitCode = payload.tool_response?.exit_code ?? 0;
     const success = exitCode === 0;
     hookArgs = ['hooks', subcommand, '-c', cmd, '-s', String(success), '-e', String(exitCode)];
+    // Merge extra flags from command line (e.g. --track-metrics true --store-results true)
+    if (rest.length > 0) hookArgs.push(...rest);
   } else if (subcommand === 'post-edit') {
     const payload = parseStdinPayload();
     if (!payload) { done(); }
     const file = payload.tool_input?.file_path || payload.tool_input?.path;
     if (!file) { done(); }
     hookArgs = ['hooks', subcommand, '-f', file, '-s', 'true'];
+    // Merge extra flags from command line (e.g. --train-patterns)
+    if (rest.length > 0) hookArgs.push(...rest);
   } else if (SUBCOMMAND_FIELDS[subcommand]) {
     // Generic stdin→arg extraction for known hook subcommands
     const payload = parseStdinPayload();

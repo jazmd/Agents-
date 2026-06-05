@@ -84,7 +84,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/ruflo-hook.cjs\" post-command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/ruflo-hook.cjs\" post-command --track-metrics true --store-results true",
             "timeout": 3000,
             "continueOnError": true
           }
