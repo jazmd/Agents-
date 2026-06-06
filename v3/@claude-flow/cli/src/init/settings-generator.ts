@@ -33,7 +33,7 @@ export function generateSettings(options: InitOptions): object {
       'Bash(npx @claude-flow*)',
       'Bash(npx claude-flow*)',
       'Bash(node .claude/*)',
-      'mcp__claude-flow__:*',
+      'mcp__claude-flow__*',
     ],
     deny: [
       'Read(./.env)',
