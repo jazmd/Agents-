@@ -14,9 +14,10 @@ irreducibility, you have to *run* the competition to find out.
 
 ```bash
 cd plugins/ruflo-arena
-npm install
+npm install        # light — runtime dep is just zod
 npm run build      # tsc -> dist/
 npm test           # vitest (engine + MCP tools + persistence)
+npm run lint       # eslint (typescript-eslint)
 ```
 
 ## CLI
