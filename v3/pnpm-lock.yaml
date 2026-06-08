@@ -520,6 +520,9 @@ importers:
 
   '@claude-flow/security':
     dependencies:
+      '@noble/ed25519':
+        specifier: ^2.0.0
+        version: 2.3.0
       bcryptjs:
         specifier: ^3.0.3
         version: 3.0.3
