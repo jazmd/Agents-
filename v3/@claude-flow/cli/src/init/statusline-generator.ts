@@ -33,14 +33,16 @@ export function generateStatuslineScript(options: InitOptions): string {
  * readers locally using fragile file probes that missed AgentDB patterns,
  * the v3/docs/adr/ ADR directory, and the real vector count.
  *
- * This version delegates to 'npx @claude-flow/cli hooks statusline --json'
- * as the single source of truth. That command queries AgentDB directly,
+ * This version delegates to the @claude-flow/cli "hooks statusline --json"
+ * command as the single source of truth, preferring an already-installed CLI
+ * invoked directly via node (no npx; npx@latest re-resolved the registry and
+ * relaunched the whole CLI on every render). That command queries AgentDB directly,
  * counts ADRs in both directories, and reports the real intelligence pct.
  *
  * ADR counting falls back to local file reads so the display still works
  * without network access (counts both v3/docs/adr/ and v3/implementation/adrs/).
  *
- * Cache: JSON result is cached in /tmp for 10s so rapid prompt triggers
+ * Cache: JSON result is cached in /tmp (CACHE_TTL_MS) so rapid prompt triggers
  * (every keystroke in some shells) don't hammer the CLI on every call.
  *
  * Usage: node statusline.cjs [--json] [--compact] [--dashboard]
@@ -49,7 +51,7 @@ export function generateStatuslineScript(options: InitOptions): string {
 /* eslint-disable @typescript-eslint/no-var-requires */
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const os = require('os');
 
 // Configuration
@@ -69,10 +71,13 @@ const CONFIG = {
 const CWD = process.cwd();
 
 // ─── Delegation cache ───────────────────────────────────────────
-// Cache the CLI JSON result for 10s so rapid prompt re-renders
-// (e.g. every keypress in some shells) don't re-invoke npx each time.
+// Cache the CLI JSON result so rapid prompt re-renders (Claude Code can refresh
+// the statusline several times a second while streaming) don't re-launch the CLI
+// each time. 10s was far too short: across several concurrent sessions it spawned
+// a near-continuous storm of CLI processes that pinned host CPU. 60s keeps a dev
+// statusline fresh enough while cutting launches ~6x.
 const CACHE_FILE = path.join(os.tmpdir(), 'ruflo-statusline-cache-' + require('crypto').createHash('md5').update(CWD).digest('hex').slice(0, 8) + '.json');
-const CACHE_TTL_MS = 10000;
+const CACHE_TTL_MS = 60000;
 
 function readCache() {
   try {
@@ -90,6 +95,39 @@ function writeCache(data) {
   try { fs.writeFileSync(CACHE_FILE, JSON.stringify({ _ts: Date.now(), data }), 'utf-8'); } catch { /* ignore */ }
 }
 
+// Resolve an already-installed @claude-flow/cli (or ruflo) entry script so we can
+// invoke it directly with the running node binary, instead of npx ...@latest.
+// npx@latest re-resolves the package from the registry and relaunches the CLI on
+// EVERY statusline render; across several concurrent Claude Code sessions that
+// produced an npm-exec storm that pinned host CPU. Returns null if not installed.
+function resolveCliEntry() {
+  const home = os.homedir();
+  const binDir = path.dirname(process.execPath);
+  const roots = [
+    path.join(CWD, 'node_modules'),
+    path.join(home, '.claude', 'plugins', 'marketplaces', 'ruflo', 'node_modules'),
+    path.join(binDir, '..', 'lib', 'node_modules'),
+    path.join(binDir, 'node_modules'),
+  ];
+  for (const root of roots) {
+    for (const name of ['@claude-flow/cli', 'ruflo']) {
+      try {
+        const pkgPath = path.join(root, name, 'package.json');
+        if (!fs.existsSync(pkgPath)) continue;
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+        let rel = null;
+        if (typeof pkg.bin === 'string') rel = pkg.bin;
+        else if (pkg.bin && typeof pkg.bin === 'object') rel = pkg.bin['claude-flow'] || pkg.bin.ruflo || pkg.bin.cli || Object.values(pkg.bin)[0];
+        else if (typeof pkg.main === 'string') rel = pkg.main;
+        if (!rel) continue;
+        const entry = path.join(root, name, rel);
+        if (fs.existsSync(entry)) return entry;
+      } catch { /* ignore */ }
+    }
+  }
+  return null;
+}
+
 /**
  * Single source of truth: delegate to the CLI hooks statusline --json command.
  * Falls back to a minimal static object on failure so the statusline still renders.
@@ -103,10 +141,21 @@ function getStatuslineData() {
   if (cached) return cached;
 
   try {
-    const raw = execSync(
-      'npx --yes @claude-flow/cli@latest hooks statusline --json 2>/dev/null',
-      { encoding: 'utf-8', timeout: 8000, stdio: ['pipe', 'pipe', 'pipe'], cwd: CWD }
-    ).trim();
+    const entry = resolveCliEntry();
+    let raw;
+    if (entry) {
+      // Direct invocation via the running node binary — no npx, no registry
+      // round-trip, no CLI re-resolution on every render.
+      raw = execFileSync(process.execPath, [entry, 'hooks', 'statusline', '--json'],
+        { encoding: 'utf-8', timeout: 8000, stdio: ['pipe', 'pipe', 'pipe'], cwd: CWD }).trim();
+    } else {
+      // Last resort when nothing is installed locally: npx WITHOUT @latest, so it
+      // uses the cached package instead of re-resolving the registry each render.
+      raw = execSync(
+        'npx --prefer-offline --yes @claude-flow/cli hooks statusline --json 2>/dev/null',
+        { encoding: 'utf-8', timeout: 8000, stdio: ['pipe', 'pipe', 'pipe'], cwd: CWD }
+      ).trim();
+    }
     // The CLI may emit preamble lines before the JSON — find the first '{'.
     const jsonStart = raw.indexOf('{');
     if (jsonStart === -1) throw new Error('no JSON in CLI output');
