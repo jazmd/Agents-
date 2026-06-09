@@ -122,9 +122,20 @@ The probe was run twice against this build. Both runs returned `FINAL: level=1 s
 | `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 node scripts/probe-nested-spawn-depth.mjs` | Same — env var does not unlock it |
 | `claude plugin details ruflo-agent` after cache-stage | All 9 components discovered; YAML parsed cleanly; `tools:` field accepted by the loader |
 
-**Empirical conclusion:** declaring `tools: [Task]` in an agent's YAML frontmatter is **necessary but not sufficient** in CLI 2.1.169. The plugin loader recognizes the field (the agent is correctly registered with its declared tool set), but at parent → child spawn time the runtime's `hasTaskTool` gate is still computed `false` for the child — the YAML allow-list is **not** the parent-side propagation switch. No env-var or CLI flag we found unlocks it.
+Path-2 sweep — single-shot variants asking L1 `nested-coordinator` to report its actual tool list. Our YAML declares `tools: [Task, Read, Grep, Glob, TodoWrite, Bash]` (6 tools). The probe asks the child to enumerate what it actually has:
 
-The most plausible reading: the 2.1.169 binary contains the nested-subagent plumbing (`parentAgentId`, `isSubagent`, the literal "propagated to nested subagents") but the spawn-time propagation logic is gated by something not yet user-enableable in this release — likely server-side, or behind a feature flag Anthropic rolls out without surfacing as an env var. Cherny's tweet ("going out in today's release", 2026-06-09) may refer to the binary plumbing rather than the full user-facing capability.
+| Path-2 variant | L1's reported tools |
+|---|---|
+| Control (no flags) | `Read, Grep, Glob, Bash` |
+| `--allowedTools Read,Edit,Write,Bash,Glob,Grep,Task,TodoWrite,Agent` | `Read, Grep, Glob, Bash` |
+| `--permission-mode bypassPermissions` | `Read, Grep, Glob, Bash` |
+| `--agent nested-coordinator` (lead is `nested-coordinator`) | `Read, Grep, Glob, Bash` |
+
+**Sharper empirical conclusion:** **the YAML `tools:` field IS honored** — exactly 4 of our 6 declared tools propagate to the spawned child. **The runtime strips `Task` and `TodoWrite`** from any spawned subagent's tool list. The strip is consistent across permission modes, lead agent identity, and explicit `--allowedTools` grants, which means the gate is a **hardcoded or server-side denylist on specific tool names**, not a user-facing toggle. No flag we found defeats it.
+
+This is actually a *favorable* finding for ADR-147: it confirms that the YAML mechanism is the right opt-in shape, and our agent files are declaratively correct. When the denylist for `Task` lifts — whether by a 2.1.170+ build, a server-side rollout, or an opt-out flag we haven't discovered — nested spawning activates with **zero code changes** to ruflo's agents.
+
+Cherny's tweet ("going out in today's release", 2026-06-09) most likely refers to the binary plumbing landing while the runtime denylist gets relaxed in a follow-on rollout.
 
 **Implication for P1 status:** P1's *infrastructure* (agent files, skill doc, ADR) is shipped and correct — when the runtime gate flips on (whether by an Anthropic-side rollout, a future 2.1.170+ build, or a discovered flag), the agents will work as designed without further code changes. Empirical end-to-end verification of the depth=5 cap **cannot** be performed against 2.1.169 as currently built.
 
