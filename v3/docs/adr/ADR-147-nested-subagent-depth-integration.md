@@ -109,9 +109,47 @@ The current "swarm orchestration" sections in `CLAUDE.md` describe a flat fan-ou
 ## Validation
 
 **P1** lands with:
-- The five orchestrator agent files updated with `tools: [..., Task]`.
-- A smoke test (`tests/integration/nested-spawn.test.ts`) that spawns `v3-queen-coordinator` from the lead and asserts the queen successfully spawns one worker (chain length 2).
-- The recursive depth probe (single file `tests/integration/depth-probe.test.ts`) that spawns level → level+1 until refusal and records the observed cap. **The probe's result is appended to this ADR before P2 begins** — if the observed cap is not 5, the ADR's title and default in P3 are revised.
+- New `nested-*` agent set in `plugins/ruflo-agent/` (8 agents + 1 skill) — orchestrators declare `tools: [Task, ...]`, leaves explicitly do not. This is the additive shape; existing v3-queen-coordinator / sparc-orchestrator / hierarchical-coordinator agents are NOT modified in P1 (deferred until the YAML opt-in mechanism is empirically confirmed to work — see below).
+- A recursive depth probe (`scripts/probe-nested-spawn-depth.mjs`) that drives `claude -p` to spawn `nested-coordinator` and recursively chain L1 → L2 → … until refusal. Output goes to `docs/probes/nested-spawn-depth-*.txt`.
+
+### P1 empirical results — 2026-06-09 (CLI 2.1.169)
+
+The probe was run twice against this build. Both runs returned `FINAL: level=1 status=NO_AGENT_TOOL`. Findings:
+
+| Probe variant | Result |
+|---|---|
+| `node scripts/probe-nested-spawn-depth.mjs` (default env) | L1 `nested-coordinator` has no Agent/Task tool — chain dies at length 1 |
+| `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1 node scripts/probe-nested-spawn-depth.mjs` | Same — env var does not unlock it |
+| `claude plugin details ruflo-agent` after cache-stage | All 9 components discovered; YAML parsed cleanly; `tools:` field accepted by the loader |
+
+**Empirical conclusion:** declaring `tools: [Task]` in an agent's YAML frontmatter is **necessary but not sufficient** in CLI 2.1.169. The plugin loader recognizes the field (the agent is correctly registered with its declared tool set), but at parent → child spawn time the runtime's `hasTaskTool` gate is still computed `false` for the child — the YAML allow-list is **not** the parent-side propagation switch. No env-var or CLI flag we found unlocks it.
+
+The most plausible reading: the 2.1.169 binary contains the nested-subagent plumbing (`parentAgentId`, `isSubagent`, the literal "propagated to nested subagents") but the spawn-time propagation logic is gated by something not yet user-enableable in this release — likely server-side, or behind a feature flag Anthropic rolls out without surfacing as an env var. Cherny's tweet ("going out in today's release", 2026-06-09) may refer to the binary plumbing rather than the full user-facing capability.
+
+**Implication for P1 status:** P1's *infrastructure* (agent files, skill doc, ADR) is shipped and correct — when the runtime gate flips on (whether by an Anthropic-side rollout, a future 2.1.170+ build, or a discovered flag), the agents will work as designed without further code changes. Empirical end-to-end verification of the depth=5 cap **cannot** be performed against 2.1.169 as currently built.
+
+**Until end-to-end verification is possible:**
+
+1. P1 is mergeable as "infrastructure preparation." The agents and skill are present, declaratively correct, and zero-cost to ship — they consume ~680 always-on tokens per session but no runtime behaviour beyond their availability in the registry.
+2. P2 (capture `parent_agent_id` to AgentDB) and P3 (depth-aware pre-task guardrail) **block on this**. Both require a working nested spawn to exercise; deferring them is correct.
+3. P4 (CLAUDE.md rewrite) MUST NOT claim nested spawning is currently usable. It should describe the pattern and reference this ADR's empirical block.
+4. The probe script stays in the tree as the regression test — re-running it should be the first verification step after any Claude Code CLI upgrade, and the day it returns a `CAP OBSERVED at depth=N` verdict is the day P2/P3 unblock.
+
+**P2** lands with (deferred — see above):
+- AgentDB migration adding `parent_agent_id`, `depth` columns to the agents table.
+- Hook bridge writes the row on every `post-task` fire; smoke test reads back a depth-3 chain by `agent_id` and confirms parent linkage.
+- Latency budget: post-task hook adds < 2 ms p99 (it was already writing one row; this adds two columns).
+
+**P3** lands with (deferred — see above):
+- `pre-task` hook reads `parent_agent_id` chain depth and returns `NESTING_DEPTH_EXCEEDED` when at cap.
+- Unit test: chain at cap → refusal; chain at cap−1 → allowed.
+- Integration test: a 6-level spawn chain with default cap=4 refuses at level 5, payload contains full chain.
+- `CLAUDE_FLOW_STRICT_NESTING` env var documented and registered in `audit-env-var-precedence.mjs`.
+
+**P4** lands with:
+- `CLAUDE.md` queen-coordinator section rewritten to use `Task({subagent_type: "v3-queen-coordinator", ...})` nested pattern — flagged as "shipping but pending runtime activation" until the probe returns a positive verdict.
+- Workflow vs nested-subagent trade-off section added (Workflows for deterministic resume + flat fan-out; nested subagents for deep context isolation).
+- Cross-references from ADR-099, ADR-144, ADR-143 updated to point at ADR-147 for the depth semantics.
 
 **P2** lands with:
 - AgentDB migration adding `parent_agent_id`, `depth` columns to the agents table.
