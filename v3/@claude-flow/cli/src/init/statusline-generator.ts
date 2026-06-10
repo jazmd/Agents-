@@ -69,10 +69,51 @@ const CONFIG = {
 const CWD = process.cwd();
 
 // ─── Delegation cache ───────────────────────────────────────────
-// Cache the CLI JSON result for 10s so rapid prompt re-renders
-// (e.g. every keypress in some shells) don't re-invoke npx each time.
+// Cache the CLI JSON result for 60s so rapid prompt re-renders
+// (Claude Code refreshes the statusline several times a second while
+// streaming) don't re-invoke the CLI each time. #2337: bumped 10s→60s
+// because 10s was far too short for how often Claude Code re-renders.
 const CACHE_FILE = path.join(os.tmpdir(), 'ruflo-statusline-cache-' + require('crypto').createHash('md5').update(CWD).digest('hex').slice(0, 8) + '.json');
-const CACHE_TTL_MS = 10000;
+const CACHE_TTL_MS = 60000;
+
+// #2337: resolve an already-installed @claude-flow/cli (or ruflo) bin so we
+// can invoke it directly via \`node\`. The previous version called
+// \`npx --yes @claude-flow/cli@latest\` on every uncached render, which forces
+// a registry resolution + cold-start of the entire CLI per render. With
+// multiple concurrent Claude Code sessions this storms the host (reporter
+// saw load average 40-65 on a 12-core box).
+//
+// Returns the absolute path to bin/cli.js or null. Mirrors getPkgVersion()'s
+// path probing (project, monorepo, plugin marketplace, global node_modules
+// including custom-prefix layouts like ~/.npm-global).
+function resolveCliBin() {
+  try {
+    const home = os.homedir();
+    const candidates = [
+      path.join(home, '.claude', 'plugins', 'marketplaces', 'ruflo', 'bin', 'cli.js'),
+      path.join(CWD, 'node_modules', '@claude-flow', 'cli', 'bin', 'cli.js'),
+      path.join(CWD, 'node_modules', 'ruflo', 'bin', 'cli.js'),
+      path.join(CWD, 'v3', '@claude-flow', 'cli', 'bin', 'cli.js'),
+    ];
+    try {
+      const binDir = path.dirname(process.execPath);
+      const globalModuleDirs = [path.join(binDir, '..', 'lib', 'node_modules'), path.join(binDir, 'node_modules')];
+      for (const prefix of [process.env.npm_config_prefix, process.env.PREFIX, path.join(home, '.npm-global')]) {
+        if (prefix) globalModuleDirs.push(path.join(prefix, 'lib', 'node_modules'));
+      }
+      for (const gm of globalModuleDirs) {
+        candidates.push(
+          path.join(gm, 'ruflo', 'bin', 'cli.js'),
+          path.join(gm, '@claude-flow', 'cli', 'bin', 'cli.js'),
+        );
+      }
+    } catch { /* ignore */ }
+    for (const p of candidates) {
+      if (fs.existsSync(p)) return p;
+    }
+  } catch { /* ignore */ }
+  return null;
+}
 
 function readCache() {
   try {
@@ -103,8 +144,16 @@ function getStatuslineData() {
   if (cached) return cached;
 
   try {
+    // #2337: prefer an already-installed CLI bin via direct \`node\` invocation
+    // — no npx, no registry round-trip, no @latest re-resolve per render.
+    // Fall back to \`npx --prefer-offline @claude-flow/cli\` (no @latest) only
+    // when nothing is installed locally, so a cold environment still works.
+    const cliBin = resolveCliBin();
+    const cmd = cliBin
+      ? '"' + process.execPath + '" "' + cliBin + '" hooks statusline --json 2>/dev/null'
+      : 'npx --prefer-offline @claude-flow/cli hooks statusline --json 2>/dev/null';
     const raw = execSync(
-      'npx --yes @claude-flow/cli@latest hooks statusline --json 2>/dev/null',
+      cmd,
       { encoding: 'utf-8', timeout: 8000, stdio: ['pipe', 'pipe', 'pipe'], cwd: CWD }
     ).trim();
     // The CLI may emit preamble lines before the JSON — find the first '{'.
