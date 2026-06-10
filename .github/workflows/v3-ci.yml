@@ -2322,13 +2322,14 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm -r build
       - name: Run trajectory graph edges smoke
-        # #2312 — TEST 2 (post-task → reinforced-by edge) OOMs at 6 GB+ inside
-        # the SONA endTrajectory + distillLearning chain (EWCConsolidator init
-        # is the likely allocator). The graph-edge contract being asserted is
-        # orthogonal to that path. Gate the step non-blocking until the real
-        # allocation profile is fixed; TEST 1 (trajectory-step → trajectory-
-        # caused edge) still runs and gates the same contract.
-        continue-on-error: true
+        # #2312 root cause (fixed): memory-bridge's rescueAgentdbEmbedder
+        # patched agentdb.embedder.embed to delegate to generateEmbedding —
+        # which is bridge-first, so the patched embed re-entered itself via
+        # bridgeGenerateEmbedding in an unbounded async cycle (heap OOM at
+        # the V8 limit, SIGABRT 134; SONA/EWC were innocent). The rescue now
+        # delegates to generateLocalEmbedding (a bridge-free leaf), so this
+        # smoke gates again at default heap — verified green in a node:22
+        # Linux container at 512 MB with a cold model cache.
         run: node scripts/smoke-trajectory-graph-edges.mjs
 
   graph-plugin-adapter-smoke:

@@ -568,25 +568,41 @@ async function rescueAgentdbEmbedder(agentdb: { embedder?: { pipeline?: unknown;
   // own embed() does the right thing and we should not interpose.
   if (emb.pipeline) return;
 
-  type EmbedFn = (text: string) => Promise<{ embedding: number[] | Float32Array; dimensions: number; model: string }>;
-  let generateEmbedding: EmbedFn | null = null;
+  // #2312: delegate to generateLOCALEmbedding, NOT generateEmbedding.
+  // generateEmbedding is bridge-first — routing the rescued embed through it
+  // closes a cycle (generateEmbedding → bridgeGenerateEmbedding →
+  // embedder.embed [patched] → generateEmbedding → …) that allocated
+  // unboundedly via microtasks until V8 hit the heap limit (~4 GB on the CI
+  // runner, SIGABRT 134). The local chain never consults the bridge, so the
+  // rescued embedder is a leaf. If the running memory-initializer build
+  // predates generateLocalEmbedding, decline the rescue entirely — a stale
+  // pairing must fail safe, not recurse.
+  type EmbedFn = (text: string) => Promise<{ embedding: number[] | Float32Array; dimensions: number; model: string; backend?: 'onnx' | 'mock' }>;
+  let localEmbed: EmbedFn | null = null;
   try {
-    const mod = (await import('./memory-initializer.js')) as unknown as { generateEmbedding?: EmbedFn };
-    generateEmbedding = mod.generateEmbedding ?? null;
+    const mod = (await import('./memory-initializer.js')) as unknown as { generateLocalEmbedding?: EmbedFn };
+    localEmbed = mod.generateLocalEmbedding ?? null;
   } catch {
     return; // can't import the rescuer — leave the mock fallback alone
   }
-  if (!generateEmbedding) return;
-  const embed: EmbedFn = generateEmbedding;
+  if (!localEmbed) return;
+  const embed: EmbedFn = localEmbed;
 
-  // Probe once to confirm the rescuer actually returns real (non-zero) vectors.
-  // If our own fallback chain also dead-ends in mock embeddings, leave
-  // agentdb as-is rather than swapping one mock for another.
+  // Probe once to confirm the rescuer actually returns REAL ONNX vectors
+  // (#2312: the old probe only checked non-zero, which the deterministic
+  // hash fallback also satisfies — so it "rescued" agentdb's mock with our
+  // own mock and reported it as real). Require backend === 'onnx'.
   try {
     const probe = await embed('rescue-probe');
     const arr = probe?.embedding ? Array.from(probe.embedding as ArrayLike<number>) : [];
     const hasSignal = arr.length > 0 && arr.some((v: number) => Math.abs(v) > 1e-9);
-    if (!hasSignal) return;
+    if (!hasSignal || probe.backend !== 'onnx') {
+      // Local chain is also degraded — leave agentdb's embedder alone, but
+      // tag it so bridgeGenerateEmbedding's AUDIT-#3 isMock check reports
+      // backend='mock' truthfully instead of labeling mock vectors 'onnx'.
+      try { (emb as { backend?: string }).backend = 'mock'; } catch { /* frozen */ }
+      return;
+    }
   } catch {
     return;
   }

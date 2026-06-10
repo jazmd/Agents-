@@ -1867,6 +1867,30 @@ export async function generateEmbedding(text: string): Promise<{
     }
   }
 
+  return generateLocalEmbedding(text);
+}
+
+/**
+ * Generate an embedding using ONLY the local model chain (transformers.js /
+ * ruvector ONNX / hash fallback) — never the AgentDB bridge.
+ *
+ * #2312: this MUST stay bridge-free. `memory-bridge.ts` rescues a degraded
+ * agentdb embedder by delegating to this module; if that delegation went
+ * through `generateEmbedding` (bridge-first), the call would re-enter the
+ * patched `agentdb.embedder.embed` and recurse unboundedly:
+ *
+ *   generateEmbedding → bridgeGenerateEmbedding → embedder.embed (patched)
+ *     → generateEmbedding → … (heap OOM at ~4 GB on CI, no stack overflow
+ *     because the cycle is async/microtask-driven)
+ *
+ * Keeping the local chain as its own export breaks that cycle structurally.
+ */
+export async function generateLocalEmbedding(text: string): Promise<{
+  embedding: number[];
+  dimensions: number;
+  model: string;
+  backend: 'onnx' | 'mock';
+}> {
   // Ensure model is loaded
   if (!embeddingModelState?.loaded) {
     await loadEmbeddingModel();
