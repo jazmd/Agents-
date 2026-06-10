@@ -43,6 +43,14 @@ export type HeadlessWorkerType =
   | 'predict';
 
 /**
+ * Label used in the process pool / status / events. Includes the
+ * dispatch-driven 'arbitrary' kind that the queen-dispatcher uses
+ * to run a free-form (systemPrompt, prompt) pair through Claude Code
+ * without going through the fixed HEADLESS_WORKER_CONFIGS templates.
+ */
+export type ExecutorWorkerLabel = HeadlessWorkerType | 'arbitrary';
+
+/**
  * Local worker types - workers that run locally without AI
  */
 export type LocalWorkerType = 'map' | 'consolidate' | 'benchmark' | 'preload';
@@ -194,20 +202,90 @@ export interface HeadlessExecutionResult {
 interface PoolEntry {
   process: ChildProcess;
   executionId: string;
-  workerType: HeadlessWorkerType;
+  workerType: ExecutorWorkerLabel;
   startTime: Date;
   timeout: NodeJS.Timeout;
 }
 
 /**
- * Pending queue entry
+ * Pending queue entry. Discriminated union so the queue can hold
+ * both fixed-template worker requests AND queen-dispatched arbitrary
+ * executions while preserving FIFO across both.
  */
-interface QueueEntry {
-  workerType: HeadlessWorkerType;
-  config?: Partial<HeadlessOptions>;
-  resolve: (result: HeadlessExecutionResult) => void;
-  reject: (error: Error) => void;
-  queuedAt: Date;
+type QueueEntry =
+  | {
+      kind: 'worker';
+      workerType: HeadlessWorkerType;
+      config?: Partial<HeadlessOptions>;
+      resolve: (result: HeadlessExecutionResult) => void;
+      reject: (error: Error) => void;
+      queuedAt: Date;
+    }
+  | {
+      kind: 'arbitrary';
+      input: ArbitraryExecutionInput;
+      resolve: (result: ArbitraryExecutionResult) => void;
+      reject: (error: Error) => void;
+      queuedAt: Date;
+    };
+
+/**
+ * Input for executeArbitrary — the queen-dispatcher path. Decoupled
+ * from HEADLESS_WORKER_CONFIGS so callers can hand in a free-form
+ * (systemPrompt, prompt) pair plus per-execution sandbox / model /
+ * timeout overrides.
+ */
+export interface ArbitraryExecutionInput {
+  /** User-message body sent to claude --print via stdin. Required. */
+  prompt: string;
+  /**
+   * Optional system prompt. When provided, prepended to the user
+   * prompt with a SYSTEM/TASK separator (claude --print does not
+   * accept a system flag in all supported versions, so we concatenate
+   * to stay version-portable).
+   */
+  systemPrompt?: string;
+  /** Sandbox mode. Defaults to 'permissive' so workers can edit files. */
+  sandbox?: SandboxMode;
+  /** Logical model alias (haiku / sonnet / opus). Defaults to 'sonnet'. */
+  model?: ModelType;
+  /**
+   * Execution timeout in ms. Defaults to the executor's defaultTimeoutMs
+   * (5 min). Caller should pick a budget appropriate for the work.
+   */
+  timeoutMs?: number;
+  /** Override cwd for the spawned claude process. Defaults to projectRoot. */
+  cwd?: string;
+  /**
+   * Caller-supplied label for telemetry / status. Defaults to 'arbitrary'.
+   * E.g. queen-dispatcher uses 'queen:<taskId>'.
+   */
+  label?: string;
+}
+
+/**
+ * Result of an arbitrary execution. Mirrors HeadlessExecutionResult
+ * but without the worker-template fields (workerType, parsedOutput).
+ */
+export interface ArbitraryExecutionResult {
+  /** Whether the spawned claude session exited 0. */
+  success: boolean;
+  /** Raw stdout (stderr on failure). */
+  output: string;
+  /** Duration in ms. */
+  durationMs: number;
+  /** Model id used. */
+  model: string;
+  /** Sandbox mode used. */
+  sandboxMode: SandboxMode;
+  /** When the execution finished. */
+  timestamp: Date;
+  /** Generated execution id (for tracking via getPoolStatus / cancel). */
+  executionId: string;
+  /** Caller-supplied label echoed back. */
+  label: string;
+  /** Error message when success is false. */
+  error?: string;
 }
 
 /**
@@ -228,12 +306,12 @@ export interface PoolStatus {
   maxConcurrent: number;
   activeWorkers: Array<{
     executionId: string;
-    workerType: HeadlessWorkerType;
+    workerType: ExecutorWorkerLabel;
     startTime: Date;
     elapsedMs: number;
   }>;
   queuedWorkers: Array<{
-    workerType: HeadlessWorkerType;
+    workerType: ExecutorWorkerLabel;
     queuedAt: Date;
     waitingMs: number;
   }>;
@@ -712,6 +790,7 @@ export class HeadlessWorkerExecutor extends EventEmitter {
       // Queue the request
       return new Promise((resolve, reject) => {
         const entry: QueueEntry = {
+          kind: 'worker',
           workerType,
           config: configOverrides,
           resolve,
@@ -728,6 +807,61 @@ export class HeadlessWorkerExecutor extends EventEmitter {
 
     // Execute immediately
     return this.executeInternal(workerType, configOverrides);
+  }
+
+  /**
+   * Execute an arbitrary (systemPrompt, prompt) pair via Claude Code
+   * headless mode. This is the queen-dispatcher path — it bypasses the
+   * fixed HEADLESS_WORKER_CONFIGS lookup so the WorkerDaemon dispatcher
+   * (ADR-072 follow-up) can hand workers their assigned task as
+   * free-form text.
+   *
+   * Honors the same process-pool + queue + cancellation semantics as
+   * `execute()`. Use `cancel(executionId)` with the result's
+   * `executionId` to abort mid-flight.
+   *
+   * Distinct from `mcp-tools/agent-execute-core.ts:executeAgentTask`
+   * (single-shot chat completion via Anthropic Messages API): this one
+   * spawns a real Claude Code session with the full tool surface
+   * (Read/Write/Edit/Bash) and multi-turn agentic loop. Use this for
+   * coding work; use agent_execute for short chat-only jobs.
+   */
+  async executeArbitrary(input: ArbitraryExecutionInput): Promise<ArbitraryExecutionResult> {
+    if (!input || typeof input.prompt !== 'string' || input.prompt.length === 0) {
+      throw new Error('executeArbitrary: input.prompt is required and must be non-empty');
+    }
+
+    // Check availability
+    const available = await this.isAvailable();
+    if (!available) {
+      const result = this.createArbitraryErrorResult(
+        input,
+        'Claude Code CLI not available. Install with: npm install -g @anthropic-ai/claude-code',
+      );
+      this.emit('error', result);
+      return result;
+    }
+
+    // Check concurrent limit; queue if full.
+    if (this.processPool.size >= this.config.maxConcurrent) {
+      return new Promise((resolve, reject) => {
+        const entry: QueueEntry = {
+          kind: 'arbitrary',
+          input,
+          resolve,
+          reject,
+          queuedAt: new Date(),
+        };
+        this.pendingQueue.push(entry);
+        this.emit('queued', {
+          workerType: 'arbitrary',
+          label: input.label ?? 'arbitrary',
+          queuePosition: this.pendingQueue.length,
+        });
+      });
+    }
+
+    return this.executeArbitraryInternal(input);
   }
 
   /**
@@ -760,7 +894,10 @@ export class HeadlessWorkerExecutor extends EventEmitter {
         elapsedMs: now - entry.startTime.getTime(),
       })),
       queuedWorkers: this.pendingQueue.map((entry) => ({
-        workerType: entry.workerType,
+        workerType:
+          entry.kind === 'worker'
+            ? (entry.workerType as ExecutorWorkerLabel)
+            : ('arbitrary' as ExecutorWorkerLabel),
         queuedAt: entry.queuedAt,
         waitingMs: now - entry.queuedAt.getTime(),
       })),
@@ -958,10 +1095,122 @@ export class HeadlessWorkerExecutor extends EventEmitter {
       const next = this.pendingQueue.shift();
       if (!next) break;
 
-      this.executeInternal(next.workerType, next.config)
-        .then(next.resolve)
-        .catch(next.reject);
+      if (next.kind === 'worker') {
+        this.executeInternal(next.workerType, next.config)
+          .then(next.resolve)
+          .catch(next.reject);
+      } else {
+        this.executeArbitraryInternal(next.input)
+          .then(next.resolve)
+          .catch(next.reject);
+      }
     }
+  }
+
+  /**
+   * Internal execution for the queen-dispatcher path. Mirrors
+   * executeInternal() but skips the HEADLESS_WORKER_CONFIGS template
+   * lookup, context-file building, and output parsing — the caller
+   * has already assembled (systemPrompt, prompt) and just wants Claude
+   * Code spawned with them.
+   */
+  private async executeArbitraryInternal(
+    input: ArbitraryExecutionInput,
+  ): Promise<ArbitraryExecutionResult> {
+    const startTime = Date.now();
+    const label = input.label ?? 'arbitrary';
+    const sandbox: SandboxMode = input.sandbox ?? 'permissive';
+    const model: ModelType = input.model ?? 'sonnet';
+    const timeoutMs = input.timeoutMs ?? this.config.defaultTimeoutMs;
+    const executionId = `arbitrary_${startTime}_${Math.random().toString(36).slice(2, 8)}`;
+
+    // Concatenate systemPrompt + prompt because `claude --print` doesn't
+    // accept a `--system-prompt` flag across all supported versions.
+    // The SYSTEM/TASK separator matches the pattern executeAgentTask
+    // uses for its default agent system-prompt.
+    const fullPrompt = input.systemPrompt
+      ? `[SYSTEM]\n${input.systemPrompt}\n\n[TASK]\n${input.prompt}`
+      : input.prompt;
+
+    this.emit('start', { executionId, workerType: 'arbitrary', label, sandbox, model });
+
+    // Save & restore projectRoot if a cwd override was supplied. The
+    // private executeClaudeCode uses this.projectRoot as cwd; this is
+    // the smallest patch that lets arbitrary callers retarget without
+    // refactoring executeClaudeCode's signature.
+    const previousRoot = this.projectRoot;
+    if (input.cwd) this.projectRoot = input.cwd;
+
+    try {
+      this.logExecution(executionId, 'prompt', fullPrompt);
+
+      const result = await this.executeClaudeCode(fullPrompt, {
+        sandbox,
+        model,
+        timeoutMs,
+        executionId,
+        // workerType is used purely as a telemetry label inside
+        // executeClaudeCode; cast through ExecutorWorkerLabel.
+        workerType: 'arbitrary' as unknown as HeadlessWorkerType,
+      });
+
+      const executionResult: ArbitraryExecutionResult = {
+        success: result.success,
+        output: result.output,
+        durationMs: Date.now() - startTime,
+        model,
+        sandboxMode: sandbox,
+        timestamp: new Date(),
+        executionId,
+        label,
+        error: result.error,
+      };
+
+      this.logExecution(executionId, 'result', JSON.stringify(executionResult, null, 2));
+      this.emit('complete', executionResult);
+      return executionResult;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorResult: ArbitraryExecutionResult = {
+        success: false,
+        output: '',
+        durationMs: Date.now() - startTime,
+        model,
+        sandboxMode: sandbox,
+        timestamp: new Date(),
+        executionId,
+        label,
+        error: errorMessage,
+      };
+      this.logExecution(executionId, 'error', errorMessage);
+      this.emit('error', errorResult);
+      return errorResult;
+    } finally {
+      this.projectRoot = previousRoot;
+      // Process next queued entry (parity with executeInternal's finally).
+      this.processQueue();
+    }
+  }
+
+  /**
+   * Build a populated ArbitraryExecutionResult representing a failure
+   * that happened before the spawn (e.g. claude CLI unavailable).
+   */
+  private createArbitraryErrorResult(
+    input: ArbitraryExecutionInput,
+    error: string,
+  ): ArbitraryExecutionResult {
+    return {
+      success: false,
+      output: '',
+      durationMs: 0,
+      model: input.model ?? 'sonnet',
+      sandboxMode: input.sandbox ?? 'permissive',
+      timestamp: new Date(),
+      executionId: `error_${Date.now()}`,
+      label: input.label ?? 'arbitrary',
+      error,
+    };
   }
 
   /**
