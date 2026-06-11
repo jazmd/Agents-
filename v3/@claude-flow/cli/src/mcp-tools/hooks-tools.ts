@@ -2795,7 +2795,82 @@ export const hooksTrajectoryEnd: MCPTool = {
       } catch { /* intelligence module not loadable — keep sona-only behaviour */ }
     }
 
+    // #2351: when an agent calls trajectory-end with no recorded steps but a
+    // non-empty `feedback` string, the feedback was previously dropped on the
+    // floor — `patternsExtracted` reported 0 and `pattern-search` never
+    // surfaced it. Step-less trajectories are the common case for LLM agents
+    // (nothing forces step logging mid-task), and feedback is often the most
+    // distilled lesson available. Route it through the same store + embed
+    // path that pattern-store uses so it becomes searchable. Best-effort:
+    // failures here must not turn the trajectory-end call itself into a
+    // failure — the trajectory record was already persisted above.
+    let feedbackDistilled: { stored: boolean; patternId?: string; controller?: string } = { stored: false };
+    const hasSteps = !!trajectory && trajectory.steps.length > 0;
+    const trimmedFeedback = typeof feedback === 'string' ? feedback.trim() : '';
+    if (trajectory && !hasSteps && trimmedFeedback.length > 0) {
+      const distilledPatternId = `pattern-feedback-${trajectoryId}-${Date.now()}`;
+      const patternMetadata: Record<string, unknown> = {
+        sourceTrajectoryId: trajectoryId,
+        task: trajectory.task,
+        agent: trajectory.agent,
+        outcome: success ? 'success' : 'failure',
+        distilledFrom: 'trajectory-end-feedback',
+      };
+      // Modest default confidence — step-less feedback hasn't been validated
+      // by execution evidence the way a multi-step trajectory has.
+      const feedbackConfidence = success ? 0.6 : 0.4;
+
+      try {
+        const bridge = await import('../memory/memory-bridge.js');
+        const rb = await bridge.bridgeStorePattern({
+          pattern: trimmedFeedback,
+          type: 'trajectory-feedback',
+          confidence: feedbackConfidence,
+          metadata: patternMetadata,
+        });
+        if (rb?.success) {
+          feedbackDistilled = { stored: true, patternId: rb.patternId, controller: rb.controller };
+        }
+      } catch {
+        // Bridge unavailable — fall through to direct store
+      }
+
+      if (!feedbackDistilled.stored) {
+        try {
+          const storeFn = await getRealStoreFunction();
+          if (storeFn) {
+            const r = await storeFn({
+              key: distilledPatternId,
+              value: JSON.stringify({
+                pattern: trimmedFeedback,
+                type: 'trajectory-feedback',
+                confidence: feedbackConfidence,
+                metadata: patternMetadata,
+                timestamp: endedAt,
+              }),
+              namespace: 'pattern',
+              generateEmbeddingFlag: true,
+              tags: [
+                'trajectory-feedback',
+                success ? 'success' : 'failure',
+                `confidence-${Math.round(feedbackConfidence * 100)}`,
+              ],
+            });
+            if (r?.success) {
+              feedbackDistilled = { stored: true, patternId: r.id || distilledPatternId, controller: 'store-fallback' };
+            }
+          }
+        } catch {
+          // Both paths failed — leave feedbackDistilled.stored = false.
+        }
+      }
+    }
+
     const learningTimeMs = Date.now() - startTime;
+    // patternsExtracted now reflects either recorded steps (the original
+    // semantics) OR a distilled feedback pattern (#2351), so step-less
+    // trajectories with useful feedback no longer report 0.
+    const patternsExtracted = (trajectory?.steps.length || 0) + (feedbackDistilled.stored ? 1 : 0);
 
     return {
       trajectoryId,
@@ -2809,7 +2884,11 @@ export const hooksTrajectoryEnd: MCPTool = {
         sonaConfidence: sonaResult.confidence || undefined,
         ewcConsolidation: ewcResult.consolidated,
         ewcPenalty: ewcResult.penalty || undefined,
-        patternsExtracted: trajectory?.steps.length || 0,
+        patternsExtracted,
+        feedbackDistilled: feedbackDistilled.stored ? {
+          patternId: feedbackDistilled.patternId,
+          controller: feedbackDistilled.controller,
+        } : undefined,
         learningTimeMs,
         globalStatsTrajectoriesDelta: globalStatsDelta,  // Round B: was 0, now reflects
       },

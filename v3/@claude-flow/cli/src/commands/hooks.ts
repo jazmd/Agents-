@@ -466,9 +466,22 @@ const postEditCommand: Command = {
         timestamp: Date.now(),
       });
 
+      // #2352: the MCP handler returns `{success: false, error: "..."}` on
+      // validation failure (e.g. unsupported path shape) without throwing.
+      // Surface that explicitly instead of always printing the success line —
+      // Windows users were seeing `[OK]` while nothing reached the learning
+      // pipeline because absolute paths were rejected upstream.
+      const mcpFailed = result && (result as { success?: boolean }).success === false;
+      const mcpError = (result as { error?: string } | undefined)?.error;
+
       if (ctx.flags.format === 'json') {
         output.printJson(result);
-        return { success: true, data: result };
+        return { success: !mcpFailed, exitCode: mcpFailed ? 1 : 0, data: result };
+      }
+
+      if (mcpFailed) {
+        output.printError(`Post-edit hook failed: ${mcpError || 'unknown error'}`);
+        return { success: false, exitCode: 1 };
       }
 
       output.writeln();

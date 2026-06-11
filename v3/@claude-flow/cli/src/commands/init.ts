@@ -884,7 +884,13 @@ const hooksCommand: Command = {
         skills: false,
         commands: false,
         agents: false,
-        helpers: false,
+        // #2350: helpers MUST ship with the hooks subcommand. The hook entries
+        // in settings.json point at `.claude/helpers/hook-handler.cjs`; if
+        // that file doesn't exist, settings-generator (#1744 fix) drops the
+        // hooks block entirely — so the one subcommand whose stated purpose
+        // is "Initialize only hooks configuration" produced settings.json
+        // with no `hooks` key while reporting "N hooks enabled".
+        helpers: true,
         statusline: false,
         mcp: false,
         runtime: false,
