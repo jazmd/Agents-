@@ -69,6 +69,16 @@ const MODEL_MAP: Record<string, string> = {
   inherit: DEFAULT_ANTHROPIC_MODEL,
 };
 
+// #2357 — the adaptive-thinking family (Fable 5, Opus 4.8, Opus 4.7) removed
+// the sampling parameters (temperature/top_p/top_k); the Anthropic API
+// returns 400 "Extra inputs are not permitted" when any is present.
+// Prefix-match so dated snapshots (e.g. claude-opus-4-8-YYYYMMDD) are
+// covered. Applies only to the direct Anthropic path — the Ollama/OpenRouter
+// OpenAI-compat paths accept temperature and are unchanged.
+export function modelRejectsSamplingParams(model: string): boolean {
+  return /^claude-(fable-5|opus-4-8|opus-4-7)/.test(model);
+}
+
 export interface AnthropicCallInput {
   prompt: string;
   systemPrompt?: string;
@@ -150,7 +160,13 @@ export async function callAnthropicMessages(input: AnthropicCallInput): Promise<
       body: JSON.stringify({
         model,
         max_tokens: input.maxTokens || 1024,
-        temperature: typeof input.temperature === 'number' ? input.temperature : 0.7,
+        // #2357 — omit temperature for models that reject sampling params
+        // (Fable 5 / Opus 4.8 / Opus 4.7 → 400 "Extra inputs are not
+        // permitted"); keep the 0.7 default unchanged for models that still
+        // accept it (sonnet / haiku / opus ≤4.6).
+        ...(modelRejectsSamplingParams(model)
+          ? {}
+          : { temperature: typeof input.temperature === 'number' ? input.temperature : 0.7 }),
         // #8 prompt caching (hermes-agent pattern): mark the (often large,
         // stable) system prompt as an ephemeral cache breakpoint so repeated
         // agent_execute calls with the same system prompt hit Anthropic's
