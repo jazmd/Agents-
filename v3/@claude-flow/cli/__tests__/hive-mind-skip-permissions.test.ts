@@ -25,7 +25,7 @@ import { CommandParser } from '../src/parser.js';
 function shouldSkipPermissions(flags: Record<string, unknown>): boolean {
   return (
     (flags['dangerously-skip-permissions'] === true || flags.dangerouslySkipPermissions === true) &&
-    !(flags['no-auto-permissions'] || flags.noAutoPermissions)
+    !(flags['no-auto-permissions'] || flags.noAutoPermissions || flags.autoPermissions === false)
   );
 }
 
@@ -76,5 +76,37 @@ describe('#2269 hive-mind --dangerously-skip-permissions flag handling', () => {
     // object manually with the kebab key. The fix is intentionally a dual
     // read, so this path keeps working.
     expect(shouldSkipPermissions({ 'dangerously-skip-permissions': true })).toBe(true);
+  });
+
+  it('parser produces the yargs-style negation autoPermissions:false for --no-auto-permissions', () => {
+    // This pins the parser contract that drives the deny-clause third term.
+    // If the parser ever changes its negation idiom (e.g. starts storing
+    // noAutoPermissions:true instead), this test fails BEFORE the predicate
+    // silently goes back to ignoring --no-auto-permissions in production.
+    const parser = new CommandParser({ allowUnknownFlags: true });
+    const { flags } = parser.parse(['--no-auto-permissions']);
+    expect(flags.autoPermissions).toBe(false);
+    expect(flags['no-auto-permissions']).toBeUndefined();
+    expect(flags.noAutoPermissions).toBeUndefined();
+  });
+
+  it('predicate denies when only the yargs-style negation key is set', () => {
+    // Belt-and-braces for the parser-produced shape, independent of the
+    // CLI integration test above.
+    expect(shouldSkipPermissions({
+      dangerouslySkipPermissions: true,
+      autoPermissions: false,
+    })).toBe(false);
+  });
+
+  it('predicate ignores autoPermissions:true (a positive autoPermissions does NOT enable skip on its own)', () => {
+    // Guard against an over-broad reading of the third term: only
+    // autoPermissions === false should be treated as the negation signal.
+    expect(shouldSkipPermissions({ autoPermissions: true })).toBe(false);
+    // And it still allows skip when the negation is absent.
+    expect(shouldSkipPermissions({
+      dangerouslySkipPermissions: true,
+      autoPermissions: true,
+    })).toBe(true);
   });
 });

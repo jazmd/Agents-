@@ -301,9 +301,13 @@ async function spawnClaudeCodeInstance(
       // normalizeKey) and stores only the normalized key, so reading
       // flags['dangerously-skip-permissions'] alone is always undefined. Accept
       // both forms — mirroring the isNonInteractive pattern a few lines above.
+      // The deny clause must ALSO accept the yargs-style negation the parser
+      // produces for `--no-auto-permissions` (stored as `autoPermissions: false`,
+      // NOT `noAutoPermissions: true`); without this third clause, the deny half
+      // never fires and `--no-auto-permissions` is silently ignored.
       const skipPermissions =
         (flags['dangerously-skip-permissions'] === true || flags.dangerouslySkipPermissions === true) &&
-        !(flags['no-auto-permissions'] || flags.noAutoPermissions);
+        !(flags['no-auto-permissions'] || flags.noAutoPermissions || flags.autoPermissions === false);
       if (skipPermissions) {
         claudeArgs.push('--dangerously-skip-permissions');
         if (!isNonInteractive) {
