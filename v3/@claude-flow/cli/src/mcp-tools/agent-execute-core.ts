@@ -132,7 +132,11 @@ export async function callAnthropicMessages(input: AnthropicCallInput): Promise<
       apiKey: openrouterKey,
       baseUrl: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api',
       providerLabel: 'openrouter',
-      defaultModel: process.env.OPENROUTER_DEFAULT_MODEL || 'anthropic/claude-3.5-sonnet',
+      // #2357 Finding C: anthropic/claude-3.5-sonnet was retired Oct 2025.
+      // Default to the same canonical family the rest of the resolver uses
+      // (MODEL_MAP). `OPENROUTER_DEFAULT_MODEL` still wins for callers who
+      // want to pin a specific OpenRouter slug.
+      defaultModel: process.env.OPENROUTER_DEFAULT_MODEL || 'anthropic/claude-sonnet-4-6',
     });
   }
   if (useOllama && ollamaKey) {
@@ -392,10 +396,12 @@ async function callOpenAICompat(
 
 function resolveOpenAICompatModel(input: string | undefined, fallback: string): string {
   if (!input) return fallback;
-  // Logical Claude names → OpenRouter Anthropic-vendored names
-  if (input === 'haiku') return 'anthropic/claude-3.5-haiku';
-  if (input === 'sonnet' || input === 'inherit') return 'anthropic/claude-3.5-sonnet';
-  if (input === 'opus') return 'anthropic/claude-3-opus';
+  // Logical Claude names → OpenRouter Anthropic-vendored names.
+  // #2357 Finding C: the 3.5 / 3-opus slugs were retired Oct 2025; align with
+  // MODEL_MAP (claude-haiku-4-5 / claude-sonnet-4-6 / claude-opus-4-8).
+  if (input === 'haiku') return 'anthropic/claude-haiku-4-5';
+  if (input === 'sonnet' || input === 'inherit') return 'anthropic/claude-sonnet-4-6';
+  if (input === 'opus') return 'anthropic/claude-opus-4-8';
   return input;
 }
 
