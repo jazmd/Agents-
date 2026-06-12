@@ -42,7 +42,7 @@ import { dirname, join } from 'path';
 /**
  * Available Claude models for routing
  */
-export type ClaudeModel = 'haiku' | 'sonnet' | 'opus' | 'inherit';
+export type ClaudeModel = 'haiku' | 'sonnet' | 'opus' | 'fable' | 'inherit';
 
 /**
  * Model capabilities and characteristics
@@ -70,6 +70,15 @@ export const MODEL_CAPABILITIES: Record<ClaudeModel, {
     costMultiplier: 1.0,    // Baseline
     speedMultiplier: 1.0,   // Baseline
     description: 'Most capable for complex reasoning',
+  },
+  // #2357 / ADR-148 — Fable 5 ties opus on the (0–1-capped) complexity axis;
+  // cost is the real differentiator ($10/$50 vs $5/$25 per MTok). Opt-in
+  // only — never auto-selected from complexity (see computeModelScores).
+  fable: {
+    maxComplexity: 1.0,
+    costMultiplier: 2.0,    // 2× Opus
+    speedMultiplier: 0.8,   // estimate — tune from telemetry
+    description: 'Frontier tier — maximum intelligence for critical / long-horizon work (explicit opt-in)',
   },
   inherit: {
     maxComplexity: 1.0,
@@ -184,6 +193,9 @@ const BANDIT_REWARDS: Record<ClaudeModel, Record<'success' | 'failure' | 'escala
   haiku:   { success: 1.0, failure: 0.0, escalated: 0.0 },
   sonnet:  { success: 0.7, failure: 0.0, escalated: 0.1 },
   opus:    { success: 0.4, failure: 0.0, escalated: 0.0 },
+  // #2357 — success reward continues the cost gradient (1.0/0.7/0.4/0.2):
+  // the dearer the model, the less credit a bare success earns.
+  fable:   { success: 0.2, failure: 0.0, escalated: 0.0 },
   inherit: { success: 0.5, failure: 0.0, escalated: 0.0 },
 };
 
@@ -296,6 +308,7 @@ function defaultBanditPriors(): Record<ClaudeModel, BetaPrior> {
     haiku:   { alpha: 1, beta: 1 },
     sonnet:  { alpha: 1, beta: 1 },
     opus:    { alpha: 1, beta: 1 },
+    fable:   { alpha: 1, beta: 1 },
     inherit: { alpha: 1, beta: 1 },
   };
 }
@@ -305,8 +318,18 @@ function defaultBucketedPriors(): BucketedPriors {
   return { low: defaultBanditPriors(), med: defaultBanditPriors(), high: defaultBanditPriors() };
 }
 
-function clonePriors(p: Record<ClaudeModel, BetaPrior>): Record<ClaudeModel, BetaPrior> {
-  return { haiku: { ...p.haiku }, sonnet: { ...p.sonnet }, opus: { ...p.opus }, inherit: { ...p.inherit } };
+// #2357 — defensive clone: persisted snapshots written before a model key
+// existed (e.g. pre-`fable` state) must backfill Beta(1,1) instead of
+// propagating `undefined` into sampleBeta() (NaN scores poison the argmax).
+// Iterates the canonical key set so future model additions can't silently
+// miss this site again. Exported for tests.
+export function clonePriors(p: Partial<Record<ClaudeModel, BetaPrior>>): Record<ClaudeModel, BetaPrior> {
+  const out = defaultBanditPriors();
+  for (const k of Object.keys(out) as ClaudeModel[]) {
+    const prior = p[k];
+    if (prior && typeof prior.alpha === 'number') out[k] = { ...prior };
+  }
+  return out;
 }
 
 /**
@@ -322,9 +345,11 @@ function migratePriors(p: unknown): BucketedPriors {
   const obj = p as Record<string, any>;
   if (obj.low && typeof obj.low === 'object' && obj.low.haiku) {
     return {
-      low: obj.low,
-      med: obj.med ?? clonePriors(obj.low),
-      high: obj.high ?? clonePriors(obj.low),
+      // clonePriors (not raw keep) so legacy buckets missing a newer model
+      // key — e.g. pre-`fable` state — are backfilled with Beta(1,1) (#2357).
+      low: clonePriors(obj.low),
+      med: clonePriors(obj.med ?? obj.low),
+      high: clonePriors(obj.high ?? obj.low),
     };
   }
   if (obj.haiku && typeof obj.haiku.alpha === 'number') {
@@ -381,6 +406,7 @@ export class ModelRouter {
     haiku: 0,
     sonnet: 0,
     opus: 0,
+    fable: 0,
     inherit: 0,
   };
 
@@ -561,6 +587,11 @@ export class ModelRouter {
       haiku: Math.max(0, 1 - score * 2), // Drops off quickly as complexity rises
       sonnet: 1 - Math.abs(score - 0.5) * 2, // Peaks at medium complexity
       opus: Math.min(1, score * 1.5), // Rises with complexity
+      // #2357 / ADR-148 P2 — explicit-only: the 0–1 complexity axis caps at
+      // opus, so fable never wins the argmax here. Reachable today via
+      // routedBy:'explicit' (model:"fable"); ADR-148 P3 adds the
+      // allowFrontier-gated escalation rung.
+      fable: 0,
       inherit: 0.1, // Low baseline unless explicitly needed
     };
   }
@@ -603,10 +634,14 @@ export class ModelRouter {
     // keyed by complexity bucket (ADR-142) so learning is task-type-local.
     const bucketed = this.state.priors ?? defaultBucketedPriors();
     const priors = bucketed[complexityBucket(complexityScore)] ?? defaultBanditPriors();
+    // #2357 — belt-and-braces: state objects can predate the `fable` key
+    // (migratePriors/clonePriors backfill on load, but guard the read too).
+    const fablePrior = priors.fable ?? { alpha: 1, beta: 1 };
     const sampledScores: Record<ClaudeModel, number> = {
       haiku:   scores.haiku   * sampleBeta(priors.haiku.alpha,   priors.haiku.beta),
       sonnet:  scores.sonnet  * sampleBeta(priors.sonnet.alpha,  priors.sonnet.beta),
       opus:    scores.opus    * sampleBeta(priors.opus.alpha,    priors.opus.beta),
+      fable:   scores.fable   * sampleBeta(fablePrior.alpha,     fablePrior.beta),
       inherit: scores.inherit, // not bandit-controlled
     };
 
@@ -788,7 +823,7 @@ export class ModelRouter {
   private loadState(): RouterState {
     const defaultState: RouterState = {
       totalDecisions: 0,
-      modelDistribution: { haiku: 0, sonnet: 0, opus: 0, inherit: 0 },
+      modelDistribution: { haiku: 0, sonnet: 0, opus: 0, fable: 0, inherit: 0 },
       avgComplexity: 0.5,
       avgConfidence: 0.8,
       circuitBreakerTrips: 0,
@@ -839,7 +874,7 @@ export class ModelRouter {
   reset(): void {
     this.state = {
       totalDecisions: 0,
-      modelDistribution: { haiku: 0, sonnet: 0, opus: 0, inherit: 0 },
+      modelDistribution: { haiku: 0, sonnet: 0, opus: 0, fable: 0, inherit: 0 },
       avgComplexity: 0.5,
       avgConfidence: 0.8,
       circuitBreakerTrips: 0,
@@ -848,7 +883,7 @@ export class ModelRouter {
       version: 2,
       priors: defaultBucketedPriors(),
     };
-    this.consecutiveFailures = { haiku: 0, sonnet: 0, opus: 0, inherit: 0 };
+    this.consecutiveFailures = { haiku: 0, sonnet: 0, opus: 0, fable: 0, inherit: 0 };
     this.decisionCount = 0;
     this.saveState();
   }
@@ -861,12 +896,9 @@ export class ModelRouter {
   getBanditPriors(bucket: ComplexityBucket = 'med'): Record<ClaudeModel, BetaPrior> {
     const bucketed = this.state.priors ?? defaultBucketedPriors();
     const p = bucketed[bucket] ?? defaultBanditPriors();
-    return {
-      haiku:   { ...p.haiku },
-      sonnet:  { ...p.sonnet },
-      opus:    { ...p.opus },
-      inherit: { ...p.inherit },
-    };
+    // #2357 — clonePriors (not a literal-keyed copy) so the accessor can't
+    // silently drop newer model keys; was the fifth literal-key site.
+    return clonePriors(p);
   }
 
   /** All bucketed priors (copy) — for dashboards/tests. */

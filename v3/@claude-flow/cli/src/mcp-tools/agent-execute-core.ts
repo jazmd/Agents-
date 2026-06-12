@@ -16,7 +16,7 @@ const STORAGE_DIR = '.claude-flow';
 const AGENT_DIR = 'agents';
 const AGENT_FILE = 'store.json';
 
-type ClaudeModel = 'haiku' | 'sonnet' | 'opus' | 'opus-4.7' | 'inherit';
+type ClaudeModel = 'haiku' | 'sonnet' | 'opus' | 'opus-4.7' | 'fable' | 'inherit';
 
 export interface AgentRecord {
   agentId: string;
@@ -66,6 +66,9 @@ const MODEL_MAP: Record<string, string> = {
   sonnet: 'claude-sonnet-4-6',
   opus: 'claude-opus-4-8',
   'opus-4.7': 'claude-opus-4-7',
+  // #2357 / ADR-148 P1 — frontier tier ($10/$50 per MTok, 2× Opus 4.8);
+  // explicit opt-in only, never auto-selected by the router.
+  fable: 'claude-fable-5',
   inherit: DEFAULT_ANTHROPIC_MODEL,
 };
 
