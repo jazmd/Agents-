@@ -350,7 +350,7 @@ All CI jobs gate `publish`. A regression in any layer blocks the release on the 
 ## References
 
 - [docs/validation/README.md](../docs/validation/README.md) — full architecture overview (in-repo)
-- [Public gist](https://gist.github.com/ruvnet/ee7763c36f7a9a1c1886da783abc872b) — external-friendly version
+- [Public gist](https://gist.github.com/0x-wzw/ee7763c36f7a9a1c1886da783abc872b) — external-friendly version
 - [ADR-102](../v3/docs/adr/ADR-102-plugin-hook-cli-flag-regression-ci-guard.md) — smoke harness pattern + flag-priority CLI convention
 - [ADR-103](../v3/docs/adr/ADR-103-witness-temporal-history.md) — JSONL history layer + plugin distribution
 - [`plugins/ruflo-core/skills/witness/SKILL.md`](../plugins/ruflo-core/skills/witness/SKILL.md) — Claude Code skill workflow

@@ -65,7 +65,7 @@ Three new MCP tools wired through agentdb@3.0.0-alpha.13's native Cypher-routed 
 - `agentdb_causal-edge-delete` — calls `GraphDatabaseAdapter.deleteEdgesByEndpoints(from, to, relation?)` (Cypher-injection-safe)
 - `agentdb_causal-node-delete` — calls `GraphDatabaseAdapter.deleteNode(id, {cascade: true})` returns native `{deletedNode, deletedEdges}` audit
 
-All wrapped in MutationGuard (fail-closed) + AttestationLog (audit). Unblocks `/adr-index` re-index when ADR files are deleted from disk — stale nodes + dangling `supersedes` / `amends` / `related` / `depends-on` edges are now scrubbable. Closed [#1784](https://github.com/ruvnet/ruflo/issues/1784).
+All wrapped in MutationGuard (fail-closed) + AttestationLog (audit). Unblocks `/adr-index` re-index when ADR files are deleted from disk — stale nodes + dangling `supersedes` / `amends` / `related` / `depends-on` edges are now scrubbable. Closed [#1784](https://github.com/0x-wzw/ruflo/issues/1784).
 
 ### What didn't change
 
@@ -204,10 +204,10 @@ npx ruflo@latest hooks intelligence --status
 
 ```bash
 # One-line install (recommended)
-curl -fsSL https://cdn.jsdelivr.net/gh/ruvnet/ruflo@main/scripts/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/0x-wzw/ruflo@main/scripts/install.sh | bash
 
 # Or full setup with MCP + diagnostics
-curl -fsSL https://cdn.jsdelivr.net/gh/ruvnet/ruflo@main/scripts/install.sh | bash -s -- --full
+curl -fsSL https://cdn.jsdelivr.net/gh/0x-wzw/ruflo@main/scripts/install.sh | bash -s -- --full
 
 # Or via npx
 npx ruflo@latest init wizard
@@ -490,10 +490,10 @@ claude --dangerously-skip-permissions
 
 ```bash
 # curl-style installer with progress display
-curl -fsSL https://cdn.jsdelivr.net/gh/ruvnet/ruflo@main/scripts/install.sh | bash
+curl -fsSL https://cdn.jsdelivr.net/gh/0x-wzw/ruflo@main/scripts/install.sh | bash
 
 # Full setup (global + MCP + diagnostics)
-curl -fsSL https://cdn.jsdelivr.net/gh/ruvnet/ruflo@main/scripts/install.sh | bash -s -- --full
+curl -fsSL https://cdn.jsdelivr.net/gh/0x-wzw/ruflo@main/scripts/install.sh | bash -s -- --full
 ```
 
 <details>
@@ -563,7 +563,7 @@ Install Ruflo as a native Claude Code plugin -- adds skills, commands, agents, a
 
 ```bash
 # Add the marketplace (one-time)
-/plugin marketplace add ruvnet/ruflo
+/plugin marketplace add 0x-wzw/ruflo
 
 # Install individual plugins
 /plugin install ruflo-core@ruflo         # MCP server + base agents
@@ -2564,14 +2564,14 @@ Claude Code pipes JSON session data via **stdin** to the statusline script after
 
 **Output Format:**
 ```
-▊ Ruflo V3 ● ruvnet  │  ⎇ main  │  Opus 4.6  | ●42% ctx  | $0.15
+▊ Ruflo V3 ● 0x-wzw  │  ⎇ main  │  Opus 4.6  | ●42% ctx  | $0.15
 🏗️ DDD [●●●●○] 4/5  ⚡ HNSW 150x  🤖 ◉ [12/8]  👥 3  🟢 CVE 3/3  💾 512MB  🧠 15%  📦 AgentDB ●1.2K vectors
 ```
 
 | Indicator | Description | Source |
 |-----------|-------------|--------|
 | `▊ Ruflo V3` | Project header | Always shown |
-| `● ruvnet` | GitHub user | `gh api user` CLI |
+| `● 0x-wzw` | GitHub user | `gh api user` CLI |
 | `⎇ main` | Current git branch | `git branch --show-current` |
 | `Opus 4.6` | Claude model name | Stdin JSON `model.display_name` |
 | `●42% ctx` | Context window usage | Stdin JSON `context_window.used_percentage` |
@@ -4837,9 +4837,9 @@ Core infrastructure packages powering Ruflo's intelligence layer.
 
 [![npm version](https://img.shields.io/npm/v/agentic-flow?color=blue&label=npm)](https://www.npmjs.com/package/agentic-flow)
 [![npm downloads](https://img.shields.io/npm/dm/agentic-flow?color=green)](https://www.npmjs.com/package/agentic-flow)
-[![GitHub](https://img.shields.io/badge/GitHub-ruvnet%2Fagentic--flow-blue?logo=github)](https://github.com/ruvnet/agentic-flow)
+[![GitHub](https://img.shields.io/badge/GitHub-0x-wzw%2Fagentic--flow-blue?logo=github)](https://github.com/0x-wzw/agentic-flow)
 
-Ruflo v3 is built on top of **[agentic-flow](https://github.com/ruvnet/agentic-flow)**, a production-ready AI agent orchestration platform. This deep integration provides instant (regex-based, no LLM call) code transformations, learning memory, and geometric intelligence.
+Ruflo v3 is built on top of **[agentic-flow](https://github.com/0x-wzw/agentic-flow)**, a production-ready AI agent orchestration platform. This deep integration provides instant (regex-based, no LLM call) code transformations, learning memory, and geometric intelligence.
 
 ### Quick Start
 
@@ -5157,7 +5157,7 @@ const config = optimizer.getOptimalConfig(agentCount);
 
 [![npm version](https://img.shields.io/npm/v/agentic-jujutsu?color=blue&label=npm)](https://www.npmjs.com/package/agentic-jujutsu)
 [![npm downloads](https://img.shields.io/npm/dm/agentic-jujutsu?color=green)](https://www.npmjs.com/package/agentic-jujutsu)
-[![GitHub](https://img.shields.io/badge/GitHub-ruvnet%2Fagentic--flow-blue?logo=github)](https://github.com/ruvnet/agentic-flow/tree/main/packages/agentic-jujutsu)
+[![GitHub](https://img.shields.io/badge/GitHub-0x-wzw%2Fagentic--flow-blue?logo=github)](https://github.com/0x-wzw/agentic-flow/tree/main/packages/agentic-jujutsu)
 
 **Agentic-Jujutsu** is self-learning version control designed for multiple AI agents working simultaneously without conflicts. Built on [Jujutsu](https://github.com/martinvonz/jj), it provides faster performance than Git with automatic conflict resolution.
 
@@ -5391,8 +5391,8 @@ npx agentic-jujutsu examples        # Show usage examples
 
 [![npm version](https://img.shields.io/npm/v/ruvector?color=blue&label=npm)](https://www.npmjs.com/package/ruvector)
 [![npm downloads](https://img.shields.io/npm/dm/ruvector?color=green)](https://www.npmjs.com/package/ruvector)
-[![GitHub](https://img.shields.io/badge/GitHub-ruvnet%2Fruvector-blue?logo=github)](https://github.com/ruvnet/ruvector)
-[![Docker](https://img.shields.io/badge/Docker-ruvector--postgres-blue?logo=docker)](https://hub.docker.com/r/ruvnet/ruvector-postgres)
+[![GitHub](https://img.shields.io/badge/GitHub-0x-wzw%2Fruvector-blue?logo=github)](https://github.com/0x-wzw/ruvector)
+[![Docker](https://img.shields.io/badge/Docker-ruvector--postgres-blue?logo=docker)](https://hub.docker.com/r/0x-wzw/ruvector-postgres)
 
 **RuVector** is a high-performance distributed vector database combining vector search, graph queries, and self-learning neural networks. Written in Rust with Node.js/WASM bindings, it powers Ruflo's intelligence layer with native speed.
 
@@ -5428,7 +5428,7 @@ npm install ruvector
 npx ruvector --help
 
 # Start Postgres for centralized coordination
-docker run -d -p 5432:5432 ruvnet/ruvector-postgres
+docker run -d -p 5432:5432 0x-wzw/ruvector-postgres
 ```
 
 ### Basic Usage
@@ -5486,7 +5486,7 @@ docker run -d \
   -e POSTGRES_USER=claude \
   -e POSTGRES_PASSWORD=ruflo-test \
   -e POSTGRES_DB=claude_flow \
-  ruvnet/ruvector-postgres
+  0x-wzw/ruvector-postgres
 
 # Migrate existing memory to PostgreSQL
 npx ruflo ruvector import --input memory-export.json
@@ -7597,18 +7597,18 @@ cp -r ./data-backup-v2 ./data
 
 | Resource | Link |
 |----------|------|
-| 📚 Documentation | [github.com/ruvnet/claude-flow](https://github.com/ruvnet/claude-flow) |
-| 🐛 Issues & Bugs | [github.com/ruvnet/claude-flow/issues](https://github.com/ruvnet/claude-flow/issues) |
-| 💼 Professional Implementation | [ruv.io](https://ruv.io) — Enterprise consulting, custom integrations, and production deployment |
+| 📚 Documentation | [github.com/0x-wzw/ruflo](https://github.com/0x-wzw/ruflo) |
+| 🐛 Issues & Bugs | [github.com/0x-wzw/ruflo/issues](https://github.com/0x-wzw/ruflo/issues) |
+| 💼 Professional Implementation | [teoh.my](https://teoh.my) — Enterprise consulting, custom integrations, and production deployment |
 | 💬 Discord Community | [Agentics Foundation](https://discord.com/invite/dfxmpwkG2D) |
 
 ## License
 
-MIT - [RuvNet](https://github.com/ruvnet)
+MIT - [0x-wzw](https://github.com/0x-wzw)
 
 
 [![RuVector](https://img.shields.io/npm/v/ruvector?style=for-the-badge&logo=rust&color=orange&label=RuVector)](https://www.npmjs.com/package/ruvector)
 [![Agentic-Flow](https://img.shields.io/npm/v/agentic-flow?style=for-the-badge&logo=typescript&color=3178c6&label=Agentic-Flow)](https://www.npmjs.com/package/agentic-flow)
 [![Reddit](https://img.shields.io/reddit/subreddit-subscribers/aipromptprogramming?style=for-the-badge&logo=reddit&color=FF4500&label=r/aipromptprogramming)](https://www.reddit.com/r/aipromptprogramming/)
 
-[![Crates.io](https://img.shields.io/badge/crates.io-ruvnet-E6732E?style=for-the-badge&logo=rust&logoColor=white)](https://crates.io/users/ruvnet)
+[![Crates.io](https://img.shields.io/badge/crates.io-0x-wzw-E6732E?style=for-the-badge&logo=rust&logoColor=white)](https://crates.io/users/0x-wzw)

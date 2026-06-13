@@ -628,7 +628,7 @@ enabled = true
 
 ## 📚 SUPPORT
 
-- Docs: https://github.com/ruvnet/claude-flow
-- Issues: https://github.com/ruvnet/claude-flow/issues
+- Docs: https://github.com/0x-wzw/ruflo
+- Issues: https://github.com/0x-wzw/ruflo/issues
 
 **Remember: Codex executes, claude-flow orchestrates!**

@@ -2,7 +2,7 @@
 
 Three-layer regression-protection stack used by ruflo's CI to catch the regression classes that traditional unit tests miss. Adopt the same stack in any project — the toolkit is project-agnostic and ships in `plugins/ruflo-core/scripts/witness/`.
 
-> **External-friendly version** (no ruflo-specific paths): [agentic-validation-system gist](https://gist.github.com/ruvnet/ee7763c36f7a9a1c1886da783abc872b). This document is the in-repo home with cross-references to ruflo's own implementation.
+> **External-friendly version** (no ruflo-specific paths): [agentic-validation-system gist](https://gist.github.com/0x-wzw/ee7763c36f7a9a1c1886da783abc872b). This document is the in-repo home with cross-references to ruflo's own implementation.
 
 ---
 
@@ -334,5 +334,5 @@ This costs nothing on the green path and gives you a concrete failure cause on t
 - [witness-fixes.json](../../witness-fixes.json) — ruflo's project-specific NEW_FIXES
 - [ADR-102](../../v3/docs/adr/ADR-102-plugin-hook-cli-flag-regression-ci-guard.md) — smoke harness pattern + flag-priority convention
 - [ADR-103](../../v3/docs/adr/ADR-103-witness-temporal-history.md) — JSONL history layer + plugin distribution
-- [Public gist](https://gist.github.com/ruvnet/ee7763c36f7a9a1c1886da783abc872b) — external-friendly version
+- [Public gist](https://gist.github.com/0x-wzw/ee7763c36f7a9a1c1886da783abc872b) — external-friendly version
 - [.github/workflows/v3-ci.yml](../../.github/workflows/v3-ci.yml) — `smoke-install-no-bsqlite`, `plugin-hooks-smoke`, `witness-verify` jobs

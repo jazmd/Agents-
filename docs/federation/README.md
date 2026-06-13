@@ -2,7 +2,7 @@
 
 > Cross-installation agent peering with built-in cost limits, circuit breaker, signed envelopes, and (as of alpha.14) opt-in WireGuard mesh layer governed by federation trust.
 
-This guide walks through what federation is, when to use it, and how to set it up. For the architectural backstory and per-phase release notes see the [companion gist](https://gist.github.com/ruvnet/3b5111a2ea7e450ff262ce96e88560bf).
+This guide walks through what federation is, when to use it, and how to set it up. For the architectural backstory and per-phase release notes see the [companion gist](https://gist.github.com/0x-wzw/3b5111a2ea7e450ff262ce96e88560bf).
 
 ## What federation does
 
@@ -250,7 +250,7 @@ The federation plugin handles signing, PII gating, breaker, and audit on every s
 
 | Version | What landed |
 |---|---|
-| `1.0.0-alpha.9` | First user-visible release — see [announcement gist](https://gist.github.com/ruvnet/3b5111a2ea7e450ff262ce96e88560bf) |
+| `1.0.0-alpha.9` | First user-visible release — see [announcement gist](https://gist.github.com/0x-wzw/3b5111a2ea7e450ff262ce96e88560bf) |
 | `1.0.0-alpha.10` | ADR-097 Phases 2.a-4 + ADR-104 transport + ADR-109 inbound dispatcher |
 | `1.0.0-alpha.11-12` | ADR-109 sig verify, ADR-104 compression, ADR-107 TLS cert pinning |
 | `1.0.0-alpha.13` | ADR-104 stream multiplexing + ADR-110 MemorySpendReporter |
@@ -270,7 +270,7 @@ The federation plugin handles signing, PII gating, breaker, and audit on every s
 
 ## Support
 
-- Issues: https://github.com/ruvnet/ruflo/issues
-- Tracking issue (ADR-111): [#1879](https://github.com/ruvnet/ruflo/issues/1879)
-- Federation gist (current through alpha.14): https://gist.github.com/ruvnet/3b5111a2ea7e450ff262ce96e88560bf
-- ADR-111 deep-dive gist: https://gist.github.com/ruvnet/c640fc71c7a6ced37908e645d5db84c5
+- Issues: https://github.com/0x-wzw/ruflo/issues
+- Tracking issue (ADR-111): [#1879](https://github.com/0x-wzw/ruflo/issues/1879)
+- Federation gist (current through alpha.14): https://gist.github.com/0x-wzw/3b5111a2ea7e450ff262ce96e88560bf
+- ADR-111 deep-dive gist: https://gist.github.com/0x-wzw/c640fc71c7a6ced37908e645d5db84c5

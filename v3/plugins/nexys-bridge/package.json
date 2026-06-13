@@ -51,11 +51,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ruvnet/ruflo-nexys.git",
+    "url": "https://github.com/0x-wzw/ruflo-nexys.git",
     "directory": "v3/plugins/nexys-bridge"
   },
   "bugs": {
-    "url": "https://github.com/ruvnet/ruflo-nexys/issues"
+    "url": "https://github.com/0x-wzw/ruflo-nexys/issues"
   },
   "engines": {
     "node": ">=18.0.0"

@@ -38,7 +38,7 @@ The intended day-to-day flow:
 
 4. **Install plugins as you need them**:
    ```bash
-   /plugin marketplace add ruvnet/ruflo
+   /plugin marketplace add 0x-wzw/ruflo
    /plugin install ruflo-federation@ruflo
    ```
 
@@ -122,4 +122,4 @@ Per-capability witness signing for the full 300-tool / 49-command surface is in 
 | Architecture decisions | [`v3/docs/adr/`](../v3/docs/adr/) — ADR-093, ADR-095, ADR-096, ADR-097 are the recent ones |
 | Cryptographic proof of build correctness | [`verification.md`](../verification.md) + [`ruflo verify`](#verification) |
 | Plugin development | [`USERGUIDE.md` → Plugin section](USERGUIDE.md#-ecosystem--integrations) |
-| Open issues + roadmap | [GitHub Issues](https://github.com/ruvnet/claude-flow/issues) |
+| Open issues + roadmap | [GitHub Issues](https://github.com/0x-wzw/ruflo/issues) |

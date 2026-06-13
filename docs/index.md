@@ -14,7 +14,7 @@ RuFlo provides native Claude Code plugins for multi-agent orchestration, /loop w
 
 ```bash
 # Add the marketplace
-/plugin marketplace add ruvnet/ruflo
+/plugin marketplace add 0x-wzw/ruflo
 
 # Install plugins
 /plugin install ruflo-core@ruflo
@@ -79,7 +79,7 @@ RuFlo plugins use Claude Code's native capabilities when available:
 
 ## Links
 
-- [GitHub Repository](https://github.com/ruvnet/ruflo)
+- [GitHub Repository](https://github.com/0x-wzw/ruflo)
 - [npm Packages](https://www.npmjs.com/package/@claude-flow/cli)
-- [ADR-091: Native Integration](https://github.com/ruvnet/ruflo/blob/main/v3/docs/adr/ADR-091-loop-monitor-native-integration.md)
-- [Issues & Support](https://github.com/ruvnet/ruflo/issues)
+- [ADR-091: Native Integration](https://github.com/0x-wzw/ruflo/blob/main/v3/docs/adr/ADR-091-loop-monitor-native-integration.md)
+- [Issues & Support](https://github.com/0x-wzw/ruflo/issues)

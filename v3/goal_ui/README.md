@@ -1,9 +1,9 @@
-# RuFlo Research
+# GOAL
 
-> Goal-Oriented Action Planning UI for autonomous AI research workflows. Part of the [RuFlo](https://github.com/ruvnet/ruflo) platform.
-> Live: [goal.ruv.io](https://goal.ruv.io/) · Agents dashboard: [goal.ruv.io/agents](https://goal.ruv.io/agents)
+> Goal-Oriented Action Planning UI for autonomous AI research workflows. Part of the [Ruflo](https://github.com/0x-wzw/ruflo) platform.
+> Live: [goal.teoh.my](https://goal.teoh.my/) · Agents dashboard: [goal.teoh.my/agents](https://goal.teoh.my/agents)
 
-Turn plain-English research goals into executable agent plans. RuFlo Research applies classic Goal-Oriented Action Planning (GOAP) — A* search through a state space of actions with preconditions and effects — to autonomous AI research, then dispatches the work to live agents you can inspect in real time.
+Turn plain-English research goals into executable agent plans. GOAL applies classic Goal-Oriented Action Planning (GOAP) — A* search through a state space of actions with preconditions and effects — to autonomous AI research, then dispatches the work to live agents you can inspect in real time.
 
 ## Highlights
 
@@ -50,18 +50,18 @@ v3/goal_ui/
 ## Embedding the Widget
 
 ```html
-<div id="ruflo-research-widget-container"></div>
+<div id="goal-widget-container"></div>
 <script>
-  window.RufloResearchWidgetConfig = {
+  window.GoalWidgetConfig = {
     primaryColor: "#8b5cf6",
     accentColor: "#10b981",
   };
 </script>
-<script src="https://goal.ruv.io/widget.js"></script>
-<link rel="stylesheet" href="https://goal.ruv.io/widget.css" />
+<script src="https://goal.teoh.my/widget.js"></script>
+<link rel="stylesheet" href="https://goal.teoh.my/widget.css" />
 ```
 
-The widget exposes a global `window.RufloResearchWidget` with `init(containerId)` and `version` for programmatic control. See [`docs/WIDGET-INTEGRATION.md`](docs/WIDGET-INTEGRATION.md) for the full integration guide.
+The widget exposes a global `window.GoalWidget` with `init(containerId)` and `version` for programmatic control. See [`docs/WIDGET-INTEGRATION.md`](docs/WIDGET-INTEGRATION.md) for the full integration guide.
 
 ## Tech Stack
 
@@ -69,7 +69,7 @@ React 18 · TypeScript 5 · Vite 5 · Tailwind 3 · shadcn/ui · Radix UI · Rea
 
 ## Deployment
 
-Hosted on Netlify (`netlify.toml`) at [goal.ruv.io](https://goal.ruv.io/). See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for self-hosting instructions and edge-function deploy steps.
+Hosted on Netlify (`netlify.toml`) at [goal.teoh.my](https://goal.teoh.my/). See [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md) for self-hosting instructions and edge-function deploy steps.
 
 ## Environment
 
@@ -83,4 +83,4 @@ VITE_SUPABASE_PUBLISHABLE_KEY=...
 
 ## License
 
-MIT — same as the parent [RuFlo](https://github.com/ruvnet/ruflo) project.
+MIT — same as the parent [RuFlo](https://github.com/0x-wzw/ruflo) project.
