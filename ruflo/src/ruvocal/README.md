@@ -1,36 +1,36 @@
-# RuVocal — RuFlo Web UI
+# Flo — Ruflo Web UI
 
-> RuFlo's multi-model AI chat with built-in Model Context Protocol (MCP) tool calling. Live at [**flo.ruv.io**](https://flo.ruv.io/).
+> Ruflo's multi-model AI chat with built-in Model Context Protocol (MCP) tool calling. Live at [**flo.teoh.my**](https://flo.teoh.my/).
 
-[![Try the Web UI — flo.ruv.io](https://img.shields.io/badge/✨_Try_it-flo.ruv.io-6366f1?style=for-the-badge&logo=svelte&logoColor=white)](https://flo.ruv.io/)
+[![Try the Web UI — flo.teoh.my](https://img.shields.io/badge/✨_Try_it-flo.teoh.my-6366f1?style=for-the-badge&logo=svelte&logoColor=white)](https://flo.teoh.my/)
 
-RuVocal is the SvelteKit web app that lets you chat with Qwen, Claude, Gemini, or OpenAI while [RuFlo](https://github.com/ruvnet/ruflo) invokes the same ~210 MCP tools the CLI uses — agent orchestration, persistent memory, swarm coordination, code review, GitHub ops — all directly from chat. No install, no API key needed to try the hosted demo.
+Flo is the SvelteKit web app that lets you chat with Qwen, Claude, Gemini, or OpenAI while [Ruflo](https://github.com/0x-wzw/ruflo) invokes the same ~210 MCP tools the CLI uses — agent orchestration, persistent memory, swarm coordination, code review, GitHub ops — all directly from chat. No install, no API key needed to try the hosted demo.
 
-It started as a fork of the [HuggingFace chat-ui](https://github.com/huggingface/chat-ui) v0.20.0 and has been extended with a WASM-MCP integration layer, parallel tool execution, an in-browser tool gallery, and a "RuFlo Capabilities" tour modal. See [ADR-033](../../docs/adr/ADR-033-RUVOCAL-WASM-MCP-INTEGRATION.md) for the architecture.
+It started as a fork of the [HuggingFace chat-ui](https://github.com/huggingface/chat-ui) v0.20.0 and has been extended with a WASM-MCP integration layer, parallel tool execution, an in-browser tool gallery, and a "Ruflo Capabilities" tour modal. See [ADR-033](../../docs/adr/ADR-033-RUVOCAL-WASM-MCP-INTEGRATION.md) for the architecture.
 
-## What RuVocal adds on top of upstream chat-ui
+## What Flo adds on top of upstream chat-ui
 
 | | |
 |---|---|
-| 🛠️ **~210 MCP tools, prefixed** | Five RuFlo server groups (Core, Intelligence, Agents, Memory, DevTools) plus a 18-tool in-browser WASM gallery |
+| 🛠️ **~210 MCP tools, prefixed** | Five Ruflo server groups (Core, Intelligence, Agents, Memory, DevTools) plus a 18-tool in-browser WASM gallery |
 | ⚡ **Parallel tool calls** | One model turn fires 4–6+ tools at once via `Promise.all`. The UI shows a *Step N — X tools completed* badge per turn |
-| 📘 **RuFlo Capabilities modal** | Question-mark icon → multi-section tour: models, tools, architecture, shortcuts |
+| 📘 **Ruflo Capabilities modal** | Question-mark icon → multi-section tour: models, tools, architecture, shortcuts |
 | 💾 **AgentDB-backed memory** | "Remember my favorite color is indigo" → recalled weeks later via HNSW vector search |
 | 🧠 **6 curated frontier models** | Qwen 3.6 Max (default), Claude Sonnet 4.6, Claude Haiku 4.5, Gemini 2.5 Pro, Gemini 2.5 Flash, OpenAI — via OpenRouter |
 | 🔌 **Bring-your-own MCP servers** | Add HTTP/SSE/stdio endpoints from the chat input; they join the parallel-execution flow |
-| 🦾 **ruvLLM ready** | Native support for [ruvLLM](https://github.com/ruvnet/RuVector/tree/main/examples/ruvLLM) — RuFlo's self-improving local model layer |
+| 🦾 **ruvLLM ready** | Native support for [ruvLLM](https://github.com/0x-wzw/RuVector/tree/main/examples/ruvLLM) — Ruflo's self-improving local model layer |
 | 🏠 **Self-hostable** | Multi-stage Dockerfile (`INCLUDE_DB=true` builds in MongoDB), `cloudbuild.yaml` for Google Cloud Run |
 
 ## Quick Start
 
 ### Hosted (zero install)
 
-[**flo.ruv.io**](https://flo.ruv.io/) — pick a model, type a question. That's it.
+[**flo.teoh.my**](https://flo.teoh.my/) — pick a model, type a question. That's it.
 
 ### Local dev
 
 ```bash
-git clone https://github.com/ruvnet/ruflo
+git clone https://github.com/0x-wzw/ruflo
 cd ruflo/ruflo/src/ruvocal
 cp .env .env.local        # then edit .env.local — see below
 npm install
@@ -43,9 +43,9 @@ Minimum `.env.local` to use OpenRouter (matches the hosted setup):
 OPENAI_BASE_URL=https://openrouter.ai/api/v1
 OPENAI_API_KEY=sk-or-v1-...
 
-# Curated RuFlo model list (optional — defaults to /models from the base URL)
+# Curated Ruflo model list (optional — defaults to /models from the base URL)
 TASK_MODEL=qwen/qwen3.6-max-preview
-PUBLIC_APP_NAME=RuFlo
+PUBLIC_APP_NAME=Ruflo
 PUBLIC_APP_DESCRIPTION="Intelligent workflow automation assistant powered by Claude/Gemini/Qwen and MCP tools."
 ```
 
@@ -72,7 +72,7 @@ docker run -p 3000:3000 \
 
 ### Google Cloud Run (production-style)
 
-`cloudbuild.yaml` does a multi-stage build with `INCLUDE_DB=true`, pushes to Artifact Registry, and deploys to Cloud Run. Hosted demo at `flo.ruv.io` runs from this exact pipeline. See [`cloudbuild.yaml`](./cloudbuild.yaml) and the deploy notes in [ADR-033](../../docs/adr/ADR-033-RUVOCAL-WASM-MCP-INTEGRATION.md).
+`cloudbuild.yaml` does a multi-stage build with `INCLUDE_DB=true`, pushes to Artifact Registry, and deploys to Cloud Run. Hosted demo at `flo.teoh.my` runs from this exact pipeline. See [`cloudbuild.yaml`](./cloudbuild.yaml) and the deploy notes in [ADR-033](../../docs/adr/ADR-033-RUVOCAL-WASM-MCP-INTEGRATION.md).
 
 ## Database
 
@@ -84,18 +84,18 @@ Chat history, users, settings, files, and stats live in MongoDB. Three options:
 
 `MONGODB_DB_NAME` defaults to `chat-ui` (kept for upstream compatibility); change per environment.
 
-## MCP Tools (the RuFlo difference)
+## MCP Tools (the Ruflo difference)
 
-RuVocal calls tools exposed by Model Context Protocol servers and feeds results back to the model via OpenAI function calling. Configure trusted servers via env, let users add their own, and the router auto-selects tools-capable models when needed.
+Flo calls tools exposed by Model Context Protocol servers and feeds results back to the model via OpenAI function calling. Configure trusted servers via env, let users add their own, and the router auto-selects tools-capable models when needed.
 
 ```env
 MCP_SERVERS=[
-  {"name":"RuFlo Core","url":"https://mcp-bridge-...run.app/mcp/core","transport":"sse"},
-  {"name":"RuFlo Intelligence","url":"https://mcp-bridge-...run.app/mcp/intelligence","transport":"sse"},
-  {"name":"RuFlo Agents","url":"https://mcp-bridge-...run.app/mcp/agents","transport":"sse"},
-  {"name":"RuFlo Memory","url":"https://mcp-bridge-...run.app/mcp/memory","transport":"sse"},
-  {"name":"RuFlo DevTools","url":"https://mcp-bridge-...run.app/mcp/devtools","transport":"sse"},
-  {"name":"π Shared Brain","url":"https://mcp.pi.ruv.io","transport":"streamable-http"}
+  {"name":"Ruflo Core","url":"https://mcp-bridge-...run.app/mcp/core","transport":"sse"},
+  {"name":"Ruflo Intelligence","url":"https://mcp-bridge-...run.app/mcp/intelligence","transport":"sse"},
+  {"name":"Ruflo Agents","url":"https://mcp-bridge-...run.app/mcp/agents","transport":"sse"},
+  {"name":"Ruflo Memory","url":"https://mcp-bridge-...run.app/mcp/memory","transport":"sse"},
+  {"name":"Ruflo DevTools","url":"https://mcp-bridge-...run.app/mcp/devtools","transport":"sse"},
+  {"name":"π Shared Brain","url":"https://mcp.pi.teoh.my","transport":"streamable-http"}
 ]
 ```
 
@@ -105,7 +105,7 @@ When a model calls a tool, the message shows a compact card with parameters, a p
 
 ## LLM Router (Omni)
 
-RuVocal can do server-side smart routing using [katanemo/Arch-Router-1.5B](https://huggingface.co/katanemo/Arch-Router-1.5B) without a separate router service. Selecting "Omni" in the model picker:
+Flo can do server-side smart routing using [katanemo/Arch-Router-1.5B](https://huggingface.co/katanemo/Arch-Router-1.5B) without a separate router service. Selecting "Omni" in the model picker:
 
 1. Calls Arch once (non-streaming) to pick the best route for recent turns
 2. Emits `RouterMetadata` so the UI shows route + selected model
@@ -122,7 +122,7 @@ Display: `PUBLIC_LLM_ROUTER_ALIAS_ID` (default `omni`), `PUBLIC_LLM_ROUTER_DISPL
 ## Theming
 
 ```env
-PUBLIC_APP_NAME=RuFlo
+PUBLIC_APP_NAME=Ruflo
 PUBLIC_APP_ASSETS=chatui
 PUBLIC_APP_DESCRIPTION="Intelligent workflow automation assistant powered by Claude/Gemini/Qwen and MCP tools."
 PUBLIC_APP_DATA_SHARING=
@@ -153,12 +153,12 @@ For deeper internals, see [`CLAUDE.md`](./CLAUDE.md) (Claude Code agent guide) a
 
 ## Related
 
-- 🏠 **Parent project** — [RuFlo](https://github.com/ruvnet/ruflo)
+- 🏠 **Parent project** — [Ruflo](https://github.com/0x-wzw/ruflo)
 - 🎯 **Goal Planner UI** — [goal.ruv.io](https://goal.ruv.io/) · [/agents](https://goal.ruv.io/agents)
-- 📖 **ADR-033** — RuVocal/WASM-MCP integration architecture
-- 📋 **Roadmap** — [issue #1689](https://github.com/ruvnet/ruflo/issues/1689)
-- 🍴 **Upstream** — [huggingface/chat-ui](https://github.com/huggingface/chat-ui) (RuVocal is forked from v0.20.0)
+- 📖 **ADR-033** — Flo/WASM-MCP integration architecture
+- 📋 **Roadmap** — [issue #1689](https://github.com/0x-wzw/ruflo/issues/1689)
+- 🍴 **Upstream** — [huggingface/chat-ui](https://github.com/huggingface/chat-ui) (Flo is forked from v0.20.0)
 
 ## License
 
-MIT — same as the parent [RuFlo](https://github.com/ruvnet/ruflo) project.
+MIT — same as the parent [Ruflo](https://github.com/0x-wzw/ruflo) project.

@@ -1,5 +1,5 @@
 /**
- * RVF Document Store — self-contained, zero-dependency database for RuVocal.
+ * RVF Document Store — self-contained, zero-dependency database for Flo.
  *
  * Replaces MongoDB with an in-memory document store persisted to a single
  * RVF JSON file on disk. Implements the MongoDB Collection interface used

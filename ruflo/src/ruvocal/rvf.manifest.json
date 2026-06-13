@@ -3,7 +3,7 @@
   "format": "rvf-package",
   "name": "ruvocal",
   "version": "1.0.0",
-  "description": "RuVocal — Conversational AI UI powered by RuVector-Postgres. Fork of HuggingFace Chat UI with MongoDB replaced by PostgreSQL + pgvector for unified vector search across conversations, agents, and knowledge.",
+  "description": "Flo — Conversational AI UI powered by RuVector-Postgres. Fork of HuggingFace Chat UI with MongoDB replaced by PostgreSQL + pgvector for unified vector search across conversations, agents, and knowledge.",
   "license": "Apache-2.0",
   "upstream": {
     "repo": "https://github.com/huggingface/chat-ui",

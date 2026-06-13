@@ -1,5 +1,5 @@
 /**
- * PostgreSQL adapter for RuVocal — drop-in replacement for MongoDB collections.
+ * PostgreSQL adapter for Flo — drop-in replacement for MongoDB collections.
  *
  * Implements the MongoDB Collection interface used by HF Chat UI,
  * translating find/insert/update/delete/aggregate calls to SQL.

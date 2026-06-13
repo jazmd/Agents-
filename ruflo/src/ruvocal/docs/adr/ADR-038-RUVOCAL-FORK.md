@@ -1,4 +1,4 @@
-# ADR-038: RuVocal — HF Chat UI Fork with Self-Contained RVF Document Store
+# ADR-038: Flo — HF Chat UI Fork with Self-Contained RVF Document Store
 
 **Status:** Implemented
 **Date:** 2026-03-05
@@ -18,20 +18,20 @@ We initially considered PostgreSQL (ruvector-postgres) as the replacement, but p
 
 ## Decision
 
-Fork HuggingFace Chat UI as **RuVocal** (`/workspaces/dev/packages/ruvocal`), replacing MongoDB with a pure TypeScript in-memory document store persisted to a single `.rvf.json` file.
+Fork HuggingFace Chat UI as **Flo** (`/workspaces/dev/packages/ruvocal`), replacing MongoDB with a pure TypeScript in-memory document store persisted to a single `.rvf.json` file.
 
 ### Name
 
-**RuVocal** = **Ru**Vector + **Vocal** (voice/conversation). A conversational AI interface powered by ruvector.
+**Flo** = **Ru**Vector + **Vocal** (voice/conversation). A conversational AI interface powered by ruvector.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                        RuVocal Stack                             │
+│                        Flo Stack                             │
 │                                                                  │
 │  ┌──────────────────┐    ┌──────────────────┐                   │
-│  │   RuVocal UI     │    │   MCP Bridge     │                   │
+│  │   Flo UI     │    │   MCP Bridge     │                   │
 │  │   (SvelteKit 2)  │───▶│   (Node.js)      │                   │
 │  │                  │    │                  │                   │
 │  │  - Chat UI       │    │  - Tool proxy    │                   │
@@ -255,14 +255,14 @@ RVF_DB_PATH=/data/ruvocal
 RVF_DB_PATH=
 
 # Everything else stays the same
-PUBLIC_APP_NAME=RuVocal
+PUBLIC_APP_NAME=Flo
 PUBLIC_ORIGIN=https://chat.example.com
 OPENAI_BASE_URL=https://openrouter.ai/api/v1
 ```
 
 ## Benefits
 
-| Aspect | MongoDB (upstream) | RVF Store (RuVocal) |
+| Aspect | MongoDB (upstream) | RVF Store (Flo) |
 |--------|-------------------|---------------------|
 | **Dependencies** | MongoDB server required | Zero — pure TypeScript |
 | **Container size** | +500MB for MongoDB | 0 extra |

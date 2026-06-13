@@ -16,4 +16,4 @@ db
 models/*
 !models/add-your-models-here.txt
 .claude/*
-!.claude/skills/
+!.claude/skills/build/

@@ -1,5 +1,5 @@
 /**
- * RuVocal Database — self-contained RVF document store.
+ * Flo Database — self-contained RVF document store.
  *
  * Zero external dependencies. All data persisted to a single
  * RVF JSON file on disk. MongoDB Collection interface preserved
@@ -52,13 +52,13 @@ export class Database {
 
 		const dbPath = join(dbFolder, "ruvocal.rvf.json");
 
-		console.log(`[RuVocal] Database: ${dbPath}`);
+		console.log(`[Flo] Database: ${dbPath}`);
 		initRvfStore(dbPath);
 		this.initialized = true;
 
 		// Flush to disk on exit
 		onExit(async () => {
-			console.log("[RuVocal] Flushing database to disk");
+			console.log("[Flo] Flushing database to disk");
 			flushToDisk();
 		});
 	}
