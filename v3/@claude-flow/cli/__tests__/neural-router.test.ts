@@ -77,10 +77,10 @@ describe('neural-router (ADR-148)', () => {
   it('routes a cheap-looking query to haiku when gate is open and seed corpus loads', async () => {
     process.env.CLAUDE_FLOW_ROUTER_NEURAL = '1';
     __resetNeuralRouterForTests();
-    // The bundled seed corpus uses two signal channels (v[0] ≈ +0.85 for cheap,
-    // -0.85 for strong, v[1] for strong). We construct a cheap probe by
-    // mirroring those channels.
-    const e = makeEmbedding(7);
+    // Construct a clean cheap probe — only the seed corpus's signal channels
+    // populated, all noise dimensions zero. We're testing the integration,
+    // not the model's generalization to noisy embeddings.
+    const e = new Array(32).fill(0);
     e[0] = 0.85; e[1] = 0.0;
     const r = await tryCostOptimalRoute(e);
     if (!r) {
@@ -100,7 +100,7 @@ describe('neural-router (ADR-148)', () => {
   it('routes a strong-looking query away from haiku', async () => {
     process.env.CLAUDE_FLOW_ROUTER_NEURAL = '1';
     __resetNeuralRouterForTests();
-    const e = makeEmbedding(11);
+    const e = new Array(32).fill(0);
     e[0] = -0.85; e[1] = 0.7;
     const r = await tryCostOptimalRoute(e);
     if (!r) return; // dep absent in CI

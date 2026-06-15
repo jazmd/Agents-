@@ -60,6 +60,8 @@ export interface NeuralRouteResult {
 interface NeuralRouterConfig {
   enabled: boolean;
   modelPath?: string;
+  /** Bundled fallback artifact (KRR JSON). Used when `modelPath` is unset. */
+  bundledKrrPath: string;
   qualityBar: number;
   seedCorpusPath: string;
   /** k for k-NN backend (default 5). */
@@ -125,6 +127,7 @@ function getConfig(): NeuralRouterConfig {
   _config = {
     enabled: process.env.CLAUDE_FLOW_ROUTER_NEURAL === '1',
     modelPath: process.env.CLAUDE_FLOW_ROUTER_MODEL_PATH || undefined,
+    bundledKrrPath: join(assetsDir, 'seed-router.krr.json'),
     qualityBar: parseFloat(process.env.CLAUDE_FLOW_ROUTER_QUALITY_BAR ?? '0.8') || 0.8,
     seedCorpusPath: process.env.CLAUDE_FLOW_ROUTER_SEED_CORPUS
       ?? join(assetsDir, 'seed-rows.json'),
@@ -222,6 +225,31 @@ async function resolveBackend(cfg: NeuralRouterConfig): Promise<ResolvedBackend>
         },
         routedBy: 'metaharness-krr',
         reason: `KRR artifact loaded from ${cfg.modelPath}`,
+      };
+    } catch {
+      // Fall through to k-NN
+    }
+  }
+
+  // 3.5. No user artifact → try the bundled pre-trained KRR (~96kB, ~0.020 ms/route).
+  if (existsSync(cfg.bundledKrrPath)) {
+    try {
+      const json = JSON.parse(readFileSync(cfg.bundledKrrPath, 'utf8'));
+      const trained = mh.TrainedRouter.fromJSON(json);
+      const cands = json.candidates.map((c: { id: string; costPerMTok: number }) => ({ id: c.id, costPerMTok: c.costPerMTok }));
+      return {
+        available: true,
+        router: {
+          route: (e: number[]) => {
+            const r = trained.route(e);
+            return { id: r.id, predictedQuality: r.predictedQuality, costPerMTok: r.costPerMTok, metBar: r.metBar };
+          },
+          predictAll: (e: number[]) => cands.map((c: { id: string; costPerMTok: number }) => ({
+            id: c.id, predictedQuality: trained.predict(c.id, e), costPerMTok: c.costPerMTok,
+          })).sort((a: { costPerMTok: number }, b: { costPerMTok: number }) => a.costPerMTok - b.costPerMTok),
+        },
+        routedBy: 'metaharness-krr',
+        reason: `bundled KRR artifact loaded from ${cfg.bundledKrrPath}`,
       };
     } catch {
       // Fall through to k-NN

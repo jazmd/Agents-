@@ -40,6 +40,22 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 
+// ----------------------------------------------------------------------------
+// Lazy module loaders — initialised once per process. The dynamic-import calls
+// keep these modules off the critical-path-cold-start, but we want subsequent
+// route() calls to pay only a Map lookup, not a new Promise per call.
+// ----------------------------------------------------------------------------
+let _neuralRouterMod: Promise<typeof import('./neural-router.js')> | null = null;
+function loadNeuralRouter(): Promise<typeof import('./neural-router.js')> {
+  if (_neuralRouterMod === null) _neuralRouterMod = import('./neural-router.js');
+  return _neuralRouterMod;
+}
+let _trajectoryMod: Promise<typeof import('./router-trajectory.js')> | null = null;
+function loadTrajectoryRecorder(): Promise<typeof import('./router-trajectory.js')> {
+  if (_trajectoryMod === null) _trajectoryMod = import('./router-trajectory.js');
+  return _trajectoryMod;
+}
+
 // ============================================================================
 // Types & Constants
 // ============================================================================
@@ -420,26 +436,33 @@ export class ModelRouter {
     // Analyze task complexity
     const complexity = this.analyzeComplexity(task, embedding);
 
-    // ADR-148 — optional neural cost-optimal path (gated, opt-in)
+    // ADR-148 — optional neural cost-optimal path (gated, opt-in).
+    //
+    // We use the neural pick whenever the backend returns one — the relative
+    // ranking it produces is its best guess at the cost-optimal model, and
+    // substituting the cold bandit when the neural's absolute confidence
+    // happens to be modest is strictly worse. `metBar` becomes informational
+    // (the caller can read it via `confidence` ≥ qualityBar), not gating.
+    // `bandit-fallback` is reserved for the case where the neural path was
+    // enabled but returned no decision at all (artifact load failed, etc.).
     let neuralPick:
       | { model: ClaudeModel; confidence: number; uncertainty: number; routedBy: 'metaharness-knn' | 'metaharness-krr' | 'fastgrnn' }
       | null = null;
     let neuralDeclined = false;
     if (embedding && embedding.length > 0 && process.env.CLAUDE_FLOW_ROUTER_NEURAL === '1') {
       try {
-        const { tryCostOptimalRoute } = await import('./neural-router.js');
+        const { tryCostOptimalRoute } = await loadNeuralRouter();
         const nr = await tryCostOptimalRoute(embedding);
-        if (nr && nr.metBar) {
+        if (nr) {
           neuralPick = {
             model: nr.model,
             confidence: nr.predictedQuality,
             uncertainty: 1 - nr.predictedQuality,
             routedBy: nr.routedBy,
           };
-        } else if (nr) {
-          // The neural path returned a decision but did not clear the bar —
-          // we still defer to the bandit, but tag the result so observers
-          // know the neural backend was consulted and declined.
+        } else {
+          // Neural was enabled but returned no decision at all — load failed,
+          // gate intercepted, embedding length mismatched corpus, etc.
           neuralDeclined = true;
         }
       } catch {
@@ -496,7 +519,7 @@ export class ModelRouter {
     // ADR-148 — opt-in DRACO-shaped trajectory collection
     if (process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY === '1') {
       try {
-        const { recordDecision } = await import('./router-trajectory.js');
+        const { recordDecision } = await loadTrajectoryRecorder();
         recordDecision({
           task, embedding, complexity: complexity.score,
           model, confidence, uncertainty, routedBy,

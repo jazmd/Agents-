@@ -153,10 +153,12 @@ reshaping.
 
 ### 6. Artifact: tiered distribution
 
-- **Default (everywhere)**: no model file. `@metaharness/router`'s k-NN backend
-  starts from a bundled `assets/model-router/seed-rows.json` — a tiny
-  ~50-row seed corpus checked into the repo, used as `Router.fromExamples()`
-  input. Pure TS, no I/O.
+- **Default (everywhere)**: a **bundled pre-trained KRR JSON**
+  (`assets/model-router/seed-router.krr.json`, ~96 kB) trained from
+  `assets/model-router/seed-rows.json` (64 deterministic rows). Loaded
+  via `TrainedRouter.fromJSON()` — pure TS, no native deps, no I/O after
+  the one-time read. The pure-TS k-NN over the raw seed corpus stays as
+  a fallback when the KRR artifact is missing or fails to parse.
 - **Trained (optional)**: a `TrainedRouter` JSON written via `toJSON()` from
   a larger corpus, distributed via IPFS using the existing `hooks transfer`
   channel. `CLAUDE_FLOW_ROUTER_MODEL_PATH` can point at a local path or an
