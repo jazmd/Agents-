@@ -146,43 +146,14 @@ async function getModelRouter() {
   return modelRouterInstance;
 }
 
-// ADR-149 — lazy task embedder. The cost-optimal neural router fires only
-// when `routeToModelFull(task, embedding)` is called with a real embedding.
-// Without one the routing math falls back to heuristic+bandit, discarding
-// every per-model Pareto win the v2 measurement landed. We embed via
-// @xenova/transformers (Xenova/all-MiniLM-L6-v2, 384-dim) — already a
-// transitive dep through agentdb + agentic-flow. The pipeline initialises
-// lazily on first call (~1s) and caches for the process lifetime.
-let _taskEmbedderPromise: Promise<((text: string) => Promise<number[]>) | null> | null = null;
-function loadTaskEmbedder(): Promise<((text: string) => Promise<number[]>) | null> {
-  if (_taskEmbedderPromise !== null) return _taskEmbedderPromise;
-  _taskEmbedderPromise = (async () => {
-    try {
-      // Dynamic indirect import so tsc doesn't try to resolve the optional
-      // dep at compile time. Mirrors the loader in @claude-flow/embeddings.
-      const specifier = '@xenova/transformers';
-      const mod = await import(/* @vite-ignore */ specifier).catch(() => null);
-      if (!mod || typeof mod.pipeline !== 'function') return null;
-      const extractor = await mod.pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', { quantized: true });
-      return async (text: string): Promise<number[]> => {
-        const out = await extractor(text, { pooling: 'mean', normalize: true });
-        return Array.from(out.data as Float32Array);
-      };
-    } catch {
-      return null;
-    }
-  })();
-  return _taskEmbedderPromise;
-}
-
+// ADR-149 — the cost-optimal neural router fires only when
+// `routeToModelFull(task, embedding)` is called with a real embedding. We
+// delegate to the shared task-embedder module (ADR-149 iter 9) so the
+// @xenova/transformers MiniLM pipeline + LRU cache are shared across
+// agent-tools and the agent-execute-core fallback path.
 async function embedTaskSafe(task: string): Promise<number[] | undefined> {
-  try {
-    const embed = await loadTaskEmbedder();
-    if (!embed) return undefined;
-    return await embed(task);
-  } catch {
-    return undefined;
-  }
+  const { embedTaskWithCache } = await import('../ruvector/task-embedder.js');
+  return embedTaskWithCache(task);
 }
 
 /**

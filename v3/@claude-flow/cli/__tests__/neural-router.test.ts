@@ -324,6 +324,41 @@ describe('ModelRouter integration (ADR-148)', () => {
     expect(exhausted).toBeNull();
   });
 
+  it('embedTaskWithCache caches by task hash (ADR-149 iter 9)', async () => {
+    const { embedTaskWithCache, embedderStats, __resetTaskEmbedderForTests } = await import('../src/ruvector/task-embedder.js');
+    __resetTaskEmbedderForTests();
+    const sBefore = embedderStats();
+    expect(sBefore.size).toBe(0);
+    expect(sBefore.hits).toBe(0);
+    expect(sBefore.misses).toBe(0);
+
+    // Compute the embedding twice for the same task. First should miss + load;
+    // second should hit the LRU. If @xenova/transformers isn't installed in
+    // CI, both calls return undefined and we skip the strict cache assertions.
+    const task = 'Convert this var to const. Return ONLY the JavaScript:\nvar name = "alice";';
+    const v1 = await embedTaskWithCache(task);
+    if (!v1) {
+      // dep absent — skip
+      return;
+    }
+    const v2 = await embedTaskWithCache(task);
+    expect(v2).toBeDefined();
+    expect(v2!.length).toBe(v1.length);
+    // Same task → cache hit on second call
+    const sAfter = embedderStats();
+    expect(sAfter.size).toBe(1);
+    expect(sAfter.misses).toBe(1);
+    expect(sAfter.hits).toBeGreaterThanOrEqual(1);
+
+    // Different task → cache miss + size increment
+    const task2 = 'Add a console.log before the return.';
+    const v3 = await embedTaskWithCache(task2);
+    expect(v3).toBeDefined();
+    const sFinal = embedderStats();
+    expect(sFinal.size).toBe(2);
+    expect(sFinal.misses).toBe(2);
+  });
+
   it('recordModelOutcomeByModelId writes shadow per-modelId state (ADR-149 iter 6)', async () => {
     const { resetModelRouter, recordModelOutcomeByModelId, getModelRouterStats } = await import('../src/ruvector/model-router.js');
     resetModelRouter();

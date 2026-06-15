@@ -516,14 +516,13 @@ export async function executeAgentTask(input: AgentExecuteInput): Promise<AgentE
     if (isRetryable) {
       try {
         const { nextCostOptimalAlternative } = await import('../ruvector/neural-router.js');
-        // Lazy ONNX embedder — same approach the dispatcher uses. The
-        // pipeline is cached by @xenova/transformers across module loads,
-        // so this isn't a per-call cost in steady state.
-        const tx = await (async () => { try { return await import('@xenova/transformers'); } catch { return null; } })();
-        if (tx) {
-          const extractor = await tx.pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', { quantized: true });
-          const embed = async (t: string) => Array.from(((await extractor(t, { pooling: 'mean', normalize: true })) as { data: Float32Array }).data);
-          const embedding = await embed(input.prompt);
+        // ADR-149 iter 9 — delegate to the shared task-embedder LRU. The
+        // pipeline + cache are shared with agent-tools.ts, so the embedding
+        // for this prompt is almost always already cached from the initial
+        // routing decision (no extra inference cost in steady state).
+        const { embedTaskWithCache } = await import('../ruvector/task-embedder.js');
+        const embedding = await embedTaskWithCache(input.prompt);
+        if (embedding) {
           const excludeIds: string[] = [agent.modelId];
           for (let attempt = 0; attempt < fallbackBudget && !result.success; attempt++) {
             fallbackHistory.push({ modelId: excludeIds[excludeIds.length - 1], error: result.error ?? '' });
