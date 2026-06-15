@@ -50,6 +50,10 @@ export interface TrajectoryDecisionRow {
     hybrid_pick: ClaudeModel;
     disagree: boolean;
   };
+  /** Execution provider hint (phase 2): 'anthropic' or 'openrouter'. */
+  provider?: 'anthropic' | 'openrouter';
+  /** Concrete OpenRouter model slug when provider=openrouter. */
+  openrouter_model?: string;
 }
 
 /** A routing outcome — written later by the caller via `recordOutcome()`. */
@@ -186,6 +190,8 @@ export function recordDecision(args: {
   routedBy: TrajectoryDecisionRow['routed_by'];
   neuralBackend?: TrajectoryDecisionRow['neural_backend'];
   abPair?: TrajectoryDecisionRow['ab_pair'];
+  provider?: TrajectoryDecisionRow['provider'];
+  openrouterModel?: TrajectoryDecisionRow['openrouter_model'];
 }): void {
   const cfg = getConfig();
   if (!cfg.enabled) return;
@@ -202,6 +208,8 @@ export function recordDecision(args: {
     routed_by: args.routedBy,
     ...(args.neuralBackend ? { neural_backend: args.neuralBackend } : {}),
     ...(args.abPair ? { ab_pair: args.abPair } : {}),
+    ...(args.provider ? { provider: args.provider } : {}),
+    ...(args.openrouterModel ? { openrouter_model: args.openrouterModel } : {}),
   };
   appendRow(row);
 }

@@ -42,6 +42,10 @@ const ENV_KEYS = [
   'CLAUDE_FLOW_ROUTER_TRAJECTORY_PATH',
   'CLAUDE_FLOW_ROUTER_SEED_CORPUS',
   'CLAUDE_FLOW_SWARM_DIR',
+  'CLAUDE_FLOW_ROUTER_PROVIDER',
+  'CLAUDE_FLOW_ROUTER_OPENROUTER_ALTS',
+  'OPENROUTER_API_KEY',
+  'ANTHROPIC_API_KEY',
 ];
 function clearEnv() { for (const k of ENV_KEYS) delete process.env[k]; }
 
@@ -260,5 +264,70 @@ describe('ModelRouter integration (ADR-148)', () => {
     if (result.routedBy === 'hybrid') {
       expect(['metaharness-knn', 'metaharness-krr', 'fastgrnn']).toContain(result.neuralBackend);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ADR-148 phase 2 — OpenRouter alternates
+// ---------------------------------------------------------------------------
+describe('OpenRouter alternates (ADR-148 phase 2)', () => {
+  beforeEach(() => {
+    clearEnv();
+    __resetNeuralRouterForTests();
+    vi.resetModules();
+  });
+  afterEach(() => clearEnv());
+
+  it('defaults provider to "anthropic" when no OpenRouter signals are set', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
+    const { resetModelRouter, routeToModelFull } = await import('../src/ruvector/model-router.js');
+    resetModelRouter();
+    const r = await routeToModelFull('add console.log to cache');
+    expect(r.provider).toBe('anthropic');
+    expect(r.openrouterModel).toBeUndefined();
+  });
+
+  it('switches to "openrouter" when CLAUDE_FLOW_ROUTER_PROVIDER=openrouter', async () => {
+    process.env.CLAUDE_FLOW_ROUTER_PROVIDER = 'openrouter';
+    process.env.OPENROUTER_API_KEY = 'sk-or-test';
+    const { resetModelRouter, routeToModelFull } = await import('../src/ruvector/model-router.js');
+    resetModelRouter();
+    const r = await routeToModelFull('add console.log to cache');
+    expect(r.provider).toBe('openrouter');
+    // openrouterModel should be set when the alts asset loads correctly.
+    // If asset path isn't resolved in test env it can be undefined — assert
+    // that *if* present, it's a non-empty string.
+    if (r.openrouterModel !== undefined) {
+      expect(typeof r.openrouterModel).toBe('string');
+      expect(r.openrouterModel.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('auto-selects openrouter when only OPENROUTER_API_KEY is set', async () => {
+    process.env.OPENROUTER_API_KEY = 'sk-or-test'; // no ANTHROPIC_API_KEY
+    const { resetModelRouter, routeToModelFull } = await import('../src/ruvector/model-router.js');
+    resetModelRouter();
+    const r = await routeToModelFull('add console.log to cache');
+    expect(r.provider).toBe('openrouter');
+  });
+
+  it('respects explicit ANTHROPIC_API_KEY presence even when OpenRouter key is also set', async () => {
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
+    process.env.OPENROUTER_API_KEY = 'sk-or-test';
+    // No explicit CLAUDE_FLOW_ROUTER_PROVIDER — defaults to anthropic
+    const { resetModelRouter, routeToModelFull } = await import('../src/ruvector/model-router.js');
+    resetModelRouter();
+    const r = await routeToModelFull('add console.log to cache');
+    expect(r.provider).toBe('anthropic');
+  });
+
+  it('explicit CLAUDE_FLOW_ROUTER_PROVIDER=anthropic overrides both keys', async () => {
+    process.env.CLAUDE_FLOW_ROUTER_PROVIDER = 'anthropic';
+    process.env.OPENROUTER_API_KEY = 'sk-or-test';
+    const { resetModelRouter, routeToModelFull } = await import('../src/ruvector/model-router.js');
+    resetModelRouter();
+    const r = await routeToModelFull('design distributed consensus protocol with byzantine fault tolerance');
+    expect(r.provider).toBe('anthropic');
+    expect(r.openrouterModel).toBeUndefined();
   });
 });

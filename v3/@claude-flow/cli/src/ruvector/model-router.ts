@@ -56,6 +56,64 @@ function loadTrajectoryRecorder(): Promise<typeof import('./router-trajectory.js
   return _trajectoryMod;
 }
 
+// ----------------------------------------------------------------------------
+// ADR-148 phase 2 — per-tier OpenRouter alternates. Loaded once per process
+// from `assets/model-router/openrouter-alts.json` (override path via env).
+// ----------------------------------------------------------------------------
+interface OpenRouterAlts {
+  tiers: Partial<Record<string, {
+    anthropic_default: string;
+    openrouter_alt: string;
+    cost_per_m_tok_in: number;
+    cost_per_m_tok_out: number;
+    rationale?: string;
+  }>>;
+}
+let _altsCache: OpenRouterAlts | null = null;
+let _altsProbeDone = false;
+function loadOpenRouterAlts(): OpenRouterAlts | null {
+  if (_altsProbeDone) return _altsCache;
+  _altsProbeDone = true;
+  try {
+    // Probe candidate paths: explicit env override, then asset locations
+    // relative to this file (src dev) and the dist build.
+    const explicit = process.env.CLAUDE_FLOW_ROUTER_OPENROUTER_ALTS;
+    const candidates: string[] = [];
+    if (explicit) candidates.push(explicit);
+    // Probe asset dirs without using import.meta.url so this stays compatible
+    // with both CJS and ESM consumers of the compiled .js.
+    candidates.push(join(process.cwd(), 'v3', '@claude-flow', 'cli', 'assets', 'model-router', 'openrouter-alts.json'));
+    candidates.push(join(process.cwd(), 'assets', 'model-router', 'openrouter-alts.json'));
+    for (const p of candidates) {
+      if (existsSync(p)) {
+        _altsCache = JSON.parse(readFileSync(p, 'utf8')) as OpenRouterAlts;
+        return _altsCache;
+      }
+    }
+  } catch {
+    // Silent — alts are optional.
+  }
+  return null;
+}
+
+/** Return the resolved provider + OpenRouter model for the picked tier. */
+function resolveExecutionProvider(model: ClaudeModel): { provider: 'anthropic' | 'openrouter'; openrouterModel?: string } {
+  const explicit = process.env.CLAUDE_FLOW_ROUTER_PROVIDER?.toLowerCase();
+  // Default: anthropic unless explicitly set to openrouter, or OPENROUTER_API_KEY
+  // is the only credential present (matches agent-execute-core's selection).
+  const hasOpenRouter = !!process.env.OPENROUTER_API_KEY;
+  const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;
+  const wantOR =
+    explicit === 'openrouter' ||
+    (!hasAnthropic && hasOpenRouter && explicit !== 'anthropic');
+  if (!wantOR) return { provider: 'anthropic' };
+  const alts = loadOpenRouterAlts();
+  if (!alts) return { provider: 'openrouter' }; // OR provider but no alt slug
+  const entry = alts.tiers[model];
+  if (!entry?.openrouter_alt) return { provider: 'openrouter' };
+  return { provider: 'openrouter', openrouterModel: entry.openrouter_alt };
+}
+
 // ============================================================================
 // Types & Constants
 // ============================================================================
@@ -178,6 +236,20 @@ export interface ModelRoutingResult {
    * distinct observable surfaces.
    */
   neuralBackend?: 'metaharness-knn' | 'metaharness-krr' | 'fastgrnn';
+  /**
+   * Execution provider hint (ADR-148 phase 2). 'anthropic' = default
+   * Anthropic API path (MODEL_MAP). 'openrouter' = call through
+   * OpenRouter using `openrouterModel`. Resolved per-call from
+   * `CLAUDE_FLOW_ROUTER_PROVIDER` / `OPENROUTER_API_KEY`.
+   */
+  provider?: 'anthropic' | 'openrouter';
+  /**
+   * Concrete OpenRouter model slug for this tier when `provider==='openrouter'`,
+   * loaded from `assets/model-router/openrouter-alts.json` (overridable via
+   * `CLAUDE_FLOW_ROUTER_OPENROUTER_ALTS=<path>`). Downstream consumers can
+   * use this to override the default MODEL_MAP-derived Anthropic slug.
+   */
+  openrouterModel?: string;
 }
 
 /**
@@ -551,6 +623,11 @@ export class ModelRouter {
 
     const inferenceTimeUs = (performance.now() - startTime) * 1000;
 
+    // ADR-148 phase 2 — resolve OpenRouter alt for the picked tier when the
+    // execution provider is OpenRouter. Free of side effects on the bandit;
+    // purely advisory metadata for downstream agent-execute-core.
+    const exec = resolveExecutionProvider(model);
+
     // Build result
     const result: ModelRoutingResult = {
       model,
@@ -566,6 +643,8 @@ export class ModelRouter {
       costMultiplier: MODEL_CAPABILITIES[model].costMultiplier,
       routedBy,
       ...(neuralBackend ? { neuralBackend } : {}),
+      provider: exec.provider,
+      ...(exec.openrouterModel ? { openrouterModel: exec.openrouterModel } : {}),
     };
 
     // Track decision (in-memory bandit state)
@@ -579,6 +658,8 @@ export class ModelRouter {
           task, embedding, complexity: complexity.score,
           model, confidence, uncertainty, routedBy,
           neuralBackend, abPair,
+          provider: exec.provider,
+          openrouterModel: exec.openrouterModel,
         });
       } catch {
         // Silent — trajectory recording must never break routing.
