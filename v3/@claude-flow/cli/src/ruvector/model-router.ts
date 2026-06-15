@@ -416,7 +416,7 @@ function sampleGamma(alpha: number): number {
  * X ~ Gamma(α), Y ~ Gamma(β). Returns the mean for degenerate α+β=0
  * (shouldn't happen in practice but defensive).
  */
-function sampleBeta(alpha: number, beta: number): number {
+export function sampleBeta(alpha: number, beta: number): number {
   if (alpha <= 0 || beta <= 0) return 0.5;
   const x = sampleGamma(alpha);
   const y = sampleGamma(beta);
@@ -1398,3 +1398,23 @@ export function recordModelOutcomeByModelId(
   const router = getModelRouter();
   router.recordOutcomeByModelId(task, modelId, outcome);
 }
+
+/**
+ * ADR-149 iter 14 — read-only access to the per-modelId Beta priors. The
+ * neural-router consumes this to apply per-model Thompson sampling on top
+ * of its predicted-quality vector when CLAUDE_FLOW_ROUTER_BANDIT_PER_MODEL=1.
+ * Returns the legacy bucketed priors (`priorsById[bucket][modelId]`) when
+ * present, else null.
+ */
+export function getModelRouterPriorsById(): Record<ComplexityBucket, Record<string, BetaPrior>> | null {
+  const router = getModelRouter();
+  const stats = router.getStats();
+  return stats.priorsById ?? null;
+}
+
+/**
+ * Re-export the complexity-bucket helper so the neural-router (which gets
+ * the task text via the route() call) can map a complexity score to the
+ * matching bandit bucket.
+ */
+export { complexityBucket };

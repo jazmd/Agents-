@@ -431,7 +431,51 @@ export async function tryCostOptimalRoute(embedding: number[]): Promise<NeuralRo
     // not ClaudeModel tier names. `tierLabelForModelId` derives the
     // back-compat tier; `modelId` carries the concrete pick.
     if (!backend.router) return null;
-    const all = backend.router.predictAll(embedding);
+    const allRaw = backend.router.predictAll(embedding);
+
+    // ADR-149 iter 14 — per-modelId Thompson sampling. When
+    // CLAUDE_FLOW_ROUTER_BANDIT_PER_MODEL=1, perturb each candidate's
+    // predicted quality by a Beta sample from its persisted per-modelId
+    // prior. Lets the bandit learn "Ling outperforms Haiku-4.5 within
+    // the cheap tier" without changing the neural backend's prediction.
+    //
+    // Density guard: only apply the perturbation when (α+β) > 4 for that
+    // modelId (≥2 outcomes accumulated; cold-start Beta(1,1) gives α+β=2).
+    // Otherwise the bandit's signal is uninformative noise and we'd
+    // sabotage the well-trained neural prediction.
+    let all = allRaw;
+    if (process.env.CLAUDE_FLOW_ROUTER_BANDIT_PER_MODEL === '1') {
+      try {
+        const { getModelRouterPriorsById, sampleBeta } = await import('./model-router.js');
+        const priorsById = getModelRouterPriorsById();
+        // We don't have task text here, so we can't compute the exact
+        // complexity bucket the outcomes accumulated in. Aggregate ACROSS
+        // all three buckets for the modelId — that's a marginal prior
+        // ("is this model good in general?"). A future iter passes the
+        // bucket through tryCostOptimalRoute for bucket-aware adjustment.
+        if (priorsById) {
+          all = allRaw.map(a => {
+            let alpha = 1, beta = 1, found = false;
+            for (const b of ['low', 'med', 'high'] as const) {
+              const p = priorsById[b]?.[a.id];
+              if (p) {
+                alpha += p.alpha - 1;   // subtract the Beta(1,1) base from each bucket
+                beta += p.beta - 1;
+                found = true;
+              }
+            }
+            if (!found) return a;
+            const samples = alpha + beta;
+            if (samples <= 4) return a; // density guard: need ≥2 effective outcomes
+            const banditScore = sampleBeta(alpha, beta);
+            // Blend: 50% predicted quality, 50% bandit-sampled belief.
+            // Keeps cold-start neural prediction dominant; once outcomes
+            // accumulate the bandit's belief gets equal weight.
+            return { ...a, predictedQuality: 0.5 * a.predictedQuality + 0.5 * banditScore };
+          });
+        }
+      } catch { /* best-effort */ }
+    }
 
     // ADR-149 iter 12 — latency-aware filtering. When CLAUDE_FLOW_ROUTER_
     // LATENCY_BUDGET_MS is set, drop candidates whose measured latency
@@ -439,6 +483,16 @@ export async function tryCostOptimalRoute(embedding: number[]): Promise<NeuralRo
     // alternatives stay on the result for observability — only the chosen
     // `modelId` is constrained.
     let main = backend.router.route(embedding);
+    // Re-derive `main` from the post-Thompson `all` list when per-modelId
+    // is on (otherwise the bandit adjustment is invisible to the selector).
+    if (process.env.CLAUDE_FLOW_ROUTER_BANDIT_PER_MODEL === '1') {
+      const clearing = all.filter(a => a.predictedQuality >= cfg.qualityBar)
+        .sort((a, b) => a.costPerMTok - b.costPerMTok);
+      const pick = clearing[0] ?? [...all].sort((a, b) => b.predictedQuality - a.predictedQuality)[0];
+      if (pick) {
+        main = { id: pick.id, predictedQuality: pick.predictedQuality, costPerMTok: pick.costPerMTok, metBar: pick.predictedQuality >= cfg.qualityBar };
+      }
+    }
     if (cfg.latencyBudgetMs > 0) {
       const latency = await loadLatencyMap();
       const eligible = all.filter(a => {

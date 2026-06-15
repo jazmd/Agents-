@@ -45,6 +45,7 @@ const ENV_KEYS = [
   'CLAUDE_FLOW_ROUTER_PROVIDER',
   'CLAUDE_FLOW_ROUTER_OPENROUTER_ALTS',
   'CLAUDE_FLOW_ROUTER_LATENCY_BUDGET_MS',
+  'CLAUDE_FLOW_ROUTER_BANDIT_PER_MODEL',
   'OPENROUTER_API_KEY',
   'ANTHROPIC_API_KEY',
 ];
@@ -323,6 +324,40 @@ describe('ModelRouter integration (ADR-148)', () => {
     const allIds = first.alternatives.map(a => a.modelId);
     const exhausted = await nextCostOptimalAlternative(e, allIds);
     expect(exhausted).toBeNull();
+  });
+
+  it('per-modelId Thompson is hooked when gated on (ADR-149 iter 14)', async () => {
+    // Smoke: with the gate on AND priorsById accumulated, the selector
+    // should still return a valid result. We don't assert a specific
+    // pick change because that depends on whether the bandit signal
+    // disagrees with the neural prediction — a real production-data scenario.
+    const { resetModelRouter, recordModelOutcomeByModelId, getModelRouterPriorsById } = await import('../src/ruvector/model-router.js');
+    resetModelRouter();
+    // Drive ≥5 outcomes for a candidate so the density guard passes.
+    const probeTask = 'Implement edge case for cache';
+    for (let i = 0; i < 8; i++) {
+      recordModelOutcomeByModelId(probeTask + ' ' + i, 'inclusionai/ling-2.6-flash', 'success');
+    }
+    const priorsById = getModelRouterPriorsById();
+    expect(priorsById).not.toBeNull();
+    // Marginal across all buckets for this id should reflect the accumulated alpha
+    let totalAlpha = 0; let totalBeta = 0;
+    for (const b of ['low','med','high'] as const) {
+      const p = priorsById?.[b]?.['inclusionai/ling-2.6-flash'];
+      if (p) { totalAlpha += p.alpha - 1; totalBeta += p.beta - 1; }
+    }
+    expect(totalAlpha).toBeGreaterThan(0); // ≥1 outcome accumulated
+
+    // Verify the selector path runs with the gate on
+    process.env.CLAUDE_FLOW_ROUTER_NEURAL = '1';
+    process.env.CLAUDE_FLOW_ROUTER_BANDIT_PER_MODEL = '1';
+    __resetNeuralRouterForTests();
+    const { tryCostOptimalRoute } = await import('../src/ruvector/neural-router.js');
+    const e = new Array(384).fill(0); e[0] = 0.3;
+    const r = await tryCostOptimalRoute(e);
+    if (!r) return; // dep absent
+    expect(typeof r.modelId).toBe('string');
+    expect(r.modelId.length).toBeGreaterThan(0);
   });
 
   it('latency budget filters slow candidates from the pick (ADR-149 iter 12)', async () => {
