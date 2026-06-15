@@ -501,6 +501,28 @@ export async function executeAgentTask(input: AgentExecuteInput): Promise<AgentE
   });
 
   agent.status = 'idle';
+
+  // ADR-149 — close the bandit feedback loop. `recordModelOutcome` updates
+  // the Beta(α,β) prior for the agent's tier so the Thompson sampler learns
+  // from production traffic instead of staying frozen at install-day priors.
+  // This is best-effort: any error here must NOT break the agent execution.
+  // For now, "success" = the model returned a response without an API error.
+  // A finer-grained signal (user-accepted output / regression-detected) is a
+  // follow-up; this commit closes the bandit's basic learning loop.
+  try {
+    const { recordModelOutcome } = await import('../ruvector/model-router.js');
+    // Bandit priors are keyed on the 3 canonical tiers (haiku/sonnet/opus/inherit);
+    // collapse opus-4.7 → opus before recording so the bandit's per-tier Beta
+    // updates correctly. ADR-149 phase-3 will move priors to per-modelId,
+    // at which point this map is replaced by agent.modelId.
+    const tier: 'haiku' | 'sonnet' | 'opus' | 'inherit' =
+      agent.model === 'opus-4.7' ? 'opus' :
+      (agent.model as 'haiku' | 'sonnet' | 'opus' | 'inherit' | undefined) ?? 'sonnet';
+    recordModelOutcome(input.prompt, tier, result.success ? 'success' : 'failure');
+  } catch {
+    // Silent — bandit feedback must never block routing.
+  }
+
   if (result.success) {
     const out: AgentExecuteResult = {
       success: true,
