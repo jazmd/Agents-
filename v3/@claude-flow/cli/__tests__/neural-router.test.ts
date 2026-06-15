@@ -295,6 +295,35 @@ describe('ModelRouter integration (ADR-148)', () => {
     expect(typeof statsAfter.totalDecisions).toBe('number');
   });
 
+  it('nextCostOptimalAlternative returns a different model when the picked one is excluded (ADR-149 iter 7)', async () => {
+    process.env.CLAUDE_FLOW_ROUTER_NEURAL = '1';
+    __resetNeuralRouterForTests();
+    const { nextCostOptimalAlternative, tryCostOptimalRoute } = await import('../src/ruvector/neural-router.js');
+    const e = new Array(384).fill(0);
+    const first = await tryCostOptimalRoute(e);
+    if (!first) return; // dep absent in CI
+    expect(typeof first.modelId).toBe('string');
+    const alt = await nextCostOptimalAlternative(e, [first.modelId]);
+    if (!alt) return; // single-candidate registry — unusual but possible
+    expect(typeof alt.modelId).toBe('string');
+    expect(alt.modelId).not.toBe(first.modelId);
+    // alt.alternatives must NOT include the excluded model id
+    expect(alt.alternatives.find(a => a.modelId === first.modelId)).toBeUndefined();
+  });
+
+  it('nextCostOptimalAlternative returns null when every candidate is excluded (ADR-149 iter 7)', async () => {
+    process.env.CLAUDE_FLOW_ROUTER_NEURAL = '1';
+    __resetNeuralRouterForTests();
+    const { nextCostOptimalAlternative, tryCostOptimalRoute } = await import('../src/ruvector/neural-router.js');
+    const e = new Array(384).fill(0);
+    const first = await tryCostOptimalRoute(e);
+    if (!first) return; // dep absent in CI
+    // Exclude every candidate the router knows about
+    const allIds = first.alternatives.map(a => a.modelId);
+    const exhausted = await nextCostOptimalAlternative(e, allIds);
+    expect(exhausted).toBeNull();
+  });
+
   it('recordModelOutcomeByModelId writes shadow per-modelId state (ADR-149 iter 6)', async () => {
     const { resetModelRouter, recordModelOutcomeByModelId, getModelRouterStats } = await import('../src/ruvector/model-router.js');
     resetModelRouter();

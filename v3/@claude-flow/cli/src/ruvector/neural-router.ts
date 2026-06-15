@@ -418,6 +418,67 @@ export async function neuralRouterStatus(): Promise<{ enabled: boolean; availabl
 }
 
 /**
+ * ADR-149 iter 7 — fallback selector for retry-on-failure. Returns the
+ * cheapest candidate predicted to clear the quality bar (or the best-
+ * predicted if none do) that is NOT in `excludeModelIds`. Used by
+ * `executeAgentTask` to retry with a different model after a 429/5xx.
+ *
+ * Returns `null` when:
+ *   - the gate is closed (mirrors tryCostOptimalRoute)
+ *   - the embedding is missing or empty
+ *   - the backend isn't loadable
+ *   - every candidate is excluded (all retries exhausted)
+ *
+ * Selection is per-candidate via predictAll, then filter by exclude,
+ * then cheapest-clearing-bar (falling back to best-predicted).
+ */
+export async function nextCostOptimalAlternative(
+  embedding: number[],
+  excludeModelIds: Iterable<string>
+): Promise<NeuralRouteResult | null> {
+  const cfg = getConfig();
+  if (!cfg.enabled) return null;
+  if (!Array.isArray(embedding) || embedding.length === 0) return null;
+  const backend = await getBackend();
+  if (!backend.available || backend.router === null || backend.routedBy === null) return null;
+
+  const exclude = new Set<string>(excludeModelIds);
+  const t0 = Number(process.hrtime.bigint() / 1000n);
+
+  // Pure-TS path only — fallback retries are too rare to be worth threading
+  // through the FastGRNN candidate-embedding rebuild dance.
+  try {
+    const all = backend.router.predictAll(embedding);
+    const remaining = all.filter(a => !exclude.has(a.id));
+    if (remaining.length === 0) return null;
+
+    // Cheapest predicted to clear qualityBar, else best-predicted among
+    // remaining. Mirrors @metaharness/router's qualityBar semantics.
+    const clearing = remaining.filter(a => a.predictedQuality >= cfg.qualityBar)
+      .sort((a, b) => a.costPerMTok - b.costPerMTok);
+    const pick = clearing[0] ?? [...remaining].sort((a, b) => b.predictedQuality - a.predictedQuality)[0];
+    const t1 = Number(process.hrtime.bigint() / 1000n);
+
+    return {
+      model: tierLabelForModelId(pick.id),
+      modelId: pick.id,
+      predictedQuality: pick.predictedQuality,
+      metBar: pick.predictedQuality >= cfg.qualityBar,
+      alternatives: remaining.map(a => ({
+        model: tierLabelForModelId(a.id),
+        modelId: a.id,
+        predictedQuality: a.predictedQuality,
+        costPerMTok: a.costPerMTok,
+      })),
+      routedBy: backend.routedBy,
+      inferenceTimeUs: t1 - t0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Test seam — reset module-level caches so unit tests can simulate cold init.
  * Not exported from the package's barrel.
  */

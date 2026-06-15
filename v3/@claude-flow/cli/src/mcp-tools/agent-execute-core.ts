@@ -463,6 +463,13 @@ export interface AgentExecuteResult {
   durationMs?: number;
   error?: string;
   remediation?: string;
+  /**
+   * ADR-149 iter 7 — present when the request was retried after a 429/5xx
+   * via `nextCostOptimalAlternative`. Each entry records a model that
+   * was tried and failed, in attempt order. The final `model` field is
+   * the one that produced the surfaced result (success or final error).
+   */
+  fallbackHistory?: Array<{ modelId: string; error: string }>;
 }
 
 export async function executeAgentTask(input: AgentExecuteInput): Promise<AgentExecuteResult> {
@@ -486,12 +493,8 @@ export async function executeAgentTask(input: AgentExecuteInput): Promise<AgentE
   const startedAt = Date.now();
 
   // #2042 — delegate to callAnthropicMessages so the v3 provider router
-  // (Anthropic / Ollama / OpenRouter) governs which backend is hit. The
-  // previous inline `fetch('https://api.anthropic.com/...')` bypassed
-  // the router entirely and forced an ANTHROPIC_API_KEY error for every
-  // non-Anthropic deployment. Reporter (@ummcke00) had OpenRouter
-  // configured but the bypass made the agent unreachable.
-  const result = await callAnthropicMessages({
+  // (Anthropic / Ollama / OpenRouter) governs which backend is hit.
+  let result = await callAnthropicMessages({
     model: anthropicModel,
     prompt: input.prompt,
     systemPrompt,
@@ -499,6 +502,53 @@ export async function executeAgentTask(input: AgentExecuteInput): Promise<AgentE
     temperature: input.temperature,
     timeoutMs: input.timeoutMs,
   });
+
+  // ADR-149 iter 7 — fallback chain on retryable failures (429, 5xx,
+  // timeout). When the cost-optimal neural backend picked a specific
+  // model id and that model fails for a transient reason, fall back to
+  // the next-cheapest candidate that clears the quality bar. Budget is
+  // bounded by CLAUDE_FLOW_ROUTER_FALLBACK_MAX_RETRIES (default 1) so
+  // upstream outages don't cause retry storms.
+  const fallbackBudget = Math.max(0, parseInt(process.env.CLAUDE_FLOW_ROUTER_FALLBACK_MAX_RETRIES ?? '1', 10) || 1);
+  const fallbackHistory: Array<{ modelId: string; error: string }> = [];
+  if (!result.success && agent.modelId && fallbackBudget > 0) {
+    const isRetryable = /\b(429|500|502|503|504|timeout|ECONNRESET|ETIMEDOUT)\b/i.test(result.error ?? '');
+    if (isRetryable) {
+      try {
+        const { nextCostOptimalAlternative } = await import('../ruvector/neural-router.js');
+        // Lazy ONNX embedder — same approach the dispatcher uses. The
+        // pipeline is cached by @xenova/transformers across module loads,
+        // so this isn't a per-call cost in steady state.
+        const tx = await (async () => { try { return await import('@xenova/transformers'); } catch { return null; } })();
+        if (tx) {
+          const extractor = await tx.pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', { quantized: true });
+          const embed = async (t: string) => Array.from(((await extractor(t, { pooling: 'mean', normalize: true })) as { data: Float32Array }).data);
+          const embedding = await embed(input.prompt);
+          const excludeIds: string[] = [agent.modelId];
+          for (let attempt = 0; attempt < fallbackBudget && !result.success; attempt++) {
+            fallbackHistory.push({ modelId: excludeIds[excludeIds.length - 1], error: result.error ?? '' });
+            const alt = await nextCostOptimalAlternative(embedding, excludeIds);
+            if (!alt || !alt.modelId) break;
+            excludeIds.push(alt.modelId);
+            const altResult = await callAnthropicMessages({
+              model: alt.modelId,
+              prompt: input.prompt,
+              systemPrompt,
+              maxTokens: input.maxTokens,
+              temperature: input.temperature,
+              timeoutMs: input.timeoutMs,
+            });
+            // Record the model that ACTUALLY answered (or errored). On success,
+            // update agent.modelId so downstream observers see the retry winner.
+            agent.modelId = alt.modelId;
+            result = altResult;
+          }
+        }
+      } catch {
+        // Fallback chain is best-effort — preserve the original error result.
+      }
+    }
+  }
 
   agent.status = 'idle';
 
@@ -540,6 +590,7 @@ export async function executeAgentTask(input: AgentExecuteInput): Promise<AgentE
       output: result.output,
       usage: result.usage,
       durationMs: result.durationMs ?? Date.now() - startedAt,
+      ...(fallbackHistory.length > 0 ? { fallbackHistory } : {}),
     };
     agent.lastResult = out as unknown as Record<string, unknown>;
     saveAgentStore(store);
@@ -556,6 +607,7 @@ export async function executeAgentTask(input: AgentExecuteInput): Promise<AgentE
     model: anthropicModel,
     error: result.error || 'agent_execute failed',
     durationMs: result.durationMs ?? Date.now() - startedAt,
+    ...(fallbackHistory.length > 0 ? { fallbackHistory } : {}),
     ...(noProvider && {
       remediation:
         'Set one of ANTHROPIC_API_KEY, OPENROUTER_API_KEY (+ optional OPENROUTER_BASE_URL), or OLLAMA_API_KEY. ' +
