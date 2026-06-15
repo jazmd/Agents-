@@ -332,11 +332,18 @@ async function main() {
     const mean = sorted.length ? sorted.reduce((s, x) => s + x, 0) / sorted.length : 0;
     const p50 = sorted.length ? sorted[Math.floor(sorted.length * 0.5)] : 0;
     const p95 = sorted.length ? sorted[Math.floor(sorted.length * 0.95)] : 0;
+    // Sample std-dev of per-call latency; useful when --repeat > 1 to see how
+    // stable a model's latency is across redundant runs.
+    let stdev = 0;
+    if (sorted.length > 1) {
+      const variance = sorted.reduce((s, x) => s + (x - mean) ** 2, 0) / (sorted.length - 1);
+      stdev = Math.sqrt(variance);
+    }
     return {
       model: r.model, family: r.family,
       passRate: r.total ? r.passes / r.total : 0,
       passes: r.passes, total: r.total,
-      latency: { mean, p50, p95 },
+      latency: { mean, p50, p95, stdev },
       usdCost: r.usdCost,
       promptTokens: r.promptTokens, completionTokens: r.completionTokens,
       errorCount: r.errors.length,
@@ -347,11 +354,15 @@ async function main() {
   // Sort by pass rate desc, then by cost asc — Pareto-friendly view
   rows.sort((a, b) => b.passRate - a.passRate || a.usdCost - b.usdCost);
 
-  console.log(`| Model | Family | Pass | Latency mean | p95 | $/run | $/1k passes |`);
+  const showStdev = ARGS.repeat > 1;
+  console.log(`| Model | Family | Pass | Latency mean${showStdev ? ' ± σ' : ''} | p95 | $/run | $/1k passes |`);
   console.log(`|---|---|---|---|---|---|---|`);
   for (const r of rows) {
     const dollarPer1kPasses = r.passes > 0 ? (r.usdCost / r.passes) * 1000 : Infinity;
-    console.log(`| \`${r.model}\` | ${r.family} | **${r.passes}/${r.total} = ${(r.passRate * 100).toFixed(1)}%** | ${r.latency.mean.toFixed(0)} ms | ${r.latency.p95.toFixed(0)} ms | $${r.usdCost.toFixed(5)} | ${dollarPer1kPasses === Infinity ? '∞' : '$' + dollarPer1kPasses.toFixed(4)} |`);
+    const lat = showStdev
+      ? `${r.latency.mean.toFixed(0)} ± ${r.latency.stdev.toFixed(0)} ms`
+      : `${r.latency.mean.toFixed(0)} ms`;
+    console.log(`| \`${r.model}\` | ${r.family} | **${r.passes}/${r.total} = ${(r.passRate * 100).toFixed(1)}%** | ${lat} | ${r.latency.p95.toFixed(0)} ms | $${r.usdCost.toFixed(5)} | ${dollarPer1kPasses === Infinity ? '∞' : '$' + dollarPer1kPasses.toFixed(4)} |`);
   }
   console.log('');
   console.log(`Total spend: $${rows.reduce((s, r) => s + r.usdCost, 0).toFixed(5)}`);
