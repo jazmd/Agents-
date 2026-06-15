@@ -478,9 +478,34 @@ export async function executeAgentTask(input: AgentExecuteInput): Promise<AgentE
   if (!agent) return { success: false, agentId: input.agentId, error: 'Agent not found' };
   if (agent.status === 'terminated') return { success: false, agentId: input.agentId, error: 'Agent has been terminated' };
 
-  // #2232 — Single source of truth so literal claude-* ids pass through
-  // instead of silently collapsing to Sonnet via the old MODEL_MAP[]||DEFAULT fold.
-  const anthropicModel = resolveAnthropicModel(agent.model || 'sonnet');
+  // ADR-149 iter 13 — first-call dispatch prefers `agent.modelId` (the
+  // cost-optimal pick from the neural backend) over `MODEL_MAP[agent.model]`
+  // when present. Before this fix the first attempt always used the tier
+  // mapping; only the iter-7 fallback chain used modelId on retry, which
+  // meant the cost-optimal pick was wasted unless the first call failed
+  // with a 429/5xx.
+  //
+  // Rules:
+  //   - agent.modelId is set AND it's a non-Anthropic slug (e.g.
+  //     'inclusionai/ling-2.6-flash', 'openai/gpt-4.1') → dispatch
+  //     directly via that id. callAnthropicMessages forwards non-Anthropic
+  //     ids through OpenRouter (#2042), so this gets us the cost-optimal
+  //     model on attempt 1.
+  //   - agent.modelId starts with 'anthropic/' → strip the prefix, use the
+  //     bare Anthropic id (e.g. 'anthropic/claude-haiku-4.5' → 'claude-haiku-4.5').
+  //   - agent.modelId is unset (no neural backend fired) → fall back to the
+  //     legacy tier-mapped MODEL_MAP path. Existing behaviour preserved.
+  let firstCallModel: string;
+  if (agent.modelId) {
+    firstCallModel = agent.modelId.startsWith('anthropic/')
+      ? agent.modelId.slice('anthropic/'.length)
+      : agent.modelId;
+  } else {
+    firstCallModel = resolveAnthropicModel(agent.model || 'sonnet');
+  }
+  // Kept for legacy error-path remediation message + final-result `model` field
+  // (returned when the request fully fails with no successful retry).
+  const anthropicModel = firstCallModel;
   const systemPrompt = input.systemPrompt ||
     `You are a ${agent.agentType} agent operating as part of a Ruflo swarm. ` +
     `Agent ID: ${input.agentId}. Domain: ${agent.domain ?? 'general'}. ` +
