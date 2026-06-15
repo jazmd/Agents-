@@ -252,7 +252,13 @@ describe('ModelRouter integration (ADR-148)', () => {
     const e = makeEmbedding(3);
     e[0] = 0.85; e[1] = 0.0;
     const result = await routeToModelFull('add console.log to cache', e);
-    // If @metaharness/router is absent in CI, we fall back gracefully.
-    expect(['metaharness-knn', 'metaharness-krr', 'fastgrnn', 'bandit-fallback', 'heuristic']).toContain(result.routedBy);
+    // ADR-148 hybrid math: `routedBy` is the decision mechanism, not the
+    // backend identity. When the neural backend returns a prediction, the
+    // bandit posterior is blended with the neural prior and the mechanism
+    // is reported as 'hybrid'; the neural backend ID is on `neuralBackend`.
+    expect(['hybrid', 'bandit-fallback', 'heuristic']).toContain(result.routedBy);
+    if (result.routedBy === 'hybrid') {
+      expect(['metaharness-knn', 'metaharness-krr', 'fastgrnn']).toContain(result.neuralBackend);
+    }
   });
 });

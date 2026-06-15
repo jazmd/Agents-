@@ -162,13 +162,22 @@ export interface ModelRoutingResult {
   /** Estimated cost multiplier */
   costMultiplier: number;
   /**
-   * Which backend produced this decision (ADR-148 / ADR-074 — observable, not
-   * inferred). Always one of:
-   *   'metaharness-knn' | 'metaharness-krr' | 'fastgrnn'  — neural backends
-   *   'bandit-fallback'                                    — neural enabled, declined
-   *   'heuristic'                                          — neural disabled (default)
+   * Which decision mechanism produced this result (ADR-148 / ADR-074 —
+   * observable, not inferred). Always one of:
+   *   'heuristic'        — neural disabled (default). Pure Thompson bandit.
+   *   'bandit-fallback'  — neural enabled but returned no decision (load fail).
+   *   'hybrid'           — neural enabled AND returned predictions; the
+   *                        bandit's Beta(α,β) priors were perturbed by the
+   *                        neural's predicted quality before sampling.
    */
-  routedBy: 'metaharness-knn' | 'metaharness-krr' | 'fastgrnn' | 'bandit-fallback' | 'heuristic';
+  routedBy: 'hybrid' | 'bandit-fallback' | 'heuristic';
+  /**
+   * The neural backend that contributed to a `hybrid` decision, if any.
+   * Absent on `heuristic` and `bandit-fallback`. Tracked separately from
+   * `routedBy` so the decision mechanism and the model identity remain
+   * distinct observable surfaces.
+   */
+  neuralBackend?: 'metaharness-knn' | 'metaharness-krr' | 'fastgrnn';
 }
 
 /**
@@ -412,6 +421,23 @@ export class ModelRouter {
     opus: 0,
     inherit: 0,
   };
+  /**
+   * ADR-148 — in-memory counters surfaced via `getStats()` and read by the
+   * `hooks_intelligence_stats` MCP tool. Process-local, not persisted (these
+   * are operational metrics, not authoritative state — see ADR-074/086).
+   */
+  private routedByCounts: Record<ModelRoutingResult['routedBy'], number> = {
+    heuristic: 0,
+    'bandit-fallback': 0,
+    hybrid: 0,
+  };
+  private neuralBackendCounts: Record<NonNullable<ModelRoutingResult['neuralBackend']>, number> = {
+    'metaharness-knn': 0,
+    'metaharness-krr': 0,
+    fastgrnn: 0,
+  };
+  private abDisagreements = 0;
+  private abComparisons = 0;
 
   constructor(config: Partial<ModelRouterConfig> = {}) {
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -438,62 +464,90 @@ export class ModelRouter {
 
     // ADR-148 — optional neural cost-optimal path (gated, opt-in).
     //
-    // We use the neural pick whenever the backend returns one — the relative
-    // ranking it produces is its best guess at the cost-optimal model, and
-    // substituting the cold bandit when the neural's absolute confidence
-    // happens to be modest is strictly worse. `metBar` becomes informational
-    // (the caller can read it via `confidence` ≥ qualityBar), not gating.
-    // `bandit-fallback` is reserved for the case where the neural path was
-    // enabled but returned no decision at all (artifact load failed, etc.).
-    let neuralPick:
-      | { model: ClaudeModel; confidence: number; uncertainty: number; routedBy: 'metaharness-knn' | 'metaharness-krr' | 'fastgrnn' }
-      | null = null;
+    // Hybrid math: we use the neural's per-candidate predicted quality as a
+    // weighted prior on the bandit's Beta(α,β) posterior, rather than
+    // overriding the bandit's pick. With weight=w (env-tunable, default 5)
+    // each candidate's Beta becomes Beta(α + q*w, β + (1-q)*w). Cold start
+    // → neural dominates (α+β ≈ 2 + w); many real outcomes → bandit
+    // dominates (α+β >> w). The persistent bandit state is unchanged.
+    //
+    // `bandit-fallback` is reserved for the case where neural was enabled
+    // but the backend returned no decision at all (artifact load failed,
+    // dim mismatch, etc.). In that case we route via pure bandit.
+    let neuralPrior: { qualities: Partial<Record<ClaudeModel, number>>; weight: number } | null = null;
+    let neuralBackend: ModelRoutingResult['neuralBackend'] | undefined = undefined;
     let neuralDeclined = false;
     if (embedding && embedding.length > 0 && process.env.CLAUDE_FLOW_ROUTER_NEURAL === '1') {
       try {
         const { tryCostOptimalRoute } = await loadNeuralRouter();
         const nr = await tryCostOptimalRoute(embedding);
         if (nr) {
-          neuralPick = {
-            model: nr.model,
-            confidence: nr.predictedQuality,
-            uncertainty: 1 - nr.predictedQuality,
-            routedBy: nr.routedBy,
-          };
+          // Build per-candidate quality map. We use RANK-based qualities
+          // rather than the backend's raw predictedQuality because k-NN/KRR
+          // backends commonly produce predictions in a narrow band (e.g.
+          // 0.92, 0.93, 0.94 for the bundled-seed KRR's three tiers). Feeding
+          // those tiny absolute differences into Beta(α + q*w, β + (1-q)*w)
+          // produces near-identical prior bumps and Beta sampling noise
+          // dominates — the neural signal gets lost. Rank-based qualities
+          // (best=1.0, second=0.5, third=0.2) give the neural's preferred
+          // candidate clear posterior weight while still leaving the
+          // unpreferred tiers with some prior mass so the bandit can learn
+          // out of it given enough outcomes.
+          const sorted = [...nr.alternatives].sort((a, b) => b.predictedQuality - a.predictedQuality);
+          // Defensive: if `model` isn't in alternatives, prepend it as the top.
+          if (!sorted.find(s => s.model === nr.model)) {
+            sorted.unshift({ model: nr.model, predictedQuality: nr.predictedQuality, costPerMTok: 0 });
+          }
+          const rankQ = [1.0, 0.5, 0.2];   // tunable triplet, default
+          const qualities: Partial<Record<ClaudeModel, number>> = {};
+          for (let i = 0; i < sorted.length && i < rankQ.length; i++) {
+            qualities[sorted[i].model] = rankQ[i];
+          }
+          const weight = parseFloat(process.env.CLAUDE_FLOW_ROUTER_NEURAL_WEIGHT ?? '5') || 5;
+          neuralPrior = { qualities, weight };
+          neuralBackend = nr.routedBy;
         } else {
-          // Neural was enabled but returned no decision at all — load failed,
-          // gate intercepted, embedding length mismatched corpus, etc.
           neuralDeclined = true;
         }
       } catch {
-        // Silent — neural path is best-effort; fall through to bandit.
+        // Silent — neural path is best-effort.
       }
     }
 
-    let model: ClaudeModel;
-    let confidence: number;
-    let uncertainty: number;
-    let routedBy: ModelRoutingResult['routedBy'];
-    let adjustedScores: Record<ClaudeModel, number>;
+    const scores = this.computeModelScores(complexity);
+    const adjustedScores = this.applyCircuitBreaker(scores);
 
-    if (neuralPick) {
-      model = neuralPick.model;
-      confidence = neuralPick.confidence;
-      uncertainty = neuralPick.uncertainty;
-      routedBy = neuralPick.routedBy;
-      // Build alternatives surface from the bandit's view (the neural backend
-      // already picked the best; bandit scores are still informative).
-      const scores = this.computeModelScores(complexity);
-      adjustedScores = this.applyCircuitBreaker(scores);
+    // A/B mode (CLAUDE_FLOW_ROUTER_AB=1): compute the pure-bandit pick
+    // alongside the hybrid pick so we can log disagreement. Both samples
+    // are drawn from the same Beta posteriors but with/without the neural
+    // prior bump — useful for measuring real lift before flipping defaults.
+    const abEnabled = process.env.CLAUDE_FLOW_ROUTER_AB === '1' && neuralPrior !== null;
+    let abPair: { bandit_pick: ClaudeModel; hybrid_pick: ClaudeModel; disagree: boolean } | undefined;
+    if (abEnabled) {
+      // Pre-compute the bandit-only pick. Single extra Thompson sample per
+      // call — independent draws are noisy but cheap (~3 Beta samples ≈
+      // <10 μs). For a per-call disagreement signal one draw is fine; over
+      // N decisions the rate stabilises.
+      const banditOnly = this.selectModel(adjustedScores, complexity.score, undefined);
+      const picked = this.selectModel(adjustedScores, complexity.score, neuralPrior ?? undefined);
+      abPair = {
+        bandit_pick: banditOnly.model,
+        hybrid_pick: picked.model,
+        disagree: banditOnly.model !== picked.model,
+      };
+      this.abComparisons++;
+      if (abPair.disagree) this.abDisagreements++;
+      var pickedForResult = picked;  // eslint-disable-line no-var
     } else {
-      const scores = this.computeModelScores(complexity);
-      adjustedScores = this.applyCircuitBreaker(scores);
-      const picked = this.selectModel(adjustedScores, complexity.score);
-      model = picked.model;
-      confidence = picked.confidence;
-      uncertainty = picked.uncertainty;
-      routedBy = neuralDeclined ? 'bandit-fallback' : 'heuristic';
+      var pickedForResult = this.selectModel(adjustedScores, complexity.score, neuralPrior ?? undefined); // eslint-disable-line no-var
     }
+
+    const model = pickedForResult.model;
+    const confidence = pickedForResult.confidence;
+    const uncertainty = pickedForResult.uncertainty;
+    const routedBy: ModelRoutingResult['routedBy'] = neuralPrior
+      ? 'hybrid'
+      : neuralDeclined ? 'bandit-fallback' : 'heuristic';
 
     const inferenceTimeUs = (performance.now() - startTime) * 1000;
 
@@ -511,6 +565,7 @@ export class ModelRouter {
       inferenceTimeUs,
       costMultiplier: MODEL_CAPABILITIES[model].costMultiplier,
       routedBy,
+      ...(neuralBackend ? { neuralBackend } : {}),
     };
 
     // Track decision (in-memory bandit state)
@@ -523,6 +578,7 @@ export class ModelRouter {
         recordDecision({
           task, embedding, complexity: complexity.score,
           model, confidence, uncertainty, routedBy,
+          neuralBackend, abPair,
         });
       } catch {
         // Silent — trajectory recording must never break routing.
@@ -699,16 +755,38 @@ export class ModelRouter {
    */
   private selectModel(
     scores: Record<ClaudeModel, number>,
-    complexityScore: number
+    complexityScore: number,
+    /**
+     * Optional neural prior (ADR-148 hybrid math). When supplied, each
+     * candidate's Beta(α, β) prior is perturbed by `weight` pseudo-counts of
+     * the neural's predicted quality before sampling. Cold start → neural
+     * dominates; many real outcomes → bandit dominates. The persistent
+     * bandit state is NOT modified — this is a per-call posterior bump only.
+     */
+    neuralPrior?: { qualities: Partial<Record<ClaudeModel, number>>; weight: number }
   ): { model: ClaudeModel; confidence: number; uncertainty: number } {
     // Thompson sampling: combine deterministic score with bandit posterior,
     // keyed by complexity bucket (ADR-142) so learning is task-type-local.
     const bucketed = this.state.priors ?? defaultBucketedPriors();
     const priors = bucketed[complexityBucket(complexityScore)] ?? defaultBanditPriors();
+
+    // Apply the optional neural prior: Beta(α + q*w, β + (1-q)*w). Per-call,
+    // does not persist. Clamp `q` into [0, 1] so a bogus backend reading
+    // cannot push the prior into invalid territory.
+    const bump = (a: number, b: number, q: number | undefined, w: number): { alpha: number; beta: number } => {
+      if (q === undefined || w <= 0) return { alpha: a, beta: b };
+      const clamped = Math.min(1, Math.max(0, q));
+      return { alpha: a + clamped * w, beta: b + (1 - clamped) * w };
+    };
+    const w = neuralPrior?.weight ?? 0;
+    const ph = bump(priors.haiku.alpha,  priors.haiku.beta,  neuralPrior?.qualities.haiku,  w);
+    const ps = bump(priors.sonnet.alpha, priors.sonnet.beta, neuralPrior?.qualities.sonnet, w);
+    const po = bump(priors.opus.alpha,   priors.opus.beta,   neuralPrior?.qualities.opus,   w);
+
     const sampledScores: Record<ClaudeModel, number> = {
-      haiku:   scores.haiku   * sampleBeta(priors.haiku.alpha,   priors.haiku.beta),
-      sonnet:  scores.sonnet  * sampleBeta(priors.sonnet.alpha,  priors.sonnet.beta),
-      opus:    scores.opus    * sampleBeta(priors.opus.alpha,    priors.opus.beta),
+      haiku:   scores.haiku   * sampleBeta(ph.alpha, ph.beta),
+      sonnet:  scores.sonnet  * sampleBeta(ps.alpha, ps.beta),
+      opus:    scores.opus    * sampleBeta(po.alpha, po.beta),
       inherit: scores.inherit, // not bandit-controlled
     };
 
@@ -756,7 +834,24 @@ export class ModelRouter {
       // while honoring any non-trivial learning.
       const selectedSamples = priors[bestModel].alpha + priors[bestModel].beta;
       const selectedTrusted = selectedSamples >= 5 && selectedMean >= 0.45;
-      if (!targetWorse && !selectedTrusted) {
+      // ADR-148 — additional trust path: when the neural prior agrees with
+      // the bandit's pick (i.e. neuralPrior.qualities[bestModel] is the
+      // highest), the neural backend's signal is treated as a vote of
+      // confidence that lets us skip escalation. Without this, cold-start
+      // installations stay stuck in the structurally-high-uncertainty
+      // regime (#2250) and the neural's clear preference never reaches
+      // the final pick. The neural prior's top is computed as the max
+      // quality over the supplied candidates.
+      let neuralEndorsesPick = false;
+      if (neuralPrior) {
+        let bestNeuralQ = -1;
+        let neuralTop: ClaudeModel | null = null;
+        for (const [m, q] of Object.entries(neuralPrior.qualities) as [ClaudeModel, number][]) {
+          if (q > bestNeuralQ) { bestNeuralQ = q; neuralTop = m; }
+        }
+        if (neuralTop === bestModel) neuralEndorsesPick = true;
+      }
+      if (!targetWorse && !selectedTrusted && !neuralEndorsesPick) {
         model = escalateTo;
       }
     }
@@ -798,6 +893,9 @@ export class ModelRouter {
     this.state.totalDecisions++;
     this.state.modelDistribution[result.model] =
       (this.state.modelDistribution[result.model] || 0) + 1;
+    // ADR-148 — operational counters for hooks_intelligence_stats.
+    this.routedByCounts[result.routedBy]++;
+    if (result.neuralBackend) this.neuralBackendCounts[result.neuralBackend]++;
 
     // Update running averages
     const n = this.state.totalDecisions;
@@ -873,6 +971,12 @@ export class ModelRouter {
     avgConfidence: number;
     circuitBreakerTrips: number;
     consecutiveFailures: Record<ClaudeModel, number>;
+    /** ADR-148: per-decision-mechanism counts (process-local, not persisted). */
+    routedByCounts: Record<ModelRoutingResult['routedBy'], number>;
+    /** ADR-148: per-neural-backend counts (process-local). */
+    neuralBackendCounts: Record<NonNullable<ModelRoutingResult['neuralBackend']>, number>;
+    /** ADR-148: A/B mode disagreement rate over the active process. */
+    ab: { comparisons: number; disagreements: number; disagreementRate: number };
   } {
     return {
       totalDecisions: this.state.totalDecisions,
@@ -881,6 +985,13 @@ export class ModelRouter {
       avgConfidence: this.state.avgConfidence,
       circuitBreakerTrips: this.state.circuitBreakerTrips,
       consecutiveFailures: { ...this.consecutiveFailures },
+      routedByCounts: { ...this.routedByCounts },
+      neuralBackendCounts: { ...this.neuralBackendCounts },
+      ab: {
+        comparisons: this.abComparisons,
+        disagreements: this.abDisagreements,
+        disagreementRate: this.abComparisons > 0 ? this.abDisagreements / this.abComparisons : 0,
+      },
     };
   }
 

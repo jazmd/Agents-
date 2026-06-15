@@ -1777,11 +1777,149 @@ const benchmarkCommand: Command = {
   },
 };
 
+// ============================================================================
+// ADR-148 — `neural router` subcommand tree: status / train / reload
+// ============================================================================
+
+const routerStatusCommand: Command = {
+  name: 'status',
+  description: 'Show the cost-optimal neural router state (ADR-148) — gate, backend, artifact, counters',
+  options: [
+    { name: 'format', short: 'f', type: 'string', description: 'Output format: table, json', default: 'table' },
+  ],
+  examples: [
+    { command: 'claude-flow neural router status', description: 'Show router state' },
+    { command: 'CLAUDE_FLOW_ROUTER_NEURAL=1 claude-flow neural router status', description: 'Show status with gate open' },
+  ],
+  action: async (ctx: CommandContext): Promise<CommandResult> => {
+    const format = (ctx.flags.format as string) || 'table';
+    const { neuralRouterStatus } = await import('../ruvector/neural-router.js');
+    const { getModelRouterStats } = await import('../ruvector/model-router.js');
+    const status = await neuralRouterStatus();
+    const stats = getModelRouterStats();
+    const payload = { neuralRouter: status, modelRouter: stats };
+    if (format === 'json') {
+      output.writeln(JSON.stringify(payload, null, 2));
+      return { success: true, data: payload };
+    }
+    output.writeln();
+    output.writeln(output.bold('Cost-Optimal Neural Router (ADR-148)'));
+    output.writeln(output.dim('─'.repeat(60)));
+    output.writeln(`  Gate (CLAUDE_FLOW_ROUTER_NEURAL=1): ${status.enabled ? output.success('open') : output.warning('closed')}`);
+    output.writeln(`  Backend available:                  ${status.available ? output.success('yes') : output.warning('no')}`);
+    output.writeln(`  Active backend (routedBy):          ${status.routedBy ?? '—'}`);
+    output.writeln(`  Reason:                             ${status.reason}`);
+    output.writeln(`  Quality bar:                        ${status.config.qualityBar}`);
+    output.writeln(`  Seed corpus path:                   ${status.config.seedCorpusPath}`);
+    output.writeln(`  Bundled KRR artifact path:          ${status.config.bundledKrrPath}`);
+    output.writeln(`  User artifact (modelPath):          ${status.config.modelPath ?? '—'}`);
+    output.writeln();
+    output.writeln(output.bold('Counters (process-local since last reset)'));
+    output.writeln(output.dim('─'.repeat(60)));
+    output.writeln(`  Total decisions:    ${stats.totalDecisions}`);
+    output.writeln(`  routedBy:           heuristic=${stats.routedByCounts.heuristic}  hybrid=${stats.routedByCounts.hybrid}  bandit-fallback=${stats.routedByCounts['bandit-fallback']}`);
+    output.writeln(`  neuralBackend:      knn=${stats.neuralBackendCounts['metaharness-knn']}  krr=${stats.neuralBackendCounts['metaharness-krr']}  fastgrnn=${stats.neuralBackendCounts.fastgrnn}`);
+    output.writeln(`  A/B mode:           ${stats.ab.comparisons} comparisons, ${stats.ab.disagreements} disagreements (${(stats.ab.disagreementRate * 100).toFixed(1)}%)`);
+    output.writeln();
+    return { success: true, data: payload };
+  },
+};
+
+const routerTrainCommand: Command = {
+  name: 'train',
+  description: 'Train a KRR router artifact from a DRACO-shaped JSON corpus (or the bundled seed) — pure TS, no native deps',
+  options: [
+    { name: 'corpus', short: 'c', type: 'string', description: 'Path to DRACO rows JSON ({embedding, scores}). Defaults to the bundled seed corpus.' },
+    { name: 'out', short: 'o', type: 'string', description: 'Output path for the trained KRR JSON.' },
+    { name: 'quality-bar', short: 'q', type: 'number', description: 'qualityBar for cost-optimal selection (default 0.8)', default: '0.8' },
+  ],
+  examples: [
+    { command: 'claude-flow neural router train', description: 'Train from the bundled seed and write to ./router.krr.json' },
+    { command: 'claude-flow neural router train -c ./my-corpus.json -o ./my-router.krr.json', description: 'Train from a custom corpus' },
+  ],
+  action: async (ctx: CommandContext): Promise<CommandResult> => {
+    const corpusPath = ctx.flags.corpus as string | undefined;
+    const outPath = (ctx.flags.out as string) || './router.krr.json';
+    const qualityBar = parseFloat(ctx.flags['quality-bar'] as string || '0.8') || 0.8;
+    let mh: typeof import('@metaharness/router');
+    try {
+      mh = await import('@metaharness/router');
+    } catch {
+      output.printError('@metaharness/router is not installed. `npm install @metaharness/router@^0.3.2` then re-run.');
+      return { success: false, exitCode: 1 };
+    }
+    const { neuralRouterStatus } = await import('../ruvector/neural-router.js');
+    const status = await neuralRouterStatus();
+    const fs = await import('node:fs');
+    const seedPath = corpusPath ?? status.config.seedCorpusPath;
+    if (!fs.existsSync(seedPath)) {
+      output.printError(`Corpus not found at ${seedPath}`);
+      return { success: false, exitCode: 1 };
+    }
+    const rows = JSON.parse(fs.readFileSync(seedPath, 'utf8'));
+    output.writeln();
+    output.writeln(output.bold('Training KRR router (ADR-148)'));
+    output.writeln(output.dim('─'.repeat(60)));
+    output.writeln(`  Corpus: ${seedPath}  (${rows.length} rows, dim=${rows[0]?.embedding?.length ?? '?'})`);
+    output.writeln(`  Output: ${outPath}`);
+    output.writeln(`  qualityBar: ${qualityBar}`);
+    output.writeln();
+    const spinner = output.createSpinner({ text: 'Fitting Beta-Bernoulli KRR with leave-one-out CV…', spinner: 'dots' });
+    spinner.start();
+    const t0 = performance.now();
+    const { router, lambda, looQuality } = mh.trainRouter(rows, { haiku: 1, sonnet: 3, opus: 15 }, {
+      qualityBar,
+      lambdas: [1e-4, 1e-3, 1e-2, 1e-1, 1e0],
+    });
+    const ms = performance.now() - t0;
+    spinner.succeed(`Trained in ${ms.toFixed(0)}ms (λ=${lambda.toExponential(3)}, looQuality=${looQuality.toFixed(4)})`);
+    fs.writeFileSync(outPath, JSON.stringify(router.toJSON()));
+    const bytes = fs.statSync(outPath).size;
+    output.writeln(`Wrote ${bytes} bytes → ${outPath}`);
+    output.writeln();
+    output.writeln(output.dim('Use: CLAUDE_FLOW_ROUTER_NEURAL=1 CLAUDE_FLOW_ROUTER_MODEL_PATH=' + outPath + ' …'));
+    output.writeln();
+    return { success: true, data: { lambda, looQuality, trainMs: ms, modelPath: outPath, modelBytes: bytes } };
+  },
+};
+
+const routerReloadCommand: Command = {
+  name: 'reload',
+  description: 'Force-reload the neural router (clears in-process backend cache; next call re-reads artifact/corpus)',
+  options: [],
+  examples: [
+    { command: 'claude-flow neural router reload', description: 'Refresh backend caches after retraining an artifact' },
+  ],
+  action: async (): Promise<CommandResult> => {
+    const { __resetNeuralRouterForTests, neuralRouterStatus } = await import('../ruvector/neural-router.js');
+    __resetNeuralRouterForTests();
+    output.writeln(output.success('Neural router backend cache cleared.'));
+    const status = await neuralRouterStatus();
+    output.writeln(output.dim(`  Active backend now: ${status.routedBy ?? '—'}  (${status.reason})`));
+    return { success: true, data: status };
+  },
+};
+
+const routerCommand: Command = {
+  name: 'router',
+  description: 'Cost-optimal neural router lifecycle (ADR-148): status, train, reload',
+  subcommands: [routerStatusCommand, routerTrainCommand, routerReloadCommand],
+  examples: [
+    { command: 'claude-flow neural router status', description: 'Show router state, gate, counters' },
+    { command: 'claude-flow neural router train -o ./router.krr.json', description: 'Train a KRR artifact' },
+    { command: 'claude-flow neural router reload', description: 'Clear in-process backend cache' },
+  ],
+  action: async (): Promise<CommandResult> => {
+    output.writeln('Use a subcommand: status | train | reload');
+    return { success: true };
+  },
+};
+
 // Main neural command
 export const neuralCommand: Command = {
   name: 'neural',
   description: 'Neural pattern training, MoE, Flash Attention, pattern learning',
-  subcommands: [trainCommand, statusCommand, patternsCommand, predictCommand, optimizeCommand, benchmarkCommand, listCommand, exportCommand, importCommand],
+  subcommands: [trainCommand, statusCommand, patternsCommand, predictCommand, optimizeCommand, benchmarkCommand, listCommand, exportCommand, importCommand, routerCommand],
   examples: [
     { command: 'claude-flow neural status', description: 'Check neural system status' },
     { command: 'claude-flow neural train -p coordination', description: 'Train coordination patterns' },

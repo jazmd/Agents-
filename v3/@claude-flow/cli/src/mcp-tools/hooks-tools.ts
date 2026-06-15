@@ -3260,6 +3260,21 @@ export const hooksIntelligenceStats: MCPTool = {
       ruvllmStats.graphDatabase = { backend: gs.backend, totalNodes: gs.totalNodes, totalEdges: gs.totalEdges, avgDegree: gs.avgDegree };
     } catch { /* not available */ }
 
+    // ADR-148 — model-router operational counters (per-mechanism, per-backend,
+    // A/B disagreement rate). Process-local so this is the most accurate
+    // surface; the memory-store path was aggregates-only and lossy.
+    let routerStats: ReturnType<typeof import('../ruvector/model-router.js').getModelRouterStats> | null = null;
+    let neuralRouter: { enabled: boolean; available: boolean; routedBy: string | null; reason: string } | null = null;
+    try {
+      const { getModelRouterStats } = await import('../ruvector/model-router.js');
+      routerStats = getModelRouterStats();
+    } catch { /* router module not loaded */ }
+    try {
+      const { neuralRouterStatus } = await import('../ruvector/neural-router.js');
+      const s = await neuralRouterStatus();
+      neuralRouter = { enabled: s.enabled, available: s.available, routedBy: s.routedBy, reason: s.reason };
+    } catch { /* neural-router module not loaded */ }
+
     const stats = {
       sona: sonaStats,
       moe: moeStats,
@@ -3275,6 +3290,17 @@ export const hooksIntelligenceStats: MCPTool = {
           : 0.78,
         memoryUsageMb: Math.round(memoryStats.memory.memorySizeBytes / 1024 / 1024 * 100) / 100,
       },
+      // ADR-148 — model-routing surface
+      modelRouter: routerStats ? {
+        totalDecisions: routerStats.totalDecisions,
+        modelDistribution: routerStats.modelDistribution,
+        routedByCounts: routerStats.routedByCounts,
+        neuralBackendCounts: routerStats.neuralBackendCounts,
+        ab: routerStats.ab,
+        avgComplexity: routerStats.avgComplexity,
+        avgConfidence: routerStats.avgConfidence,
+      } : null,
+      neuralRouter,
       dataSource: sona ? 'real-implementations' : 'memory-fallback',
       lastUpdated: new Date().toISOString(),
     };
