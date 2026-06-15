@@ -324,6 +324,66 @@ describe('ModelRouter integration (ADR-148)', () => {
     expect(exhausted).toBeNull();
   });
 
+  it('embedTaskWithCacheBatch matches single-call results + amortizes setup (ADR-149 iter 11)', async () => {
+    const { embedTaskWithCache, embedTaskWithCacheBatch, __resetTaskEmbedderForTests, embedderStats } = await import('../src/ruvector/task-embedder.js');
+    __resetTaskEmbedderForTests();
+    const tasks = ['task one', 'task two', 'task three'];
+    const single = await Promise.all(tasks.map(t => embedTaskWithCache(t)));
+    if (!single[0]) return; // dep absent
+    __resetTaskEmbedderForTests();
+    const batch = await embedTaskWithCacheBatch(tasks);
+    expect(batch.length).toBe(3);
+    // Batch results should equal single-call results
+    for (let i = 0; i < 3; i++) {
+      expect(batch[i]).toBeDefined();
+      expect(batch[i]!.length).toBe(single[i]!.length);
+      // Float comparison — same input via the same pipeline should be deterministic
+      expect(batch[i]!.slice(0, 4)).toEqual(single[i]!.slice(0, 4));
+    }
+    // Counters reflect 3 misses (cold), 0 hits
+    const s = embedderStats();
+    expect(s.size).toBe(3);
+    expect(s.misses).toBe(3);
+    expect(s.hits).toBe(0);
+  });
+
+  it('tryCostOptimalRouteBatch matches single-call shape (ADR-149 iter 11)', async () => {
+    process.env.CLAUDE_FLOW_ROUTER_NEURAL = '1';
+    __resetNeuralRouterForTests();
+    const { tryCostOptimalRoute, tryCostOptimalRouteBatch } = await import('../src/ruvector/neural-router.js');
+    const e1 = new Array(384).fill(0); e1[0] = 0.5;
+    const e2 = new Array(384).fill(0); e2[5] = 0.5;
+    const e3 = new Array(384).fill(0); e3[10] = 0.5;
+    const single1 = await tryCostOptimalRoute(e1);
+    if (!single1) return; // dep absent
+    const batch = await tryCostOptimalRouteBatch([e1, e2, e3]);
+    expect(batch).toHaveLength(3);
+    expect(batch[0]).not.toBeNull();
+    expect(batch[1]).not.toBeNull();
+    expect(batch[2]).not.toBeNull();
+    // Batch[0] should match single1's pick (both routed the same embedding)
+    expect(batch[0]!.modelId).toBe(single1.modelId);
+    // Each result must have the new modelId field set
+    for (const r of batch) {
+      if (!r) continue;
+      expect(typeof r.modelId).toBe('string');
+      expect(r.modelId.length).toBeGreaterThan(0);
+    }
+  });
+
+  it('tryCostOptimalRouteBatch returns null entries for invalid embeddings (ADR-149 iter 11)', async () => {
+    process.env.CLAUDE_FLOW_ROUTER_NEURAL = '1';
+    __resetNeuralRouterForTests();
+    const { tryCostOptimalRouteBatch } = await import('../src/ruvector/neural-router.js');
+    const valid = new Array(384).fill(0);
+    const batch = await tryCostOptimalRouteBatch([valid, [], valid]);
+    expect(batch).toHaveLength(3);
+    if (batch[0] === null) return; // dep absent — full null batch
+    expect(batch[0]).not.toBeNull();
+    expect(batch[1]).toBeNull();          // empty embedding → null
+    expect(batch[2]).not.toBeNull();
+  });
+
   it('embedTaskWithCache caches by task hash (ADR-149 iter 9)', async () => {
     const { embedTaskWithCache, embedderStats, __resetTaskEmbedderForTests } = await import('../src/ruvector/task-embedder.js');
     __resetTaskEmbedderForTests();

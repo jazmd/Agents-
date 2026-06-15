@@ -407,6 +407,98 @@ export async function tryCostOptimalRoute(embedding: number[]): Promise<NeuralRo
 }
 
 /**
+ * Batch counterpart to `tryCostOptimalRoute`. Routes a list of embeddings
+ * in one go, sharing backend resolution + (for the pure-TS paths)
+ * candidate-view setup across the batch. The native FastGRNN path still
+ * dispatches per-call (xenova's worker doesn't support array inputs for
+ * tiny-dancer's Router.route).
+ *
+ * Order of the output array matches the input order. Each slot is either
+ * a NeuralRouteResult or null (gate closed, backend unavailable, etc. —
+ * mirrors the single-call contract).
+ *
+ * For harness-style callers (batch evals, GAIA runs, parallel agent
+ * dispatch) this amortizes backend init across N queries — first-call
+ * cold-load (~10 ms) becomes a fixed cost regardless of batch size.
+ */
+export async function tryCostOptimalRouteBatch(embeddings: number[][]): Promise<Array<NeuralRouteResult | null>> {
+  const out: Array<NeuralRouteResult | null> = new Array(embeddings.length).fill(null);
+  const cfg = getConfig();
+  if (!cfg.enabled) return out;
+  const backend = await getBackend();
+  if (!backend.available || backend.routedBy === null) return out;
+
+  // FastGRNN path: per-call native dispatch. The native router doesn't
+  // expose a batch entry point. We still share the loaded NativeRouter
+  // instance + candidate embeddings, which is most of the per-call cost.
+  if (backend.routedBy === 'fastgrnn') {
+    if (!backend.native) return out;
+    const native = backend.native;
+    const tasks = embeddings.map(async (e, i) => {
+      if (!Array.isArray(e) || e.length === 0) return null;
+      try {
+        const t0 = Number(process.hrtime.bigint() / 1000n);
+        const res = await native.router.route(e, native.candidates);
+        const modelId = res.id;
+        const t1 = Number(process.hrtime.bigint() / 1000n);
+        const result: NeuralRouteResult = {
+          model: tierLabelForModelId(modelId),
+          modelId,
+          predictedQuality: 1 - res.uncertainty,
+          metBar: !res.useLightweight && res.confidence >= cfg.qualityBar,
+          alternatives: native.candidates.map(c => ({
+            model: tierLabelForModelId(c.id),
+            modelId: c.id,
+            predictedQuality: c.id === modelId ? res.confidence : 0,
+            costPerMTok: c.costPerMTok,
+          })),
+          routedBy: 'fastgrnn',
+          inferenceTimeUs: t1 - t0,
+        };
+        out[i] = result;
+      } catch {
+        out[i] = null;
+      }
+      return null;
+    });
+    await Promise.all(tasks);
+    return out;
+  }
+
+  // Pure-TS path (k-NN or KRR): same shared router + candidate views,
+  // tight loop. predictAll is cheap (already-pre-built per-candidate
+  // examples) so we avoid re-allocating per call.
+  if (!backend.router) return out;
+  for (let i = 0; i < embeddings.length; i++) {
+    const e = embeddings[i];
+    if (!Array.isArray(e) || e.length === 0) { out[i] = null; continue; }
+    try {
+      const t0 = Number(process.hrtime.bigint() / 1000n);
+      const main = backend.router.route(e);
+      const all = backend.router.predictAll(e);
+      const t1 = Number(process.hrtime.bigint() / 1000n);
+      out[i] = {
+        model: tierLabelForModelId(main.id),
+        modelId: main.id,
+        predictedQuality: main.predictedQuality,
+        metBar: main.metBar,
+        alternatives: all.map(a => ({
+          model: tierLabelForModelId(a.id),
+          modelId: a.id,
+          predictedQuality: a.predictedQuality,
+          costPerMTok: a.costPerMTok,
+        })),
+        routedBy: backend.routedBy,
+        inferenceTimeUs: t1 - t0,
+      };
+    } catch {
+      out[i] = null;
+    }
+  }
+  return out;
+}
+
+/**
  * Diagnostic surface — returns the active backend without performing a route.
  * Used by the bench and by `claude-flow neural router status` (future CLI).
  */
