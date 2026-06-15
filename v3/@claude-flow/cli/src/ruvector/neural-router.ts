@@ -157,10 +157,14 @@ function getConfig(): NeuralRouterConfig {
     enabled: process.env.CLAUDE_FLOW_ROUTER_NEURAL === '1',
     modelPath: process.env.CLAUDE_FLOW_ROUTER_MODEL_PATH || undefined,
     bundledKrrPath: join(assetsDir, 'seed-router.krr.json'),
-    // ADR-149 — measured-corpus default. Synthetic-corpus scores topped at
-    // 0.42, so the prior 0.8 bar was unreachable. 0.25 keeps top-half
-    // candidates in the "clears the bar" set; override per-installation.
-    qualityBar: parseFloat(process.env.CLAUDE_FLOW_ROUTER_QUALITY_BAR ?? '0.25') || 0.25,
+    // ADR-149 v2 — measured against the richer code-context corpus
+    // (gen-seed-corpus-v2.mjs). On that corpus, cheap models (Ling 2.6
+    // Flash) deliver 75-93% on cheap/mid tasks and ~54% on strong tasks;
+    // expensive models deliver 56-89% across tiers. Bar=0.50 lets cheap
+    // models win cheap+mid (cost-optimal) but escalates to capable models
+    // on strong queries where cheap predictions fall below the bar.
+    // Override per-installation; 0.25 = always-cheapest, 0.70 = quality-strict.
+    qualityBar: parseFloat(process.env.CLAUDE_FLOW_ROUTER_QUALITY_BAR ?? '0.50') || 0.50,
     seedCorpusPath: process.env.CLAUDE_FLOW_ROUTER_SEED_CORPUS
       ?? join(assetsDir, 'seed-rows.json'),
     k: parseInt(process.env.CLAUDE_FLOW_ROUTER_KNN_K ?? '5', 10) || 5,

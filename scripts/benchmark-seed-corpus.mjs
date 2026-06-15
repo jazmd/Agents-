@@ -113,69 +113,67 @@ if (!existsSync(SEED_PATH)) {
 const allRows = JSON.parse(readFileSync(SEED_PATH, 'utf8'));
 const provenance = existsSync(PROVENANCE_PATH) ? JSON.parse(readFileSync(PROVENANCE_PATH, 'utf8')) : null;
 
-// Re-attach tier label + task text from provenance (the bundled seed-rows.json
-// is stripped of _meta to keep it compact; the provenance file carries the
-// task text + tier per row).
-const rowsWithProv = allRows.map((row, idx) => {
-  // The provenance file has tier_distribution but NOT per-row task text in
-  // the current version. We reconstruct task text from the template indices
-  // implicit in the generator if available, else fall back to a generic
-  // synthetic task prompt suitable for grading.
-  // For now: use the row index modulo tier-template-count to infer the
-  // template; if no provenance, generate a generic task.
-  return { ...row, _idx: idx };
-});
+// ADR-149 v2 — read task+tier directly from each row when present
+// (gen-seed-corpus-v2.mjs persists them in the row). Fall back to the v1
+// template-regeneration path when the corpus pre-dates v2.
+const v2Rows = allRows.every(r => typeof r.task === 'string' && typeof r.tier === 'string');
 
-// Rebuild task text per row — we need the original template + slot fill.
-// The generator script (scripts/gen-seed-corpus.mjs) used CHEAP_TEMPLATES /
-// MID_TEMPLATES / STRONG_TEMPLATES with NOUNS substitution. We reproduce
-// the generation deterministically here to recover the task text.
+let enrichedRows;
+if (v2Rows) {
+  enrichedRows = allRows.map((row, idx) => ({
+    embedding: row.embedding,
+    scores_prev: row.scores,
+    task: row.task,
+    tier: row.tier,
+    _idx: idx,
+  }));
+  console.log(`[bench] v2 corpus detected — using row.task + row.tier directly (${allRows.length} rows).`);
+} else {
+  // v1 fallback — deterministic template regeneration.
+  const CHEAP_TEMPLATES = [
+    'rename {x} to {y}',
+    'add a console.log to {x}',
+    'fix typo in {x}',
+    'remove unused import {x}',
+    'add return type annotation to {x}',
+    'format {x} as kebab-case',
+    'increment counter in {x}',
+    'add try/catch around {x}',
+    'change var to const in {x}',
+    'delete unused export {x}',
+  ];
+  const MID_TEMPLATES = [
+    'implement a debounce helper for {x}',
+    'add unit tests for {x}',
+    'extract a hook from {x}',
+    'refactor {x} to use async/await',
+    'add input validation to {x}',
+    'migrate {x} from callbacks to promises',
+    'add a logging layer to {x}',
+    'parameterize {x} with options object',
+    'add a config schema for {x}',
+    'write integration tests covering {x}',
+  ];
+  const STRONG_TEMPLATES = [
+    'design a distributed consensus protocol with byzantine fault tolerance for {x}',
+    'audit the {x} authentication flow for OWASP top-10 vulnerabilities',
+    'architect a multi-tenant database schema with row-level security for {x}',
+    'analyze why {x} has a memory leak under load — produce hypothesis with evidence',
+    'refactor {x} to the strategy pattern and migrate all callers safely',
+    'write a threat model for {x} including STRIDE categorization and mitigations',
+    'compare CRDT-based and OT-based collaborative editing for {x} with citations',
+    'design a backwards-compatible API deprecation path for {x}',
+    'plan a zero-downtime migration of {x} from postgres to a sharded backend',
+    'reason about consistency guarantees of {x} under partition and recovery',
+    'debug a nondeterministic race condition in {x} across distributed workers',
+    'design an event-sourced architecture for {x} with snapshots and replay',
+  ];
+  const NOUNS = ['cache','session','token','user','order','queue','router','schema','span','tenant','worker','feature-flag','rate-limiter','health-check','rpc-client','migration','dashboard','webhook','indexer','pipeline'];
 
-const CHEAP_TEMPLATES = [
-  'rename {x} to {y}',
-  'add a console.log to {x}',
-  'fix typo in {x}',
-  'remove unused import {x}',
-  'add return type annotation to {x}',
-  'format {x} as kebab-case',
-  'increment counter in {x}',
-  'add try/catch around {x}',
-  'change var to const in {x}',
-  'delete unused export {x}',
-];
-const MID_TEMPLATES = [
-  'implement a debounce helper for {x}',
-  'add unit tests for {x}',
-  'extract a hook from {x}',
-  'refactor {x} to use async/await',
-  'add input validation to {x}',
-  'migrate {x} from callbacks to promises',
-  'add a logging layer to {x}',
-  'parameterize {x} with options object',
-  'add a config schema for {x}',
-  'write integration tests covering {x}',
-];
-const STRONG_TEMPLATES = [
-  'design a distributed consensus protocol with byzantine fault tolerance for {x}',
-  'audit the {x} authentication flow for OWASP top-10 vulnerabilities',
-  'architect a multi-tenant database schema with row-level security for {x}',
-  'analyze why {x} has a memory leak under load — produce hypothesis with evidence',
-  'refactor {x} to the strategy pattern and migrate all callers safely',
-  'write a threat model for {x} including STRIDE categorization and mitigations',
-  'compare CRDT-based and OT-based collaborative editing for {x} with citations',
-  'design a backwards-compatible API deprecation path for {x}',
-  'plan a zero-downtime migration of {x} from postgres to a sharded backend',
-  'reason about consistency guarantees of {x} under partition and recovery',
-  'debug a nondeterministic race condition in {x} across distributed workers',
-  'design an event-sourced architecture for {x} with snapshots and replay',
-];
-const NOUNS = ['cache','session','token','user','order','queue','router','schema','span','tenant','worker','feature-flag','rate-limiter','health-check','rpc-client','migration','dashboard','webhook','indexer','pipeline'];
+  let _rngSeed = 1234567;
+  const rng = () => { _rngSeed = (_rngSeed * 16807) % 2147483647; return _rngSeed / 2147483647; };
 
-let _rngSeed = 1234567;
-const rng = () => { _rngSeed = (_rngSeed * 16807) % 2147483647; return _rngSeed / 2147483647; };
-
-function rebuildTaskTextAndTier() {
-  const out = [];
+  const reconstructed = [];
   for (const [template, tier] of [
     ...CHEAP_TEMPLATES.map(t => [t, 'cheap']),
     ...MID_TEMPLATES.map(t => [t, 'mid']),
@@ -185,28 +183,23 @@ function rebuildTaskTextAndTier() {
       const x = NOUNS[Math.floor(rng() * NOUNS.length)];
       const y = NOUNS[Math.floor(rng() * NOUNS.length)];
       const task = template.replaceAll('{x}', x).replaceAll('{y}', y);
-      out.push({ task, tier, template });
+      reconstructed.push({ task, tier, template });
     }
   }
-  return out;
+  if (reconstructed.length !== allRows.length) {
+    console.error(`[bench] row count mismatch: corpus=${allRows.length}, reconstructed=${reconstructed.length}. Regenerate via scripts/gen-seed-corpus-v2.mjs (preferred) or scripts/gen-seed-corpus.mjs.`);
+    process.exit(3);
+  }
+  enrichedRows = allRows.map((row, idx) => ({
+    embedding: row.embedding,
+    scores_prev: row.scores,
+    task: reconstructed[idx].task,
+    tier: reconstructed[idx].tier,
+    template: reconstructed[idx].template,
+    _idx: idx,
+  }));
+  console.log(`[bench] v1 corpus detected — regenerating task text from templates (${allRows.length} rows).`);
 }
-const reconstructed = rebuildTaskTextAndTier();
-
-// Sanity: row count should match
-if (reconstructed.length !== allRows.length) {
-  console.error(`[bench] row count mismatch: corpus=${allRows.length}, reconstructed=${reconstructed.length}. Regenerate the corpus via scripts/gen-seed-corpus.mjs first.`);
-  process.exit(3);
-}
-
-// Pair each corpus row with its task+tier
-const enrichedRows = allRows.map((row, idx) => ({
-  embedding: row.embedding,
-  scores_prev: row.scores,
-  task: reconstructed[idx].task,
-  tier: reconstructed[idx].tier,
-  template: reconstructed[idx].template,
-  _idx: idx,
-}));
 
 const ROWS = ARGS.maxRows ? enrichedRows.slice(0, ARGS.maxRows) : enrichedRows;
 

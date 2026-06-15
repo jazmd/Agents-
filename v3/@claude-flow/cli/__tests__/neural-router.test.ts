@@ -78,14 +78,15 @@ describe('neural-router (ADR-148)', () => {
     expect(s.routedBy).toBeNull();
   });
 
-  it('routes a cheap-looking query to haiku when gate is open and seed corpus loads', async () => {
+  it('returns a cost-optimal pick when gate is open and seed corpus loads', async () => {
     process.env.CLAUDE_FLOW_ROUTER_NEURAL = '1';
     __resetNeuralRouterForTests();
-    // Construct a clean cheap probe — only the seed corpus's signal channels
-    // populated, all noise dimensions zero. We're testing the integration,
-    // not the model's generalization to noisy embeddings.
-    const e = new Array(32).fill(0);
-    e[0] = 0.85; e[1] = 0.0;
+    // ADR-149 v2 — the seed corpus now carries real 384-dim MiniLM embeddings.
+    // A zero-vector probe is a neutral query; we don't predict a specific tier
+    // (the picked tier depends on the trained KRR's nearest neighbours), but
+    // every routing contract still applies: a real modelId, a valid tier
+    // label, ≥2 alternatives, non-negative latency.
+    const e = new Array(384).fill(0);
     const r = await tryCostOptimalRoute(e);
     if (!r) {
       // If @metaharness/router isn't installed in CI, we expect null and a
@@ -95,8 +96,9 @@ describe('neural-router (ADR-148)', () => {
       return;
     }
     expect(['metaharness-knn', 'metaharness-krr', 'fastgrnn']).toContain(r.routedBy);
-    expect(r.model).toBe('haiku');
-    expect(r.metBar).toBe(true);
+    expect(typeof r.modelId).toBe('string');
+    expect(r.modelId.length).toBeGreaterThan(0);
+    expect(['haiku', 'sonnet', 'opus', 'inherit']).toContain(r.model);
     expect(r.inferenceTimeUs).toBeGreaterThanOrEqual(0);
     expect(r.alternatives.length).toBeGreaterThanOrEqual(2);
   });
