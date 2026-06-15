@@ -1,0 +1,354 @@
+/**
+ * neural-router.ts — Optional cost-optimal neural routing path (ADR-148).
+ *
+ * Wires `@metaharness/router` (pure-TS k-NN/KRR + optional FastGRNN via
+ * `@ruvector/tiny-dancer`) into the model-routing path as a graceful, gated
+ * addition. The shipped heuristic + Thompson bandit stays as the default;
+ * this module only contributes a decision when:
+ *
+ *   1. `CLAUDE_FLOW_ROUTER_NEURAL=1` is set
+ *   2. Either a trained artifact path resolves (`CLAUDE_FLOW_ROUTER_MODEL_PATH`)
+ *      OR the bundled seed corpus loads
+ *   3. The dynamic `import('@metaharness/router')` succeeds
+ *
+ * Otherwise `tryCostOptimalRoute(...)` returns `null` and the caller falls
+ * back to the bandit path with `routedBy: 'bandit-fallback'`.
+ *
+ * Observability — `routedBy` is returned on every result and must never be
+ * inferred from "did the import resolve?" (ADR-074, ADR-086). It carries
+ * exactly one of:
+ *   - 'metaharness-knn'  pure-TS k-NN, no training (uses raw seed examples)
+ *   - 'metaharness-krr'  pure-TS KRR with LOO-CV λ (TrainedRouter JSON)
+ *   - 'fastgrnn'         native FastGRNN via tiny-dancer (NativeRouter)
+ *
+ * Performance — module-level caches resolve the backend, seed corpus and
+ * router once per process. Hot path is a single `route(embedding)` call.
+ *
+ * @module neural-router
+ */
+
+import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join, resolve as resolvePath } from 'node:path';
+
+import type { ClaudeModel } from './model-router.js';
+
+// ============================================================================
+// Public API
+// ============================================================================
+
+/** Backend identifier carried on every result (never inferred). */
+export type NeuralRoutedBy = 'metaharness-knn' | 'metaharness-krr' | 'fastgrnn';
+
+/** Cost-optimal route decision. */
+export interface NeuralRouteResult {
+  /** Chosen Claude model. */
+  model: ClaudeModel;
+  /** Predicted quality the chosen candidate is expected to achieve (0..1). */
+  predictedQuality: number;
+  /** Did the predicted quality clear the configured `qualityBar`? */
+  metBar: boolean;
+  /** Per-candidate predicted qualities, ordered cheapest-first. */
+  alternatives: Array<{ model: ClaudeModel; predictedQuality: number; costPerMTok: number }>;
+  /** Backend that produced the decision. */
+  routedBy: NeuralRoutedBy;
+  /** Inference latency in microseconds. */
+  inferenceTimeUs: number;
+}
+
+/** Module-level configuration. Read once at first call from env. */
+interface NeuralRouterConfig {
+  enabled: boolean;
+  modelPath?: string;
+  qualityBar: number;
+  seedCorpusPath: string;
+  /** k for k-NN backend (default 5). */
+  k: number;
+}
+
+// ============================================================================
+// Internal state (lazy, single-init)
+// ============================================================================
+
+interface ResolvedBackend {
+  /** True if `@metaharness/router` was importable. */
+  available: boolean;
+  /** Initialised router, or null when no corpus / artifact was loadable. */
+  router: { route: (e: number[]) => { id: string; predictedQuality: number; costPerMTok: number; metBar: boolean }; predictAll: (e: number[]) => Array<{ id: string; predictedQuality: number; costPerMTok: number }> } | null;
+  /**
+   * For the FastGRNN/native path: the loaded `NativeRouter` instance and the
+   * pre-built per-candidate embeddings. Loaded ONCE at resolve time and
+   * reused on every route() call — avoids the load/build overhead per call.
+   */
+  native?: {
+    router: { route: (e: number[], cands: Array<{ id: string; embedding: number[]; costPerMTok?: number; successRate?: number }>) => Promise<{ id: string; confidence: number; uncertainty: number; useLightweight: boolean; costPerMTok?: number; inferenceTimeUs: number }> };
+    candidates: Array<{ id: string; embedding: number[]; costPerMTok: number }>;
+  };
+  /** Which backend the router represents. */
+  routedBy: NeuralRoutedBy | null;
+  /** Reason string for diagnostics. */
+  reason: string;
+}
+
+let _config: NeuralRouterConfig | null = null;
+let _backend: ResolvedBackend | null = null;
+let _initPromise: Promise<ResolvedBackend> | null = null;
+
+const PRICES: Record<ClaudeModel, number> = {
+  haiku: 1, sonnet: 3, opus: 15, inherit: 3,
+};
+
+// ============================================================================
+// Config resolution
+// ============================================================================
+
+function getConfig(): NeuralRouterConfig {
+  if (_config !== null) return _config;
+  // Default seed-corpus path: bundled with the package. We resolve relative to
+  // this file's location so it works both in src (tsc dev) and in the dist.
+  // dist layout:  dist/src/ruvector/neural-router.js → assets at dist/assets/...
+  // src layout:   src/ruvector/neural-router.ts     → assets at assets/...
+  // We probe both candidate locations.
+  let assetsDir: string;
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const candidates = [
+      resolvePath(here, '..', '..', 'assets', 'model-router'),       // src/ruvector → src/assets/...
+      resolvePath(here, '..', '..', '..', 'assets', 'model-router'), // dist/src/ruvector → dist/assets/...
+      resolvePath(here, '..', '..', '..', '..', 'assets', 'model-router'), // safety net
+    ];
+    assetsDir = candidates.find(existsSync) ?? candidates[0];
+  } catch {
+    assetsDir = resolvePath(process.cwd(), 'v3', '@claude-flow', 'cli', 'assets', 'model-router');
+  }
+
+  _config = {
+    enabled: process.env.CLAUDE_FLOW_ROUTER_NEURAL === '1',
+    modelPath: process.env.CLAUDE_FLOW_ROUTER_MODEL_PATH || undefined,
+    qualityBar: parseFloat(process.env.CLAUDE_FLOW_ROUTER_QUALITY_BAR ?? '0.8') || 0.8,
+    seedCorpusPath: process.env.CLAUDE_FLOW_ROUTER_SEED_CORPUS
+      ?? join(assetsDir, 'seed-rows.json'),
+    k: parseInt(process.env.CLAUDE_FLOW_ROUTER_KNN_K ?? '5', 10) || 5,
+  };
+  return _config;
+}
+
+// ============================================================================
+// Backend resolution (single-init, lazy)
+// ============================================================================
+
+/** DRACO row — the shape both pure-TS and FastGRNN backends consume. */
+interface DracoRow {
+  embedding: number[];
+  scores: Record<string, number>;
+}
+
+function loadSeedCorpus(path: string): DracoRow[] | null {
+  if (!existsSync(path)) return null;
+  try {
+    const raw = readFileSync(path, 'utf8');
+    const data = JSON.parse(raw);
+    if (!Array.isArray(data)) return null;
+    // Light-touch validation: each row must have a numeric-array embedding and
+    // a non-empty scores map. We do not coerce types — bad data should be
+    // visible as a config bug, not silently routed around.
+    for (const row of data) {
+      if (!row || !Array.isArray(row.embedding) || row.embedding.length === 0) return null;
+      if (!row.scores || typeof row.scores !== 'object') return null;
+    }
+    return data as DracoRow[];
+  } catch {
+    return null;
+  }
+}
+
+async function resolveBackend(cfg: NeuralRouterConfig): Promise<ResolvedBackend> {
+  // 1. Optional dep present?
+  let mh: typeof import('@metaharness/router');
+  try {
+    mh = await import('@metaharness/router');
+  } catch {
+    return { available: false, router: null, routedBy: null, reason: '@metaharness/router not installed' };
+  }
+
+  // 2. If a trained-model path is set AND tiny-dancer is loadable, prefer FastGRNN.
+  //    Load the NativeRouter ONCE here; reuse on every route() call.
+  if (cfg.modelPath && existsSync(cfg.modelPath)) {
+    const backend = await mh.resolveRouterBackend('auto');
+    if (backend === 'native') {
+      try {
+        const nativeRouter = await mh.NativeRouter.load({ modelPath: cfg.modelPath });
+        // Build per-candidate embeddings once. NativeRouter requires non-empty
+        // candidate embeddings; we use a one-hot signature so the three tiers
+        // are distinct in the FastGRNN's feature engineering. Dim is probed
+        // from the seed corpus or falls back to 384 (MiniLM default).
+        const seed = loadSeedCorpus(cfg.seedCorpusPath);
+        const dim = seed?.[0]?.embedding.length ?? 384;
+        const candidates = (['haiku', 'sonnet', 'opus'] as const).map((id, i) => {
+          const v = new Array(dim).fill(0);
+          v[i % dim] = 1;
+          return { id, embedding: v, costPerMTok: PRICES[id] };
+        });
+        return {
+          available: true,
+          router: null, // The native path uses the `native` field below, not `router`.
+          native: { router: nativeRouter, candidates },
+          routedBy: 'fastgrnn',
+          reason: `native router loaded from ${cfg.modelPath}`,
+        };
+      } catch (e) {
+        // Fall through to pure-TS paths
+      }
+    }
+  }
+
+  // 3. Trained KRR JSON artifact path?
+  if (cfg.modelPath && existsSync(cfg.modelPath) && cfg.modelPath.endsWith('.json')) {
+    try {
+      const json = JSON.parse(readFileSync(cfg.modelPath, 'utf8'));
+      const trained = mh.TrainedRouter.fromJSON(json);
+      // Pre-extract candidate ids+costs for predictAll
+      const cands = json.candidates.map((c: { id: string; costPerMTok: number }) => ({ id: c.id, costPerMTok: c.costPerMTok }));
+      return {
+        available: true,
+        router: {
+          route: (e: number[]) => {
+            const r = trained.route(e);
+            return { id: r.id, predictedQuality: r.predictedQuality, costPerMTok: r.costPerMTok, metBar: r.metBar };
+          },
+          predictAll: (e: number[]) => cands.map((c: { id: string; costPerMTok: number }) => ({
+            id: c.id, predictedQuality: trained.predict(c.id, e), costPerMTok: c.costPerMTok,
+          })).sort((a: { costPerMTok: number }, b: { costPerMTok: number }) => a.costPerMTok - b.costPerMTok),
+        },
+        routedBy: 'metaharness-krr',
+        reason: `KRR artifact loaded from ${cfg.modelPath}`,
+      };
+    } catch {
+      // Fall through to k-NN
+    }
+  }
+
+  // 4. Pure-TS k-NN over the bundled seed corpus.
+  const seed = loadSeedCorpus(cfg.seedCorpusPath);
+  if (!seed || seed.length === 0) {
+    return { available: true, router: null, routedBy: null, reason: `seed corpus missing or invalid at ${cfg.seedCorpusPath}` };
+  }
+  const router = mh.Router.fromExamples(seed, PRICES, { qualityBar: cfg.qualityBar, k: cfg.k });
+  // Pre-build per-candidate views ONCE so predictAll() doesn't re-allocate
+  // O(seed.length) objects per call. Sort by cost so the result is already in
+  // cheapest-first order.
+  const candIds = Object.keys(PRICES).filter(id => id !== 'inherit');
+  const candidateViews = candIds
+    .map(id => ({
+      id,
+      costPerMTok: PRICES[id as ClaudeModel],
+      examples: seed.map(r => ({ embedding: r.embedding, quality: r.scores[id] ?? 0 })),
+    }))
+    .sort((a, b) => a.costPerMTok - b.costPerMTok);
+  return {
+    available: true,
+    router: {
+      route: (e: number[]) => {
+        const r = router.route(e);
+        return { id: r.id, predictedQuality: r.predictedQuality, costPerMTok: r.costPerMTok, metBar: r.metBar };
+      },
+      predictAll: (e: number[]) => candidateViews.map(c => ({
+        id: c.id, predictedQuality: router.predict(c, e), costPerMTok: c.costPerMTok,
+      })),
+    },
+    routedBy: 'metaharness-knn',
+    reason: `k-NN over ${seed.length} seed rows`,
+  };
+}
+
+async function getBackend(): Promise<ResolvedBackend> {
+  if (_backend !== null) return _backend;
+  if (_initPromise !== null) return _initPromise;
+  const cfg = getConfig();
+  _initPromise = resolveBackend(cfg).then(b => { _backend = b; return b; });
+  return _initPromise;
+}
+
+// ============================================================================
+// Public function
+// ============================================================================
+
+/**
+ * Cost-optimal route via the optional neural backend. Returns `null` when the
+ * neural path is disabled (gate closed), unavailable (deps missing), or
+ * unconfigured (no corpus / artifact). Callers must fall back to the
+ * heuristic+bandit path on null and tag the result `routedBy: 'bandit-fallback'`.
+ *
+ * @param embedding 384-dim (or matching corpus dim) query embedding
+ * @returns NeuralRouteResult on success, or `null` when the path is inactive
+ */
+export async function tryCostOptimalRoute(embedding: number[]): Promise<NeuralRouteResult | null> {
+  const cfg = getConfig();
+  if (!cfg.enabled) return null;
+  if (!Array.isArray(embedding) || embedding.length === 0) return null;
+
+  const backend = await getBackend();
+  if (!backend.available || backend.routedBy === null) return null;
+
+  const t0 = Number(process.hrtime.bigint() / 1000n); // microseconds
+  try {
+    if (backend.routedBy === 'fastgrnn') {
+      // Native path: NativeRouter was loaded once at resolveBackend time;
+      // candidates were precomputed. Hot path is one .route() call.
+      if (!backend.native) return null;
+      const res = await backend.native.router.route(embedding, backend.native.candidates);
+      const model = res.id as ClaudeModel;
+      const t1 = Number(process.hrtime.bigint() / 1000n);
+      return {
+        model,
+        predictedQuality: 1 - res.uncertainty, // FastGRNN reports uncertainty, not quality directly
+        metBar: !res.useLightweight && res.confidence >= cfg.qualityBar,
+        alternatives: backend.native.candidates.map(c => ({
+          model: c.id as ClaudeModel,
+          predictedQuality: c.id === model ? res.confidence : 0,
+          costPerMTok: c.costPerMTok,
+        })),
+        routedBy: 'fastgrnn',
+        inferenceTimeUs: t1 - t0,
+      };
+    }
+
+    // Pure-TS paths (k-NN or KRR)
+    if (!backend.router) return null;
+    const main = backend.router.route(embedding);
+    const all = backend.router.predictAll(embedding);
+    const t1 = Number(process.hrtime.bigint() / 1000n);
+    return {
+      model: main.id as ClaudeModel,
+      predictedQuality: main.predictedQuality,
+      metBar: main.metBar,
+      alternatives: all.map(a => ({ model: a.id as ClaudeModel, predictedQuality: a.predictedQuality, costPerMTok: a.costPerMTok })),
+      routedBy: backend.routedBy,
+      inferenceTimeUs: t1 - t0,
+    };
+  } catch {
+    // Any runtime failure is silently swallowed → caller's bandit-fallback engages.
+    return null;
+  }
+}
+
+/**
+ * Diagnostic surface — returns the active backend without performing a route.
+ * Used by the bench and by `claude-flow neural router status` (future CLI).
+ */
+export async function neuralRouterStatus(): Promise<{ enabled: boolean; available: boolean; routedBy: NeuralRoutedBy | null; reason: string; config: NeuralRouterConfig }> {
+  const cfg = getConfig();
+  if (!cfg.enabled) return { enabled: false, available: false, routedBy: null, reason: 'CLAUDE_FLOW_ROUTER_NEURAL!=1', config: cfg };
+  const backend = await getBackend();
+  return { enabled: true, available: backend.available, routedBy: backend.routedBy, reason: backend.reason, config: cfg };
+}
+
+/**
+ * Test seam — reset module-level caches so unit tests can simulate cold init.
+ * Not exported from the package's barrel.
+ */
+export function __resetNeuralRouterForTests(): void {
+  _config = null;
+  _backend = null;
+  _initPromise = null;
+}

@@ -22,12 +22,17 @@
  *
  * Note (#2329): An earlier design (ADR-026 + this file's previous header)
  * described a Tiny-Dancer / FastGRNN neural router with embedding-based
- * complexity scoring. That path was never wired in — `@ruvector/tiny-dancer`
- * is not imported here and the `embedding`-consuming branch in
- * `computeSemanticDepth` is only reachable via the externally-callable
- * `routeToModelFull(task, embedding)` wrapper (no internal callers). The
- * shipped router is the heuristic + bandit described above; the neural
- * path remains a future direction tracked in #2329.
+ * complexity scoring. That path was never wired in directly.
+ *
+ * Note (ADR-148, #2334): The cost-optimal neural router is now wired as an
+ * optional, gated addition via `./neural-router.ts` (which uses
+ * `@metaharness/router`, optionally accelerated by `@ruvector/tiny-dancer`).
+ * It is double-gated on `CLAUDE_FLOW_ROUTER_NEURAL=1` + an embedding being
+ * supplied + a corpus/artifact being loadable. When any gate is closed the
+ * shipped heuristic + bandit path runs unchanged and the result carries
+ * `routedBy: 'heuristic'` (default) or `'bandit-fallback'` (neural enabled
+ * but declined). When all gates are open and a backend resolves, the result
+ * carries `routedBy: 'metaharness-knn' | 'metaharness-krr' | 'fastgrnn'`.
  *
  * @module model-router
  */
@@ -140,6 +145,14 @@ export interface ModelRoutingResult {
   inferenceTimeUs: number;
   /** Estimated cost multiplier */
   costMultiplier: number;
+  /**
+   * Which backend produced this decision (ADR-148 / ADR-074 — observable, not
+   * inferred). Always one of:
+   *   'metaharness-knn' | 'metaharness-krr' | 'fastgrnn'  — neural backends
+   *   'bandit-fallback'                                    — neural enabled, declined
+   *   'heuristic'                                          — neural disabled (default)
+   */
+  routedBy: 'metaharness-knn' | 'metaharness-krr' | 'fastgrnn' | 'bandit-fallback' | 'heuristic';
 }
 
 /**
@@ -390,7 +403,16 @@ export class ModelRouter {
   }
 
   /**
-   * Route a task to the optimal model
+   * Route a task to the optimal model.
+   *
+   * When `embedding` is supplied and `CLAUDE_FLOW_ROUTER_NEURAL=1` is set,
+   * the cost-optimal neural backend (ADR-148) is consulted first; its
+   * decision is used when its `metBar` clears the configured quality bar
+   * and `routedBy` reflects which backend produced the decision. Otherwise
+   * the shipped heuristic + Thompson bandit path runs (byte-identical to
+   * the pre-ADR-148 behavior) and the result carries `routedBy:
+   * 'bandit-fallback'` (neural was enabled but declined) or
+   * `'heuristic'` (neural was disabled).
    */
   async route(task: string, embedding?: number[]): Promise<ModelRoutingResult> {
     const startTime = performance.now();
@@ -398,14 +420,57 @@ export class ModelRouter {
     // Analyze task complexity
     const complexity = this.analyzeComplexity(task, embedding);
 
-    // Compute base model scores
-    const scores = this.computeModelScores(complexity);
+    // ADR-148 — optional neural cost-optimal path (gated, opt-in)
+    let neuralPick:
+      | { model: ClaudeModel; confidence: number; uncertainty: number; routedBy: 'metaharness-knn' | 'metaharness-krr' | 'fastgrnn' }
+      | null = null;
+    let neuralDeclined = false;
+    if (embedding && embedding.length > 0 && process.env.CLAUDE_FLOW_ROUTER_NEURAL === '1') {
+      try {
+        const { tryCostOptimalRoute } = await import('./neural-router.js');
+        const nr = await tryCostOptimalRoute(embedding);
+        if (nr && nr.metBar) {
+          neuralPick = {
+            model: nr.model,
+            confidence: nr.predictedQuality,
+            uncertainty: 1 - nr.predictedQuality,
+            routedBy: nr.routedBy,
+          };
+        } else if (nr) {
+          // The neural path returned a decision but did not clear the bar —
+          // we still defer to the bandit, but tag the result so observers
+          // know the neural backend was consulted and declined.
+          neuralDeclined = true;
+        }
+      } catch {
+        // Silent — neural path is best-effort; fall through to bandit.
+      }
+    }
 
-    // Apply circuit breaker adjustments
-    const adjustedScores = this.applyCircuitBreaker(scores);
+    let model: ClaudeModel;
+    let confidence: number;
+    let uncertainty: number;
+    let routedBy: ModelRoutingResult['routedBy'];
+    let adjustedScores: Record<ClaudeModel, number>;
 
-    // Select best model
-    const { model, confidence, uncertainty } = this.selectModel(adjustedScores, complexity.score);
+    if (neuralPick) {
+      model = neuralPick.model;
+      confidence = neuralPick.confidence;
+      uncertainty = neuralPick.uncertainty;
+      routedBy = neuralPick.routedBy;
+      // Build alternatives surface from the bandit's view (the neural backend
+      // already picked the best; bandit scores are still informative).
+      const scores = this.computeModelScores(complexity);
+      adjustedScores = this.applyCircuitBreaker(scores);
+    } else {
+      const scores = this.computeModelScores(complexity);
+      adjustedScores = this.applyCircuitBreaker(scores);
+      const picked = this.selectModel(adjustedScores, complexity.score);
+      model = picked.model;
+      confidence = picked.confidence;
+      uncertainty = picked.uncertainty;
+      routedBy = neuralDeclined ? 'bandit-fallback' : 'heuristic';
+    }
 
     const inferenceTimeUs = (performance.now() - startTime) * 1000;
 
@@ -422,10 +487,24 @@ export class ModelRouter {
         .sort((a, b) => b.score - a.score),
       inferenceTimeUs,
       costMultiplier: MODEL_CAPABILITIES[model].costMultiplier,
+      routedBy,
     };
 
-    // Track decision
+    // Track decision (in-memory bandit state)
     this.trackDecision(task, result);
+
+    // ADR-148 — opt-in DRACO-shaped trajectory collection
+    if (process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY === '1') {
+      try {
+        const { recordDecision } = await import('./router-trajectory.js');
+        recordDecision({
+          task, embedding, complexity: complexity.score,
+          model, confidence, uncertainty, routedBy,
+        });
+      } catch {
+        // Silent — trajectory recording must never break routing.
+      }
+    }
 
     return result;
   }

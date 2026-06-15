@@ -1,0 +1,69 @@
+{
+  "generated_by": "scripts/gen-seed-corpus.mjs",
+  "generated_at": "2026-06-15",
+  "dim": 32,
+  "rows": 64,
+  "tier_distribution": {
+    "cheap": 20,
+    "mid": 20,
+    "strong": 24
+  },
+  "scores_by_tier": {
+    "cheap": {
+      "haiku": 0.94,
+      "sonnet": 0.92,
+      "opus": 0.93
+    },
+    "mid": {
+      "haiku": 0.65,
+      "sonnet": 0.91,
+      "opus": 0.92
+    },
+    "strong": {
+      "haiku": 0.3,
+      "sonnet": 0.65,
+      "opus": 0.92
+    }
+  },
+  "templates": {
+    "cheap": [
+      "rename {x} to {y}",
+      "add a console.log to {x}",
+      "fix typo in {x}",
+      "remove unused import {x}",
+      "add return type annotation to {x}",
+      "format {x} as kebab-case",
+      "increment counter in {x}",
+      "add try/catch around {x}",
+      "change var to const in {x}",
+      "delete unused export {x}"
+    ],
+    "mid": [
+      "implement a debounce helper for {x}",
+      "add unit tests for {x}",
+      "extract a hook from {x}",
+      "refactor {x} to use async/await",
+      "add input validation to {x}",
+      "migrate {x} from callbacks to promises",
+      "add a logging layer to {x}",
+      "parameterize {x} with options object",
+      "add a config schema for {x}",
+      "write integration tests covering {x}"
+    ],
+    "strong": [
+      "design a distributed consensus protocol with byzantine fault tolerance for {x}",
+      "audit the {x} authentication flow for OWASP top-10 vulnerabilities",
+      "architect a multi-tenant database schema with row-level security for {x}",
+      "analyze why {x} has a memory leak under load — produce hypothesis with evidence",
+      "refactor {x} to the strategy pattern and migrate all callers safely",
+      "write a threat model for {x} including STRIDE categorization and mitigations",
+      "compare CRDT-based and OT-based collaborative editing for {x} with citations",
+      "design a backwards-compatible API deprecation path for {x}",
+      "plan a zero-downtime migration of {x} from postgres to a sharded backend",
+      "reason about consistency guarantees of {x} under partition and recovery",
+      "debug a nondeterministic race condition in {x} across distributed workers",
+      "design an event-sourced architecture for {x} with snapshots and replay"
+    ]
+  },
+  "caveat": "Synthetic deterministic corpus with hand-set scores per ADR-148. To be replaced by real DRACO trajectories once CLAUDE_FLOW_ROUTER_TRAJECTORY=1 collection runs in production."
+}
