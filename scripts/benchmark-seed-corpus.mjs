@@ -460,10 +460,16 @@ async function main() {
 
   if (ARGS.writeRows) {
     // Overwrite seed-rows.json with measured scores per model id.
+    // ADR-149 v2 — preserve ALL original row keys (notably `task` + `tier`,
+    // which gen-seed-corpus-v2.mjs writes per row). The prior stripping
+    // implementation dropped these fields and broke the v2-detection logic
+    // in this script's reader on the next run, silently falling back to v1
+    // template regeneration with a 64-row template count vs the actual 40
+    // rows in the corpus.
     const updated = allRows.map((row, idx) => {
       const m = measured.find(x => x.idx === idx);
       if (!m) return row;
-      return { embedding: row.embedding, scores: m.scores };
+      return { ...row, scores: m.scores };
     });
     writeFileSync(SEED_PATH, JSON.stringify(updated, null, 0));
     console.log(`Wrote measured seed-rows.json (${updated.length} rows)`);
