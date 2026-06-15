@@ -42,14 +42,20 @@ export type NeuralRoutedBy = 'metaharness-knn' | 'metaharness-krr' | 'fastgrnn';
 
 /** Cost-optimal route decision. */
 export interface NeuralRouteResult {
-  /** Chosen Claude model. */
+  /** Chosen Claude tier label (back-compat). Derived from `modelId`. */
   model: ClaudeModel;
+  /**
+   * Concrete picked model id — ADR-149. May be an Anthropic SDK id or an
+   * OpenRouter slug. Always a string; the closest tier label is in `model`
+   * for back-compat with consumers that still expect ClaudeModel.
+   */
+  modelId: string;
   /** Predicted quality the chosen candidate is expected to achieve (0..1). */
   predictedQuality: number;
   /** Did the predicted quality clear the configured `qualityBar`? */
   metBar: boolean;
   /** Per-candidate predicted qualities, ordered cheapest-first. */
-  alternatives: Array<{ model: ClaudeModel; predictedQuality: number; costPerMTok: number }>;
+  alternatives: Array<{ model: ClaudeModel; modelId: string; predictedQuality: number; costPerMTok: number }>;
   /** Backend that produced the decision. */
   routedBy: NeuralRoutedBy;
   /** Inference latency in microseconds. */
@@ -100,6 +106,29 @@ const PRICES: Record<ClaudeModel, number> = {
   haiku: 1, sonnet: 3, opus: 15, inherit: 3,
 };
 
+/**
+ * ADR-149 — map a concrete OpenRouter / Anthropic model id back to the
+ * closest ClaudeModel tier label for back-compat. Used to populate the
+ * `model: ClaudeModel` field when the actual picked `modelId` is e.g.
+ * `openai/gpt-4.1` or `inclusionai/ling-2.6-flash`.
+ *
+ * Mapping rule: substring-based. Anthropic ids carry the tier name;
+ * other providers map to the tier whose role they play (cheap, mid, strong).
+ * The map is intentionally non-exhaustive — unknown ids default to 'sonnet'
+ * (the safest middle ground for an unrecognised candidate).
+ */
+function tierLabelForModelId(modelId: string): ClaudeModel {
+  const id = modelId.toLowerCase();
+  if (id.includes('haiku') || id.includes('ling-') || id.includes('flash-lite')
+    || id.includes('nemotron-nano') || id.includes('ministral')
+    || id.includes('llama-3.2-3b') || id.includes('llama-3.1-8b')) {
+    return 'haiku';
+  }
+  if (id.includes('opus')) return 'opus';
+  // Mid-tier: sonnet, gpt-4.1, gemini-flash, llama-70b, nemotron-super, etc.
+  return 'sonnet';
+}
+
 // ============================================================================
 // Config resolution
 // ============================================================================
@@ -128,7 +157,10 @@ function getConfig(): NeuralRouterConfig {
     enabled: process.env.CLAUDE_FLOW_ROUTER_NEURAL === '1',
     modelPath: process.env.CLAUDE_FLOW_ROUTER_MODEL_PATH || undefined,
     bundledKrrPath: join(assetsDir, 'seed-router.krr.json'),
-    qualityBar: parseFloat(process.env.CLAUDE_FLOW_ROUTER_QUALITY_BAR ?? '0.8') || 0.8,
+    // ADR-149 — measured-corpus default. Synthetic-corpus scores topped at
+    // 0.42, so the prior 0.8 bar was unreachable. 0.25 keeps top-half
+    // candidates in the "clears the bar" set; override per-installation.
+    qualityBar: parseFloat(process.env.CLAUDE_FLOW_ROUTER_QUALITY_BAR ?? '0.25') || 0.25,
     seedCorpusPath: process.env.CLAUDE_FLOW_ROUTER_SEED_CORPUS
       ?? join(assetsDir, 'seed-rows.json'),
     k: parseInt(process.env.CLAUDE_FLOW_ROUTER_KNN_K ?? '5', 10) || 5,
@@ -325,15 +357,17 @@ export async function tryCostOptimalRoute(embedding: number[]): Promise<NeuralRo
       // candidates were precomputed. Hot path is one .route() call.
       if (!backend.native) return null;
       const res = await backend.native.router.route(embedding, backend.native.candidates);
-      const model = res.id as ClaudeModel;
+      const modelId = res.id;
       const t1 = Number(process.hrtime.bigint() / 1000n);
       return {
-        model,
+        model: tierLabelForModelId(modelId),
+        modelId,
         predictedQuality: 1 - res.uncertainty, // FastGRNN reports uncertainty, not quality directly
         metBar: !res.useLightweight && res.confidence >= cfg.qualityBar,
         alternatives: backend.native.candidates.map(c => ({
-          model: c.id as ClaudeModel,
-          predictedQuality: c.id === model ? res.confidence : 0,
+          model: tierLabelForModelId(c.id),
+          modelId: c.id,
+          predictedQuality: c.id === modelId ? res.confidence : 0,
           costPerMTok: c.costPerMTok,
         })),
         routedBy: 'fastgrnn',
@@ -341,16 +375,24 @@ export async function tryCostOptimalRoute(embedding: number[]): Promise<NeuralRo
       };
     }
 
-    // Pure-TS paths (k-NN or KRR)
+    // Pure-TS paths (k-NN or KRR) — ADR-149: ids are arbitrary strings,
+    // not ClaudeModel tier names. `tierLabelForModelId` derives the
+    // back-compat tier; `modelId` carries the concrete pick.
     if (!backend.router) return null;
     const main = backend.router.route(embedding);
     const all = backend.router.predictAll(embedding);
     const t1 = Number(process.hrtime.bigint() / 1000n);
     return {
-      model: main.id as ClaudeModel,
+      model: tierLabelForModelId(main.id),
+      modelId: main.id,
       predictedQuality: main.predictedQuality,
       metBar: main.metBar,
-      alternatives: all.map(a => ({ model: a.id as ClaudeModel, predictedQuality: a.predictedQuality, costPerMTok: a.costPerMTok })),
+      alternatives: all.map(a => ({
+        model: tierLabelForModelId(a.id),
+        modelId: a.id,
+        predictedQuality: a.predictedQuality,
+        costPerMTok: a.costPerMTok,
+      })),
       routedBy: backend.routedBy,
       inferenceTimeUs: t1 - t0,
     };

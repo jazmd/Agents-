@@ -101,18 +101,22 @@ describe('neural-router (ADR-148)', () => {
     expect(r.alternatives.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('routes a strong-looking query away from haiku', async () => {
+  it('returns a per-model pick with modelId (ADR-149)', async () => {
     process.env.CLAUDE_FLOW_ROUTER_NEURAL = '1';
     __resetNeuralRouterForTests();
     const e = new Array(32).fill(0);
     e[0] = -0.85; e[1] = 0.7;
     const r = await tryCostOptimalRoute(e);
     if (!r) return; // dep absent in CI
-    expect(r.model).not.toBe('haiku');
-    // For a strong query, predictedQuality of haiku should be below sonnet/opus
-    const haikuPred = r.alternatives.find(a => a.model === 'haiku')?.predictedQuality ?? 1;
-    const opusPred = r.alternatives.find(a => a.model === 'opus')?.predictedQuality ?? 0;
-    expect(opusPred).toBeGreaterThanOrEqual(haikuPred);
+    // ADR-149: the result must carry a concrete model id (a string), and
+    // the picked model id must appear as one of the alternatives.
+    expect(typeof r.modelId).toBe('string');
+    expect(r.modelId.length).toBeGreaterThan(0);
+    expect(r.alternatives.find(a => a.modelId === r.modelId)).toBeDefined();
+    // The tier label (model) is derived from the modelId — must be a valid
+    // ClaudeModel tier, not necessarily the "expected" tier (DRACO finding:
+    // measured cheap models often beat expensive ones on terse tasks).
+    expect(['haiku', 'sonnet', 'opus', 'inherit']).toContain(r.model);
   });
 
   it('caches the resolved backend across calls', async () => {

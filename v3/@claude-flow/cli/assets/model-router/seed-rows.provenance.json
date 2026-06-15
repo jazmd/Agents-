@@ -65,5 +65,17 @@
       "design an event-sourced architecture for {x} with snapshots and replay"
     ]
   },
-  "caveat": "Synthetic deterministic corpus with hand-set scores per ADR-148. To be replaced by real DRACO trajectories once CLAUDE_FLOW_ROUTER_TRAJECTORY=1 collection runs in production."
+  "caveat": "Seed corpus is now measured (ADR-149). Re-measure quarterly via `scripts/benchmark-seed-corpus.mjs --live`. To regenerate the embeddings (not the scores), use `scripts/gen-seed-corpus.mjs`.",
+  "measured_at": "2026-06-15T21:42:12.098Z",
+  "measured_against": [
+    "inclusionai/ling-2.6-flash",
+    "google/gemini-2.5-flash-lite",
+    "anthropic/claude-haiku-4.5",
+    "openai/gpt-4.1",
+    "meta-llama/llama-3.3-70b-instruct",
+    "anthropic/claude-sonnet-4-6",
+    "anthropic/claude-opus-4"
+  ],
+  "judge": "anthropic/claude-sonnet-4-6",
+  "measurement_run": "seed-corpus-2026-06-15-21-42-12Z.json"
 }

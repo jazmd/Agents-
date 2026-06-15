@@ -250,6 +250,14 @@ export interface ModelRoutingResult {
    * use this to override the default MODEL_MAP-derived Anthropic slug.
    */
   openrouterModel?: string;
+  /**
+   * ADR-149 — concrete picked model id (e.g. `openai/gpt-4.1`,
+   * `inclusionai/ling-2.6-flash`, `anthropic/claude-sonnet-4-6`). Set when
+   * the neural backend returned a per-model pick. The `model` field above
+   * remains the tier label for back-compat with Anthropic-API consumers
+   * that map tier → MODEL_MAP id.
+   */
+  modelId?: string;
 }
 
 /**
@@ -548,32 +556,44 @@ export class ModelRouter {
     // dim mismatch, etc.). In that case we route via pure bandit.
     let neuralPrior: { qualities: Partial<Record<ClaudeModel, number>>; weight: number } | null = null;
     let neuralBackend: ModelRoutingResult['neuralBackend'] | undefined = undefined;
+    let neuralModelId: string | undefined = undefined;
     let neuralDeclined = false;
     if (embedding && embedding.length > 0 && process.env.CLAUDE_FLOW_ROUTER_NEURAL === '1') {
       try {
         const { tryCostOptimalRoute } = await loadNeuralRouter();
         const nr = await tryCostOptimalRoute(embedding);
         if (nr) {
-          // Build per-candidate quality map. We use RANK-based qualities
-          // rather than the backend's raw predictedQuality because k-NN/KRR
-          // backends commonly produce predictions in a narrow band (e.g.
-          // 0.92, 0.93, 0.94 for the bundled-seed KRR's three tiers). Feeding
-          // those tiny absolute differences into Beta(α + q*w, β + (1-q)*w)
-          // produces near-identical prior bumps and Beta sampling noise
-          // dominates — the neural signal gets lost. Rank-based qualities
-          // (best=1.0, second=0.5, third=0.2) give the neural's preferred
-          // candidate clear posterior weight while still leaving the
-          // unpreferred tiers with some prior mass so the bandit can learn
-          // out of it given enough outcomes.
+          // ADR-149: capture the concrete picked model id (the cost-optimal
+          // pick across all candidates, not just within a tier).
+          neuralModelId = nr.modelId;
+          // Build per-tier quality map for the bandit prior. The neural
+          // backend returns per-model alternatives (e.g. 7 distinct slugs);
+          // for the Beta-prior bump we collapse to tier by taking the MAX
+          // predicted quality within each tier — the tier whose best
+          // candidate is best overall is the tier the bandit should favor.
+          // Then we apply rank-based scaling [1.0, 0.5, 0.2] across the
+          // three tiers so the Beta bumps are well-separated (raw KRR
+          // outputs are typically in a narrow band — see ADR-148 phase 1).
           const sorted = [...nr.alternatives].sort((a, b) => b.predictedQuality - a.predictedQuality);
-          // Defensive: if `model` isn't in alternatives, prepend it as the top.
           if (!sorted.find(s => s.model === nr.model)) {
-            sorted.unshift({ model: nr.model, predictedQuality: nr.predictedQuality, costPerMTok: 0 });
+            sorted.unshift({ model: nr.model, modelId: nr.modelId, predictedQuality: nr.predictedQuality, costPerMTok: 0 });
           }
-          const rankQ = [1.0, 0.5, 0.2];   // tunable triplet, default
+          // Collapse per-model alternatives → per-tier MAX quality, preserving
+          // first-occurrence order (which is best-quality first thanks to the sort).
+          const tierMaxQ: Partial<Record<ClaudeModel, number>> = {};
+          const tierOrder: ClaudeModel[] = [];
+          for (const a of sorted) {
+            if (tierMaxQ[a.model] === undefined) {
+              tierMaxQ[a.model] = a.predictedQuality;
+              tierOrder.push(a.model);
+            } else if (a.predictedQuality > (tierMaxQ[a.model] ?? 0)) {
+              tierMaxQ[a.model] = a.predictedQuality;
+            }
+          }
+          const rankQ = [1.0, 0.5, 0.2];
           const qualities: Partial<Record<ClaudeModel, number>> = {};
-          for (let i = 0; i < sorted.length && i < rankQ.length; i++) {
-            qualities[sorted[i].model] = rankQ[i];
+          for (let i = 0; i < tierOrder.length && i < rankQ.length; i++) {
+            qualities[tierOrder[i]] = rankQ[i];
           }
           const weight = parseFloat(process.env.CLAUDE_FLOW_ROUTER_NEURAL_WEIGHT ?? '5') || 5;
           neuralPrior = { qualities, weight };
@@ -626,7 +646,18 @@ export class ModelRouter {
     // ADR-148 phase 2 — resolve OpenRouter alt for the picked tier when the
     // execution provider is OpenRouter. Free of side effects on the bandit;
     // purely advisory metadata for downstream agent-execute-core.
-    const exec = resolveExecutionProvider(model);
+    //
+    // ADR-149 — when the neural backend returned a concrete `modelId` that
+    // is NOT an Anthropic slug, we override the provider to 'openrouter'
+    // and use the modelId as the openrouterModel. Otherwise consumers
+    // dispatching on `model` would call the Anthropic SDK for a model id
+    // the SDK can't reach (e.g. 'inclusionai/ling-2.6-flash'), losing the
+    // cost-optimal pick. When the neural picked an Anthropic id we keep
+    // the standard provider resolution since the Anthropic SDK can serve it.
+    let exec = resolveExecutionProvider(model);
+    if (neuralModelId && !neuralModelId.startsWith('anthropic/')) {
+      exec = { provider: 'openrouter', openrouterModel: neuralModelId };
+    }
 
     // Build result
     const result: ModelRoutingResult = {
@@ -645,6 +676,11 @@ export class ModelRouter {
       ...(neuralBackend ? { neuralBackend } : {}),
       provider: exec.provider,
       ...(exec.openrouterModel ? { openrouterModel: exec.openrouterModel } : {}),
+      // ADR-149: surface the concrete neural pick when present. Prefer the
+      // explicit OpenRouter alt (resolveExecutionProvider) for execution,
+      // but expose the model id the neural backend chose so observers and
+      // consumers can see the cost-optimal decision.
+      ...(neuralModelId ? { modelId: neuralModelId } : {}),
     };
 
     // Track decision (in-memory bandit state)
