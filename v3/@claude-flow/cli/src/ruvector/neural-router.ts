@@ -72,6 +72,13 @@ interface NeuralRouterConfig {
   seedCorpusPath: string;
   /** k for k-NN backend (default 5). */
   k: number;
+  /**
+   * ADR-149 iter 12 — optional latency budget in ms. When > 0, candidates
+   * whose measured p50 latency exceeds the budget are filtered OUT before
+   * the cost-optimal selector runs. Default 0 (unbounded, cost-only).
+   * For interactive flows that need sub-second responses, set 1000.
+   */
+  latencyBudgetMs: number;
 }
 
 // ============================================================================
@@ -105,6 +112,46 @@ let _initPromise: Promise<ResolvedBackend> | null = null;
 const PRICES: Record<ClaudeModel, number> = {
   haiku: 1, sonnet: 3, opus: 15, inherit: 3,
 };
+
+// ADR-149 iter 12 — lazy load measured per-model latency (mean ms) from the
+// most-recent FULL seed-corpus measurement file. Cached per-process.
+// Returns an empty map if no measurement is available.
+let _latencyMapPromise: Promise<Record<string, number>> | null = null;
+function loadLatencyMap(): Promise<Record<string, number>> {
+  if (_latencyMapPromise !== null) return _latencyMapPromise;
+  _latencyMapPromise = (async () => {
+    const result: Record<string, number> = {};
+    try {
+      const fs = await import('node:fs');
+      const path = await import('node:path');
+      const benchDir = path.resolve(process.cwd(), 'docs', 'benchmarks', 'runs');
+      if (!fs.existsSync(benchDir)) return result;
+      const files = fs.readdirSync(benchDir)
+        .filter(f => f.startsWith('seed-corpus-') && f.endsWith('.json'))
+        .sort().reverse();
+      // Prefer a file with all three tiers populated (full measurement run);
+      // fall back to newest if none qualify.
+      let chosen: { perCandidate?: Array<{ id: string; latency_mean_ms?: number | null; cheap_avg_score?: number | null; mid_avg_score?: number | null; strong_avg_score?: number | null }> } | null = null;
+      for (const f of files) {
+        try {
+          const data = JSON.parse(fs.readFileSync(path.join(benchDir, f), 'utf8'));
+          const sample = data.perCandidate?.[0];
+          if (sample && sample.cheap_avg_score != null && sample.mid_avg_score != null && sample.strong_avg_score != null) {
+            chosen = data; break;
+          }
+          if (!chosen) chosen = data;
+        } catch { /* skip */ }
+      }
+      for (const r of chosen?.perCandidate ?? []) {
+        if (typeof r.latency_mean_ms === 'number' && r.latency_mean_ms > 0) {
+          result[r.id] = r.latency_mean_ms;
+        }
+      }
+    } catch { /* best-effort */ }
+    return result;
+  })();
+  return _latencyMapPromise;
+}
 
 /**
  * ADR-149 — map a concrete OpenRouter / Anthropic model id back to the
@@ -168,6 +215,7 @@ function getConfig(): NeuralRouterConfig {
     seedCorpusPath: process.env.CLAUDE_FLOW_ROUTER_SEED_CORPUS
       ?? join(assetsDir, 'seed-rows.json'),
     k: parseInt(process.env.CLAUDE_FLOW_ROUTER_KNN_K ?? '5', 10) || 5,
+    latencyBudgetMs: Math.max(0, parseInt(process.env.CLAUDE_FLOW_ROUTER_LATENCY_BUDGET_MS ?? '0', 10) || 0),
   };
   return _config;
 }
@@ -383,8 +431,31 @@ export async function tryCostOptimalRoute(embedding: number[]): Promise<NeuralRo
     // not ClaudeModel tier names. `tierLabelForModelId` derives the
     // back-compat tier; `modelId` carries the concrete pick.
     if (!backend.router) return null;
-    const main = backend.router.route(embedding);
     const all = backend.router.predictAll(embedding);
+
+    // ADR-149 iter 12 — latency-aware filtering. When CLAUDE_FLOW_ROUTER_
+    // LATENCY_BUDGET_MS is set, drop candidates whose measured latency
+    // exceeds the budget BEFORE the cost-optimal pick. The unfiltered
+    // alternatives stay on the result for observability — only the chosen
+    // `modelId` is constrained.
+    let main = backend.router.route(embedding);
+    if (cfg.latencyBudgetMs > 0) {
+      const latency = await loadLatencyMap();
+      const eligible = all.filter(a => {
+        const lat = latency[a.id];
+        return lat === undefined || lat <= cfg.latencyBudgetMs;
+      });
+      if (eligible.length > 0) {
+        // Re-pick cheapest-clearing-bar among eligible
+        const clearing = eligible.filter(a => a.predictedQuality >= cfg.qualityBar)
+          .sort((a, b) => a.costPerMTok - b.costPerMTok);
+        const pick = clearing[0] ?? [...eligible].sort((a, b) => b.predictedQuality - a.predictedQuality)[0];
+        main = { id: pick.id, predictedQuality: pick.predictedQuality, costPerMTok: pick.costPerMTok, metBar: pick.predictedQuality >= cfg.qualityBar };
+      }
+      // else: every candidate exceeds the budget → fall back to the original pick
+      //   (better to return a slow answer than no answer)
+    }
+
     const t1 = Number(process.hrtime.bigint() / 1000n);
     return {
       model: tierLabelForModelId(main.id),
@@ -578,4 +649,5 @@ export function __resetNeuralRouterForTests(): void {
   _config = null;
   _backend = null;
   _initPromise = null;
+  _latencyMapPromise = null;
 }

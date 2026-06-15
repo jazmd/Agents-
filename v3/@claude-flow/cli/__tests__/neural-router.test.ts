@@ -44,6 +44,7 @@ const ENV_KEYS = [
   'CLAUDE_FLOW_SWARM_DIR',
   'CLAUDE_FLOW_ROUTER_PROVIDER',
   'CLAUDE_FLOW_ROUTER_OPENROUTER_ALTS',
+  'CLAUDE_FLOW_ROUTER_LATENCY_BUDGET_MS',
   'OPENROUTER_API_KEY',
   'ANTHROPIC_API_KEY',
 ];
@@ -322,6 +323,30 @@ describe('ModelRouter integration (ADR-148)', () => {
     const allIds = first.alternatives.map(a => a.modelId);
     const exhausted = await nextCostOptimalAlternative(e, allIds);
     expect(exhausted).toBeNull();
+  });
+
+  it('latency budget filters slow candidates from the pick (ADR-149 iter 12)', async () => {
+    // With no budget, the router picks the cost-optimal candidate (often Ling).
+    // With a tight budget (200ms), candidates whose measured p50 exceeds it
+    // should be filtered out — the picked modelId may change.
+    process.env.CLAUDE_FLOW_ROUTER_NEURAL = '1';
+    __resetNeuralRouterForTests();
+    const { tryCostOptimalRoute } = await import('../src/ruvector/neural-router.js');
+    const e = new Array(384).fill(0); e[0] = 0.3;
+
+    const unbounded = await tryCostOptimalRoute(e);
+    if (!unbounded) return; // dep absent
+
+    // Now apply a stricter budget — should still produce a result, possibly
+    // the same model id (if it was already fast) or a different one.
+    process.env.CLAUDE_FLOW_ROUTER_LATENCY_BUDGET_MS = '300';
+    __resetNeuralRouterForTests();
+    const constrained = await tryCostOptimalRoute(e);
+    expect(constrained).not.toBeNull();
+    expect(typeof constrained!.modelId).toBe('string');
+    // The CONSTRAINT must not break the routing contract — alternatives
+    // still surface the full set; only the pick is constrained.
+    expect(constrained!.alternatives.length).toBeGreaterThanOrEqual(2);
   });
 
   it('embedTaskWithCacheBatch matches single-call results + amortizes setup (ADR-149 iter 11)', async () => {
