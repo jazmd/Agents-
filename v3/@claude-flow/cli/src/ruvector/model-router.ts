@@ -324,6 +324,16 @@ function complexityBucket(score: number): ComplexityBucket {
 }
 
 type BucketedPriors = Record<ComplexityBucket, Record<ClaudeModel, BetaPrior>>;
+/**
+ * ADR-149 — per-modelId Beta priors, keyed by complexity bucket. Shadow
+ * state that accumulates from recordOutcomeByModelId() so the bandit can
+ * distinguish e.g. `inclusionai/ling-2.6-flash` from
+ * `anthropic/claude-haiku-4-5-20251001` even though both collapse to the
+ * `haiku` tier in BucketedPriors. Selection still uses BucketedPriors;
+ * a future refactor switches to BucketedPriorsById when it has enough
+ * data to be trustworthy.
+ */
+type BucketedPriorsById = Record<ComplexityBucket, Record<string, BetaPrior>>;
 
 interface RouterState {
   totalDecisions: number;
@@ -339,16 +349,25 @@ interface RouterState {
     outcome: 'success' | 'failure' | 'escalated';
     timestamp: string;
   }>;
-  /** Persisted-schema version. v2 = per-bucket priors (ADR-142). */
+  /** Persisted-schema version. v2 = per-bucket tier priors (ADR-142). v3 = adds priorsById (ADR-149). */
   version?: number;
   /**
-   * Beta(α, β) priors per complexity bucket per model — populated by
+   * Beta(α, β) priors per complexity bucket per tier — populated by
    * recordOutcome via Thompson sampling. Defaults to {alpha:1,beta:1}
    * (uniform). Keyed by bucket so e.g. haiku failures on hard tasks don't
    * suppress haiku for easy tasks. Old flat per-model files migrate forward
    * (see migratePriors).
    */
   priors?: BucketedPriors;
+  /**
+   * ADR-149 v3 — per-modelId Beta priors. Additive shadow state populated
+   * by recordOutcomeByModelId() with the concrete model id from the
+   * cost-optimal neural pick (e.g. 'inclusionai/ling-2.6-flash'). Lets the
+   * bandit learn that different models within the same tier perform
+   * differently. NOT yet consumed by selectModel() — that switch lands in
+   * a follow-up once enough per-modelId data has accumulated.
+   */
+  priorsById?: BucketedPriorsById;
 }
 
 // ============================================================================
@@ -421,6 +440,12 @@ function defaultBanditPriors(): Record<ClaudeModel, BetaPrior> {
 /** Uniform priors for every complexity bucket (cold start). */
 function defaultBucketedPriors(): BucketedPriors {
   return { low: defaultBanditPriors(), med: defaultBanditPriors(), high: defaultBanditPriors() };
+}
+
+/** ADR-149 — empty per-modelId shadow priors. Each bucket starts as `{}`; entries
+ *  populate on first `recordOutcomeByModelId(task, modelId, outcome)` call. */
+function defaultBucketedPriorsById(): BucketedPriorsById {
+  return { low: {}, med: {}, high: {} };
 }
 
 function clonePriors(p: Record<ClaudeModel, BetaPrior>): Record<ClaudeModel, BetaPrior> {
@@ -1079,6 +1104,57 @@ export class ModelRouter {
   }
 
   /**
+   * ADR-149 — record an outcome keyed by the CONCRETE model id (e.g.
+   * 'inclusionai/ling-2.6-flash') rather than the tier label. Updates the
+   * shadow `priorsById` state without affecting `priors` (tier priors).
+   *
+   * This is the per-model learning signal the bandit needs to eventually
+   * distinguish GPT-4.1 from Sonnet within the 'sonnet' tier. Selection
+   * currently still uses tier priors; this state accumulates so a future
+   * refactor can switch the selector over once there's enough data.
+   *
+   * Cost-adjusted reward semantics: cheap models get the highest reward on
+   * success (their successes are most cost-efficient). We map modelId to
+   * its closest tier for the reward table — the routing math doesn't have
+   * a per-modelId reward configuration yet.
+   */
+  recordOutcomeByModelId(
+    task: string,
+    modelId: string,
+    outcome: 'success' | 'failure' | 'escalated'
+  ): void {
+    if (!modelId || typeof modelId !== 'string') return;
+    const taskScore = this.analyzeComplexity(task).score;
+    const bucket = complexityBucket(taskScore);
+    if (!this.state.priorsById) this.state.priorsById = defaultBucketedPriorsById();
+    let perBucket = this.state.priorsById[bucket];
+    if (!perBucket) {
+      perBucket = {};
+      this.state.priorsById[bucket] = perBucket;
+    }
+    if (!perBucket[modelId]) perBucket[modelId] = { alpha: 1, beta: 1 };
+
+    // Reward proxy: derive a tier-equivalent for cost weighting. Substring
+    // match keeps it cheap and accurate for the candidates in the registry.
+    const id = modelId.toLowerCase();
+    const tierProxy: ClaudeModel =
+      id.includes('haiku') || id.includes('ling-') || id.includes('flash-lite')
+        || id.includes('nemotron-nano') || id.includes('ministral')
+        || id.includes('llama-3.2-3b') || id.includes('llama-3.1-8b')
+        ? 'haiku'
+        : id.includes('opus') ? 'opus' : 'sonnet';
+    const reward = BANDIT_REWARDS[tierProxy]?.[outcome] ?? 0.5;
+    perBucket[modelId].alpha += reward;
+    perBucket[modelId].beta += 1 - reward;
+
+    // Bump the schema version on first per-modelId write so downstream
+    // tooling can see v3 was reached (the version field stays at 3 once set).
+    if ((this.state.version ?? 0) < 3) this.state.version = 3;
+
+    this.saveState();
+  }
+
+  /**
    * Get router statistics
    */
   getStats(): {
@@ -1094,6 +1170,17 @@ export class ModelRouter {
     neuralBackendCounts: Record<NonNullable<ModelRoutingResult['neuralBackend']>, number>;
     /** ADR-148: A/B mode disagreement rate over the active process. */
     ab: { comparisons: number; disagreements: number; disagreementRate: number };
+    /**
+     * ADR-149: state schema version. 2 = bucketed tier priors only; 3 = also
+     * carries `priorsById` shadow state. Bumps on first recordOutcomeByModelId().
+     */
+    stateVersion: number;
+    /**
+     * ADR-149: per-modelId Beta priors per complexity bucket. Empty until
+     * recordOutcomeByModelId() fires. NOT consumed by selectModel() yet; this
+     * is shadow state for a future selection-by-modelId refactor.
+     */
+    priorsById?: BucketedPriorsById;
   } {
     return {
       totalDecisions: this.state.totalDecisions,
@@ -1109,6 +1196,8 @@ export class ModelRouter {
         disagreements: this.abDisagreements,
         disagreementRate: this.abComparisons > 0 ? this.abDisagreements / this.abComparisons : 0,
       },
+      stateVersion: this.state.version ?? 2,
+      ...(this.state.priorsById ? { priorsById: this.state.priorsById } : {}),
     };
   }
 
@@ -1290,4 +1379,22 @@ export function recordModelOutcome(
 ): void {
   const router = getModelRouter();
   router.recordOutcome(task, model, outcome);
+}
+
+/**
+ * ADR-149 — record an outcome keyed by the concrete model id rather than
+ * the tier label. Updates the shadow `priorsById` state. Selection logic
+ * still uses tier priors; this data accumulates for a future per-modelId
+ * selector refactor.
+ *
+ * Safe to call alongside `recordModelOutcome` — they update independent
+ * state slices so double-counting is impossible.
+ */
+export function recordModelOutcomeByModelId(
+  task: string,
+  modelId: string,
+  outcome: 'success' | 'failure' | 'escalated'
+): void {
+  const router = getModelRouter();
+  router.recordOutcomeByModelId(task, modelId, outcome);
 }

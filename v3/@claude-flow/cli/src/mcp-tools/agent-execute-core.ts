@@ -510,15 +510,22 @@ export async function executeAgentTask(input: AgentExecuteInput): Promise<AgentE
   // A finer-grained signal (user-accepted output / regression-detected) is a
   // follow-up; this commit closes the bandit's basic learning loop.
   try {
-    const { recordModelOutcome } = await import('../ruvector/model-router.js');
+    const { recordModelOutcome, recordModelOutcomeByModelId } = await import('../ruvector/model-router.js');
     // Bandit priors are keyed on the 3 canonical tiers (haiku/sonnet/opus/inherit);
     // collapse opus-4.7 → opus before recording so the bandit's per-tier Beta
-    // updates correctly. ADR-149 phase-3 will move priors to per-modelId,
-    // at which point this map is replaced by agent.modelId.
+    // updates correctly.
     const tier: 'haiku' | 'sonnet' | 'opus' | 'inherit' =
       agent.model === 'opus-4.7' ? 'opus' :
       (agent.model as 'haiku' | 'sonnet' | 'opus' | 'inherit' | undefined) ?? 'sonnet';
-    recordModelOutcome(input.prompt, tier, result.success ? 'success' : 'failure');
+    const outcome: 'success' | 'failure' = result.success ? 'success' : 'failure';
+    recordModelOutcome(input.prompt, tier, outcome);
+    // ADR-149 — also write to the shadow per-modelId priors when the cost-
+    // optimal neural backend picked a concrete model id. Selection logic
+    // still uses tier priors, but the per-modelId data accumulates so a
+    // future refactor can switch the selector over.
+    if (agent.modelId) {
+      recordModelOutcomeByModelId(input.prompt, agent.modelId, outcome);
+    }
   } catch {
     // Silent — bandit feedback must never block routing.
   }

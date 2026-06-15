@@ -294,6 +294,32 @@ describe('ModelRouter integration (ADR-148)', () => {
     expect(typeof statsBefore.totalDecisions).toBe('number');
     expect(typeof statsAfter.totalDecisions).toBe('number');
   });
+
+  it('recordModelOutcomeByModelId writes shadow per-modelId state (ADR-149 iter 6)', async () => {
+    const { resetModelRouter, recordModelOutcomeByModelId, getModelRouterStats } = await import('../src/ruvector/model-router.js');
+    resetModelRouter();
+    // Drive 3 successes on a concrete OpenRouter slug. The tier-level priors
+    // should be untouched (this method targets priorsById only). After the
+    // mutations, getStats must surface priorsById with the new entry and
+    // stateVersion must bump to 3.
+    const taskText = 'Convert this var to const. Return ONLY the JavaScript:\nvar name = "alice";';
+    for (let i = 0; i < 3; i++) {
+      recordModelOutcomeByModelId(taskText, 'inclusionai/ling-2.6-flash', 'success');
+    }
+    const stats = getModelRouterStats();
+    expect(stats.stateVersion).toBeGreaterThanOrEqual(3);
+    expect(stats.priorsById).toBeDefined();
+    // Find the bucket the task got assigned to — could be low/med/high
+    // depending on complexity analysis. We just need one of them to contain
+    // an entry keyed by our model id with non-default alpha (3 successes ≥ 4).
+    const buckets = ['low', 'med', 'high'] as const;
+    let found = false;
+    for (const b of buckets) {
+      const m = stats.priorsById?.[b]?.['inclusionai/ling-2.6-flash'];
+      if (m && m.alpha > 1) { found = true; break; }
+    }
+    expect(found).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
