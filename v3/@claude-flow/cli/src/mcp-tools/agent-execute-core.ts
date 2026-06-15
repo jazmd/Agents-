@@ -28,7 +28,19 @@ export interface AgentRecord {
   createdAt: string;
   domain?: string;
   model?: ClaudeModel;
-  modelRoutedBy?: 'explicit' | 'router' | 'codemod' | 'default';
+  modelRoutedBy?: 'explicit' | 'router' | 'codemod' | 'default' | 'hybrid';
+  /**
+   * ADR-149 — concrete picked model id (e.g. `openai/gpt-4.1`,
+   * `inclusionai/ling-2.6-flash`). Present when the cost-optimal neural
+   * router contributed to the decision; downstream `executeAgentInline`
+   * uses this to dispatch via the correct provider's API instead of
+   * falling back to MODEL_MAP[tier].
+   */
+  modelId?: string;
+  /** ADR-148 phase 2 — execution provider hint. */
+  provider?: 'anthropic' | 'openrouter';
+  /** ADR-148 phase 2 — concrete OpenRouter slug when provider='openrouter'. */
+  openrouterModel?: string;
   lastResult?: Record<string, unknown>;
 }
 
