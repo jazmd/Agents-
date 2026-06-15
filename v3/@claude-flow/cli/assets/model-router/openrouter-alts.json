@@ -35,6 +35,11 @@
         { "id": "qwen/qwen3-32b",                    "avg_score": 0.367, "structural_pass": 0.50, "latency_mean_ms": 705,  "usd_per_run": 0.00853, "usd_per_quality": 0.0233 },
         { "id": "openai/gpt-5-mini",                 "avg_score": 0.083, "structural_pass": 0.08, "latency_mean_ms": 586,  "usd_per_run": 0.01873, "usd_per_quality": 0.2247, "note": "fails at max_tokens=768 — reasoning model consumes the budget before visible output. Re-bench with --max-tokens 4096 to evaluate fairly." },
         { "id": "google/gemini-2.5-pro",             "avg_score": 0.023, "structural_pass": 0.17, "latency_mean_ms": 1996, "usd_per_run": 0.09316, "usd_per_quality": 4.0651, "note": "same caveat as gpt-5-mini — reasoning model + 768 cap" }
+      ],
+      "alternates_ranked_at_max_tokens_4096_measured_2026_06_15": [
+        { "id": "openai/gpt-4.1",         "avg_score": 0.742, "structural_pass": 0.92, "latency_mean_ms": 506,  "usd_per_run": 0.03136, "usd_per_quality": 0.0423, "note": "Pareto leader even at 4096 tokens" },
+        { "id": "openai/gpt-5-mini",      "avg_score": 0.721, "structural_pass": 0.75, "latency_mean_ms": 698,  "usd_per_run": 0.04041, "usd_per_quality": 0.0561, "note": "competitive with gpt-4.1 at 4096 but pricier per quality — reasoning premium doesn't pay off here" },
+        { "id": "google/gemini-2.5-pro",  "avg_score": 0.683, "structural_pass": 0.75, "latency_mean_ms": 2161, "usd_per_run": 0.23994, "usd_per_quality": 0.3511, "note": "strictly Pareto-dominated even at 4096 tokens — slowest, lowest quality, 8× pricier per quality than gpt-4.1" }
       ]
     },
     "opus": {
