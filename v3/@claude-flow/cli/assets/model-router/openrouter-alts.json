@@ -8,17 +8,25 @@
   "tiers": {
     "haiku": {
       "anthropic_default": "anthropic/claude-haiku-4-5-20251001",
-      "openrouter_alt": "google/gemini-2.0-flash-exp:free",
-      "cost_per_m_tok_in":  0.05,
-      "cost_per_m_tok_out": 0.20,
-      "rationale": "Cheap-tier alt: Gemini 2.0 Flash on OpenRouter free tier. Sub-second latency, comparable quality on simple structured edits."
+      "openrouter_alt": "nvidia/nemotron-3-super-120b-a12b:free",
+      "cost_per_m_tok_in":  0.00,
+      "cost_per_m_tok_out": 0.00,
+      "rationale": "Cheap-tier alt: NVIDIA Nemotron-3 Super 120B free tier. Measured 100% pass rate, 430 ms mean latency, $0/query on the bench corpus (docs/benchmarks/runs/cheap-models-2026-06-15-20-23-22Z.json). 3× faster and free vs Anthropic Haiku 4.5's 1210 ms / $0.00227/query.",
+      "alternates_ranked_by_dollar_per_1k_passes_measured_2026_06_15": [
+        { "id": "nvidia/nemotron-3-super-120b-a12b:free", "pass_rate": 1.00, "latency_mean_ms": 430,  "usd_per_1k_passes": 0.0000 },
+        { "id": "inclusionai/ling-2.6-flash",             "pass_rate": 1.00, "latency_mean_ms": 800,  "usd_per_1k_passes": 0.0010 },
+        { "id": "google/gemini-2.5-flash-lite",           "pass_rate": 1.00, "latency_mean_ms": 577,  "usd_per_1k_passes": 0.0099 },
+        { "id": "meta-llama/llama-3.3-70b-instruct",      "pass_rate": 1.00, "latency_mean_ms": 688,  "usd_per_1k_passes": 0.0121 },
+        { "id": "openai/gpt-4o-mini",                     "pass_rate": 1.00, "latency_mean_ms": 1093, "usd_per_1k_passes": 0.0150 },
+        { "id": "anthropic/claude-haiku-4.5",             "pass_rate": 1.00, "latency_mean_ms": 1210, "usd_per_1k_passes": 0.1511 }
+      ]
     },
     "sonnet": {
       "anthropic_default": "anthropic/claude-sonnet-4-6",
       "openrouter_alt": "meta-llama/llama-3.3-70b-instruct",
-      "cost_per_m_tok_in":  0.10,
+      "cost_per_m_tok_in":  0.13,
       "cost_per_m_tok_out": 0.40,
-      "rationale": "Mid-tier alt: Llama 3.3 70B Instruct — significantly cheaper than Claude Sonnet on OR while remaining competitive for general code/refactor tasks."
+      "rationale": "Mid-tier alt: Llama 3.3 70B Instruct — 100% pass on cheap-tier corpus at 688 ms / $0.00018 per call (docs/benchmarks/runs/cheap-models-2026-06-15-20-23-22Z.json). Needs a real mid-tier corpus benchmark to confirm for harder tasks; this is the upper bound."
     },
     "opus": {
       "anthropic_default": "anthropic/claude-opus-4-8",
