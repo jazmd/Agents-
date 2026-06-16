@@ -2216,11 +2216,23 @@ const routerDecisionsCommand: Command = {
     const text = fs.readFileSync(inPath, 'utf8');
     const lines = text.split('\n').filter(l => l.trim().length > 0);
     const decisions: DecisionRow[] = [];
+    // iter 31 — pair outcomes by task_hash for cost-aggregate joins.
+    interface OutcomeMini { quality?: number; cost_usd?: number; tokens?: { input: number; output: number }; model_id?: string }
+    const outcomesByHash = new Map<string, OutcomeMini>();
     let malformed = 0;
     for (const l of lines) {
       try {
         const row = JSON.parse(l);
-        if (row.type === 'decision') decisions.push(row);
+        if (row.type === 'decision') {
+          decisions.push(row);
+        } else if (row.type === 'outcome') {
+          outcomesByHash.set(row.task_hash, {
+            quality: row.quality,
+            cost_usd: row.cost_usd,
+            tokens: row.tokens,
+            model_id: row.model_id,
+          });
+        }
       } catch { malformed++; }
     }
 
@@ -2254,12 +2266,26 @@ const routerDecisionsCommand: Command = {
     const byRoutedBy: Record<string, number> = {};
     const byModel: Record<string, number> = {};
     const byTier: Record<string, number> = { cheap: 0, mid: 0, strong: 0 };
+    // iter 31 — cost aggregation. Sum cost_usd from paired outcome rows.
+    let costTotalUsd = 0;
+    let costPairedCount = 0;
+    const costByModel: Record<string, number> = {};
+    const costByTier: Record<string, number> = { cheap: 0, mid: 0, strong: 0 };
     for (const d of filtered) {
       byRoutedBy[d.routed_by] = (byRoutedBy[d.routed_by] ?? 0) + 1;
       const id = d.openrouter_model ?? d.model;
       byModel[id] = (byModel[id] ?? 0) + 1;
       const tier = d.complexity < 0.34 ? 'cheap' : d.complexity < 0.67 ? 'mid' : 'strong';
       byTier[tier]++;
+      // iter 31 — JOIN cost from outcome row.
+      const out = outcomesByHash.get(d.task_hash);
+      if (out?.cost_usd != null) {
+        costTotalUsd += out.cost_usd;
+        costPairedCount++;
+        const modelKey = out.model_id ?? id;
+        costByModel[modelKey] = (costByModel[modelKey] ?? 0) + out.cost_usd;
+        costByTier[tier] += out.cost_usd;
+      }
     }
     const fallbackRate = filtered.length > 0
       ? ((byRoutedBy['bandit-fallback'] ?? 0) / filtered.length) * 100
@@ -2277,7 +2303,19 @@ const routerDecisionsCommand: Command = {
       malformed,
       filtered: filtered.length,
       filters: { since, routedBy: routedByFilter, model: modelFilter },
-      aggregates: { byRoutedBy, byModel, byTier, fallbackRatePct: Math.round(fallbackRate * 100) / 100 },
+      aggregates: {
+        byRoutedBy, byModel, byTier,
+        fallbackRatePct: Math.round(fallbackRate * 100) / 100,
+        // iter 31 — cost aggregates. Only populated when outcome rows
+        // carry cost_usd (post-iter-31 trajectories).
+        ...(costPairedCount > 0 ? {
+          costTotalUsd: Math.round(costTotalUsd * 1000000) / 1000000,
+          costPairedCount,
+          costByModel: Object.fromEntries(Object.entries(costByModel).map(([k, v]) => [k, Math.round(v * 1000000) / 1000000])),
+          costByTier: Object.fromEntries(Object.entries(costByTier).map(([k, v]) => [k, Math.round(v * 1000000) / 1000000])),
+          avgCostPerCall: Math.round((costTotalUsd / costPairedCount) * 1000000) / 1000000,
+        } : {}),
+      },
       recent,
     };
 
@@ -2323,6 +2361,21 @@ const routerDecisionsCommand: Command = {
       output.writeln(`    ${k.padEnd(8)}  ${String(v).padStart(6)}  ${pct}%`);
     }
     output.writeln('');
+    // iter 31 — cost block (only when outcome rows carry cost_usd).
+    if (costPairedCount > 0) {
+      output.writeln('  Cost (USD, from paired outcomes):');
+      output.writeln(`    Total:           $${costTotalUsd.toFixed(4)}  across ${costPairedCount} paired decisions`);
+      output.writeln(`    Avg per call:    $${(costTotalUsd / costPairedCount).toFixed(6)}`);
+      output.writeln('    By model:');
+      for (const [k, v] of Object.entries(costByModel).sort((a, b) => b[1] - a[1])) {
+        output.writeln(`      ${k.padEnd(40)}  $${v.toFixed(4)}`);
+      }
+      output.writeln('    By tier:');
+      for (const [k, v] of Object.entries(costByTier)) {
+        output.writeln(`      ${k.padEnd(8)}  $${v.toFixed(4)}`);
+      }
+      output.writeln('');
+    }
     output.writeln(`  ${Math.min(limit, recent.length)} most-recent decisions (newest first):`);
     output.writeln('    ' + 'ts'.padEnd(20) + 'routed_by'.padEnd(18) + 'model'.padEnd(34) + 'conf');
     for (const d of recent) {

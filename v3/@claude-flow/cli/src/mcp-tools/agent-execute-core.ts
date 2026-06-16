@@ -615,11 +615,16 @@ export async function executeAgentTask(input: AgentExecuteInput): Promise<AgentE
         const scores: Record<string, number> | undefined = agent.modelId
           ? { [agent.modelId]: outcome === 'success' ? 1.0 : 0.0 }
           : undefined;
+        // iter 31 — pass token usage + modelId so the recorder can compute
+        // USD spend at write time. Consumers (`router decisions`, cost-
+        // savings reports) get cost without their own price table.
         recordTrajectoryOutcome({
           task: input.prompt,
           quality: outcome === 'success' ? 1.0 : 0.0,
           scores,
           source: 'agent-execute',
+          tokens: result.usage ? { input: result.usage.inputTokens, output: result.usage.outputTokens } : undefined,
+          modelId: agent.modelId,
         });
       } catch { /* never break execution */ }
     }

@@ -21,6 +21,7 @@ import { dirname, join, resolve as resolvePath } from 'node:path';
 
 import type { ClaudeModel } from './model-router.js';
 import type { NeuralRoutedBy } from './neural-router.js';
+import { costUsd } from './model-prices.js';
 
 // ============================================================================
 // Schema (versioned)
@@ -68,6 +69,21 @@ export interface TrajectoryOutcomeRow {
   scores?: Record<string, number>;
   /** Free-form provenance note (e.g. "manual rating", "benchmark suite"). */
   source?: string;
+  /**
+   * iter 31 — token usage from the underlying API response. Optional and
+   * additive: pre-iter-31 readers see undefined; iter-31+ consumers can
+   * sum these for production cost accounting. `modelId` is repeated here
+   * (also in the paired decision row) so cost computation needs only the
+   * outcome row — no JOIN required for streaming aggregation.
+   */
+  tokens?: { input: number; output: number };
+  /** USD spend for this call. Computed at write time from `tokens` + the
+   *  shared price table (model-prices.ts) so consumers get a canonical
+   *  number even if prices change between write and read. */
+  cost_usd?: number;
+  /** Concrete model id the call dispatched against (iter 13+ wired this
+   *  through agent.modelId). May differ from the bandit's tier label. */
+  model_id?: string;
 }
 
 export type TrajectoryRow = TrajectoryDecisionRow | TrajectoryOutcomeRow;
@@ -220,9 +236,19 @@ export function recordTrajectoryOutcome(args: {
   quality: number;
   scores?: Record<string, number>;
   source?: string;
+  /** iter 31 — optional token usage from the underlying API call. */
+  tokens?: { input: number; output: number };
+  /** iter 31 — concrete model id for cost computation against MODEL_PRICES. */
+  modelId?: string;
 }): void {
   const cfg = getConfig();
   if (!cfg.enabled) return;
+  // iter 31 — compute USD spend at write time using the canonical price
+  // table. Cost is a first-class field so consumers don't need to JOIN
+  // against the decision row (which may live in a rotated file).
+  const cost_usd = args.tokens && (args.tokens.input > 0 || args.tokens.output > 0)
+    ? costUsd(args.modelId, args.tokens.input, args.tokens.output)
+    : undefined;
   const row: TrajectoryOutcomeRow = {
     v: 1, type: 'outcome',
     ts: new Date().toISOString(),
@@ -230,6 +256,9 @@ export function recordTrajectoryOutcome(args: {
     quality: args.quality,
     scores: args.scores,
     source: args.source,
+    ...(args.tokens ? { tokens: args.tokens } : {}),
+    ...(cost_usd != null ? { cost_usd } : {}),
+    ...(args.modelId ? { model_id: args.modelId } : {}),
   };
   appendRow(row);
 }

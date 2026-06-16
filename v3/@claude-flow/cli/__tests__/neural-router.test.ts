@@ -379,6 +379,66 @@ describe('router-trajectory (ADR-148)', () => {
     expect(empty.bucketCount).toBe(0);
   });
 
+  it('outcome rows carry tokens/cost_usd/model_id when provided (ADR-149 iter 31)', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'iter31-'));
+    try {
+      const path = join(tmp, 'trajectories.jsonl');
+      process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY = '1';
+      process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY_PATH = path;
+      __resetTrajectoryRecorderForTests();
+      const { recordTrajectoryOutcome } = await import('../src/ruvector/router-trajectory.js');
+      const { MODEL_PRICES } = await import('../src/ruvector/model-prices.js');
+
+      // Sanity: known model id has a price entry.
+      expect(MODEL_PRICES['openai/gpt-4.1']).toBeDefined();
+      const p = MODEL_PRICES['openai/gpt-4.1'];
+      expect(p.in).toBeGreaterThan(0);
+
+      // Record with token usage — expect cost_usd computed from MODEL_PRICES.
+      recordTrajectoryOutcome({
+        task: 'test task with tokens',
+        quality: 1.0,
+        source: 'agent-execute',
+        tokens: { input: 1000, output: 500 },
+        modelId: 'openai/gpt-4.1',
+      });
+      const row = JSON.parse(readFileSync(path, 'utf8').trim());
+      expect(row.tokens).toEqual({ input: 1000, output: 500 });
+      expect(row.model_id).toBe('openai/gpt-4.1');
+      expect(row.cost_usd).toBeDefined();
+      // 1000 × $2 + 500 × $8 per Mtok = ($2000 + $4000) / 1_000_000 = $0.006
+      expect(row.cost_usd).toBeCloseTo(0.006, 5);
+
+      // Backward-compat: omitting tokens means no cost field.
+      __resetTrajectoryRecorderForTests();
+      const path2 = join(tmp, 'no-tokens.jsonl');
+      process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY_PATH = path2;
+      __resetTrajectoryRecorderForTests();
+      recordTrajectoryOutcome({ task: 'no tokens', quality: 0.5 });
+      const row2 = JSON.parse(readFileSync(path2, 'utf8').trim());
+      expect(row2.tokens).toBeUndefined();
+      expect(row2.cost_usd).toBeUndefined();
+
+      // Unknown model falls back to $1/Mtok blended, doesn't drop.
+      __resetTrajectoryRecorderForTests();
+      const path3 = join(tmp, 'unknown.jsonl');
+      process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY_PATH = path3;
+      __resetTrajectoryRecorderForTests();
+      recordTrajectoryOutcome({
+        task: 'unknown model task',
+        quality: 1.0,
+        tokens: { input: 1000, output: 1000 },
+        modelId: 'some/unknown-model',
+      });
+      const row3 = JSON.parse(readFileSync(path3, 'utf8').trim());
+      expect(row3.cost_usd).toBeCloseTo(0.002, 5); // 2000 tokens × $1/Mtok blended = $0.002
+    } finally {
+      delete process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY;
+      delete process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY_PATH;
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('pairTrajectoryRows reconstructs training rows from decision+outcome (ADR-149 iter 18)', async () => {
     const { pairTrajectoryRows, tierFromComplexity } = await import('../src/ruvector/router-trajectory.js');
 
