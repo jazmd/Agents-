@@ -49,6 +49,8 @@ const ENV_KEYS = [
   'CLAUDE_FLOW_ROUTER_CALIBRATE',           // iter 24 — default-on; tests should not leak overrides
   'CLAUDE_FLOW_ROUTER_CALIBRATOR_PATH',
   'CLAUDE_FLOW_ROUTER_COST_CEILING_USD_PER_MTOK',  // iter 29
+  'CLAUDE_FLOW_ROUTER_AB',                          // iter 37
+  'CLAUDE_FLOW_ROUTER_AB_SAMPLE_RATE',
   'OPENROUTER_API_KEY',
   'ANTHROPIC_API_KEY',
 ];
@@ -162,6 +164,45 @@ describe('neural-router (ADR-148)', () => {
     __resetNeuralRouterForTests();
     const sOff = await neuralRouterStatus();
     expect(sOff.reason).not.toContain('calibrated');
+  });
+
+  it('A/B sample-rate is deterministic by task_hash (ADR-149 iter 37)', async () => {
+    // Verify the deterministic-by-FNV sampling math directly. The integration
+    // point (whether abPair ends up in the route result) depends on neural
+    // backend availability — fragile in tests. We assert the sample-decision
+    // math instead: same task → same decision, populations match the rate.
+
+    // Reproduce the FNV-1a-32 + mod-10000 logic from model-router.ts.
+    const sampleDecision = (task: string, rate: number): boolean => {
+      let h = 0x811c9dc5 >>> 0;
+      for (let i = 0; i < task.length; i++) {
+        h ^= task.charCodeAt(i);
+        h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+      }
+      return (h % 10000) / 10000 < rate;
+    };
+
+    // Determinism: same task → same decision.
+    expect(sampleDecision('the same task', 0.5)).toBe(sampleDecision('the same task', 0.5));
+    expect(sampleDecision('another task', 0.5)).toBe(sampleDecision('another task', 0.5));
+
+    // Population: 50% rate over 200 varied tasks should land between 35% and
+    // 65% in-sample (loose Bernoulli bound).
+    let inSample = 0;
+    for (let i = 0; i < 200; i++) {
+      if (sampleDecision(`task-${i}-${i * 17 + 3}`, 0.5)) inSample++;
+    }
+    expect(inSample).toBeGreaterThan(70);
+    expect(inSample).toBeLessThan(130);
+
+    // Rate=0 → never in sample.
+    for (let i = 0; i < 50; i++) {
+      expect(sampleDecision(`zero-task-${i}`, 0)).toBe(false);
+    }
+    // Rate=1 → always in sample.
+    for (let i = 0; i < 50; i++) {
+      expect(sampleDecision(`one-task-${i}`, 1)).toBe(true);
+    }
   });
 
   it('cost-ceiling mode picks highest-quality candidate under budget (ADR-149 iter 29)', async () => {

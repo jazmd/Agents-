@@ -637,11 +637,35 @@ export class ModelRouter {
     const scores = this.computeModelScores(complexity);
     const adjustedScores = this.applyCircuitBreaker(scores);
 
-    // A/B mode (CLAUDE_FLOW_ROUTER_AB=1): compute the pure-bandit pick
-    // alongside the hybrid pick so we can log disagreement. Both samples
-    // are drawn from the same Beta posteriors but with/without the neural
-    // prior bump — useful for measuring real lift before flipping defaults.
-    const abEnabled = process.env.CLAUDE_FLOW_ROUTER_AB === '1' && neuralPrior !== null;
+    // A/B mode: compute the pure-bandit pick alongside the hybrid pick so
+    // we can log disagreement. Both samples are drawn from the same Beta
+    // posteriors but with/without the neural prior bump — useful for
+    // measuring real lift before flipping defaults.
+    //
+    // iter 37 — TWO knobs:
+    //   CLAUDE_FLOW_ROUTER_AB=1                    → A/B on every call (orig)
+    //   CLAUDE_FLOW_ROUTER_AB_SAMPLE_RATE=<0..1>   → A/B on a sampled subset,
+    //     keyed deterministically by task_hash so the same task always falls
+    //     in or out of the sample. Lets production accumulate ab_pair data
+    //     passively at low overhead (e.g. 0.05 = 5% of decisions).
+    //   Both set → SAMPLE_RATE wins (more specific).
+    const rateRaw = process.env.CLAUDE_FLOW_ROUTER_AB_SAMPLE_RATE;
+    const rate = rateRaw ? Math.max(0, Math.min(1, parseFloat(rateRaw) || 0)) : 0;
+    const allOn = process.env.CLAUDE_FLOW_ROUTER_AB === '1';
+    let inSample = false;
+    if (rate > 0) {
+      // Deterministic sample by FNV-1a-32 of the task text. Same task always
+      // gets the same A/B decision across re-runs (reproducible tests, stable
+      // population over time). Inlined to avoid the async router-trajectory
+      // import on the hot path.
+      let h = 0x811c9dc5 >>> 0;
+      for (let i = 0; i < task.length; i++) {
+        h ^= task.charCodeAt(i);
+        h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+      }
+      inSample = (h % 10000) / 10000 < rate;
+    }
+    const abEnabled = (rate > 0 ? inSample : allOn) && neuralPrior !== null;
     let abPair: { bandit_pick: ClaudeModel; hybrid_pick: ClaudeModel; disagree: boolean } | undefined;
     if (abEnabled) {
       // Pre-compute the bandit-only pick. Single extra Thompson sample per
