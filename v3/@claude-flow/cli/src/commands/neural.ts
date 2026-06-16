@@ -2614,6 +2614,7 @@ const routerCostSavingsCommand: Command = {
     { name: 'top-n', type: 'number', description: 'Show top-N largest individual savings (default 5)', default: '5' },
     { name: 'baseline', short: 'b', type: 'string', description: 'Counterfactual baseline: heuristic | always-haiku | always-sonnet | always-opus | always-gpt-4.1 | all (default: all)', default: 'all' },
     { name: 'window', short: 'w', type: 'string', description: 'Bin decisions into successive windows of this duration (e.g. 1h, 24h, 7d). Output adds a trend table — iter 34 drift detection.' },
+    { name: 'task-hash', type: 'string', description: 'Filter to specific task_hash (FNV-1a-32 hex). For per-task cost investigation — iter 61.' },
     { name: 'alert-on-drop-pct', type: 'number', description: 'Exit 1 if the most recent window\'s savings% falls > N points below the mean of prior windows. Requires --window. Default off. (ADR-149 iter 50)' },
   ],
   examples: [
@@ -2709,8 +2710,16 @@ const routerCostSavingsCommand: Command = {
     let droppedNoDecision = 0;
     let droppedNoTokens = 0;
 
+    // iter 61 — task-hash filter for per-task cost investigation.
+    const taskHashFilter = ((ctx.flags['task-hash'] ?? ctx.flags.taskHash) as string | undefined)?.toLowerCase();
+    if (taskHashFilter && !/^[0-9a-f]{8}$/.test(taskHashFilter)) {
+      output.printError(`--task-hash must be an 8-char hex string (got "${taskHashFilter}")`);
+      return { success: false, exitCode: 1 };
+    }
+
     for (const [hash, out] of outcomes) {
       if (cutoffMs !== null && Date.parse(out.ts) < cutoffMs) continue;
+      if (taskHashFilter && hash !== taskHashFilter) continue;
       if (out.cost_usd == null) { droppedNoOutcomeCost++; continue; }
       const dec = decisions.get(hash);
       if (!dec) { droppedNoDecision++; continue; }
@@ -2789,7 +2798,7 @@ const routerCostSavingsCommand: Command = {
 
     const payload = {
       input: inPath,
-      filters: { since },
+      filters: { since, taskHash: taskHashFilter },
       pairs: perCall.length,
       dropped: { noOutcomeCost: droppedNoOutcomeCost, noDecision: droppedNoDecision, noTokens: droppedNoTokens },
       baselines: Object.fromEntries(Object.entries(baselineAggs).map(([k, v]) => [k, {
@@ -2926,6 +2935,7 @@ const routerCostSavingsCommand: Command = {
     output.writeln(output.dim('─'.repeat(72)));
     output.writeln(`  Input:           ${inPath}`);
     if (since) output.writeln(`  Time window:     since ${since}`);
+    if (taskHashFilter) output.writeln(`  Task hash:       ${taskHashFilter}  (filtered to this task)`);
     output.writeln(`  Paired calls:    ${perCall.length}  (dropped: no-cost=${droppedNoOutcomeCost}, no-decision=${droppedNoDecision}, no-tokens=${droppedNoTokens})`);
     output.writeln('');
     if (perCall.length === 0) {
