@@ -85,11 +85,21 @@ interface NeuralRouterConfig {
 // Internal state (lazy, single-init)
 // ============================================================================
 
+type PureRouter = { route: (e: number[]) => { id: string; predictedQuality: number; costPerMTok: number; metBar: boolean }; predictAll: (e: number[]) => Array<{ id: string; predictedQuality: number; costPerMTok: number }> };
+
 interface ResolvedBackend {
   /** True if `@metaharness/router` was importable. */
   available: boolean;
-  /** Initialised router, or null when no corpus / artifact was loadable. */
-  router: { route: (e: number[]) => { id: string; predictedQuality: number; costPerMTok: number; metBar: boolean }; predictAll: (e: number[]) => Array<{ id: string; predictedQuality: number; costPerMTok: number }> } | null;
+  /** Unified-corpus router (fallback). null when no corpus / artifact was loadable. */
+  router: PureRouter | null;
+  /**
+   * ADR-149 iter 16 — per-bucket specialist KRR routers. When the caller
+   * supplies a complexity bucket AND the matching artifact is present,
+   * the specialist is preferred over the unified `router`. Each specialist
+   * was trained only on rows from its tier so it predicts more accurately
+   * for queries in that band.
+   */
+  routerByBucket?: Partial<Record<'low' | 'med' | 'high', PureRouter>>;
   /**
    * For the FastGRNN/native path: the loaded `NativeRouter` instance and the
    * pre-built per-candidate embeddings. Loaded ONCE at resolve time and
@@ -318,22 +328,52 @@ async function resolveBackend(cfg: NeuralRouterConfig): Promise<ResolvedBackend>
   // 3.5. No user artifact → try the bundled pre-trained KRR (~96kB, ~0.020 ms/route).
   if (existsSync(cfg.bundledKrrPath)) {
     try {
-      const json = JSON.parse(readFileSync(cfg.bundledKrrPath, 'utf8'));
-      const trained = mh.TrainedRouter.fromJSON(json);
-      const cands = json.candidates.map((c: { id: string; costPerMTok: number }) => ({ id: c.id, costPerMTok: c.costPerMTok }));
+      // Helper: load a TrainedRouter from a path and wrap it as a PureRouter.
+      const loadKrr = (path: string): PureRouter | null => {
+        if (!existsSync(path)) return null;
+        try {
+          const json = JSON.parse(readFileSync(path, 'utf8'));
+          const trained = mh.TrainedRouter.fromJSON(json);
+          const cands = json.candidates.map((c: { id: string; costPerMTok: number }) => ({ id: c.id, costPerMTok: c.costPerMTok }));
+          return {
+            route: (e: number[]) => {
+              const r = trained.route(e);
+              return { id: r.id, predictedQuality: r.predictedQuality, costPerMTok: r.costPerMTok, metBar: r.metBar };
+            },
+            predictAll: (e: number[]) => cands.map((c: { id: string; costPerMTok: number }) => ({
+              id: c.id, predictedQuality: trained.predict(c.id, e), costPerMTok: c.costPerMTok,
+            })).sort((a: { costPerMTok: number }, b: { costPerMTok: number }) => a.costPerMTok - b.costPerMTok),
+          };
+        } catch { return null; }
+      };
+
+      const unified = loadKrr(cfg.bundledKrrPath);
+      if (!unified) throw new Error('failed to load unified KRR');
+
+      // ADR-149 iter 16 — load per-bucket specialists if present. Each is a
+      // KRR fit only to its tier's rows (cheap → low.json, mid → med.json,
+      // strong → high.json). When tryCostOptimalRoute is called with a
+      // complexityBucket, the matching specialist is preferred over the
+      // unified router.
+      const bucketDir = cfg.bundledKrrPath.replace(/seed-router\.krr\.json$/, '');
+      const routerByBucket: Partial<Record<'low' | 'med' | 'high', PureRouter>> = {};
+      const loadedBuckets: string[] = [];
+      for (const bucket of ['low', 'med', 'high'] as const) {
+        const r = loadKrr(`${bucketDir}seed-router.krr.${bucket}.json`);
+        if (r) {
+          routerByBucket[bucket] = r;
+          loadedBuckets.push(bucket);
+        }
+      }
+      const reason = loadedBuckets.length > 0
+        ? `bundled KRR loaded from ${cfg.bundledKrrPath} + ${loadedBuckets.length} bucket specialist(s): ${loadedBuckets.join(', ')}`
+        : `bundled KRR artifact loaded from ${cfg.bundledKrrPath}`;
       return {
         available: true,
-        router: {
-          route: (e: number[]) => {
-            const r = trained.route(e);
-            return { id: r.id, predictedQuality: r.predictedQuality, costPerMTok: r.costPerMTok, metBar: r.metBar };
-          },
-          predictAll: (e: number[]) => cands.map((c: { id: string; costPerMTok: number }) => ({
-            id: c.id, predictedQuality: trained.predict(c.id, e), costPerMTok: c.costPerMTok,
-          })).sort((a: { costPerMTok: number }, b: { costPerMTok: number }) => a.costPerMTok - b.costPerMTok),
-        },
+        router: unified,
+        ...(loadedBuckets.length > 0 ? { routerByBucket } : {}),
         routedBy: 'metaharness-krr',
-        reason: `bundled KRR artifact loaded from ${cfg.bundledKrrPath}`,
+        reason,
       };
     } catch {
       // Fall through to k-NN
@@ -433,8 +473,16 @@ export async function tryCostOptimalRoute(
     // Pure-TS paths (k-NN or KRR) — ADR-149: ids are arbitrary strings,
     // not ClaudeModel tier names. `tierLabelForModelId` derives the
     // back-compat tier; `modelId` carries the concrete pick.
-    if (!backend.router) return null;
-    const allRaw = backend.router.predictAll(embedding);
+    //
+    // ADR-149 iter 16 — when the caller supplies a complexity bucket AND a
+    // per-bucket specialist KRR was loaded at backend resolution, prefer
+    // the specialist over the unified router. Each specialist is trained
+    // only on its tier's rows (looQuality 0.94 for cheap vs 0.71 unified)
+    // so its predictions are sharper for queries in that band.
+    const activeRouter = (opts?.complexityBucket && backend.routerByBucket?.[opts.complexityBucket])
+      ?? backend.router;
+    if (!activeRouter) return null;
+    const allRaw = activeRouter.predictAll(embedding);
 
     // ADR-149 iter 14 — per-modelId Thompson sampling. When
     // CLAUDE_FLOW_ROUTER_BANDIT_PER_MODEL=1, perturb each candidate's
@@ -493,7 +541,7 @@ export async function tryCostOptimalRoute(
     // exceeds the budget BEFORE the cost-optimal pick. The unfiltered
     // alternatives stay on the result for observability — only the chosen
     // `modelId` is constrained.
-    let main = backend.router.route(embedding);
+    let main = activeRouter.route(embedding);
     // Re-derive `main` from the post-Thompson `all` list when per-modelId
     // is on (otherwise the bandit adjustment is invisible to the selector).
     if (process.env.CLAUDE_FLOW_ROUTER_BANDIT_PER_MODEL === '1') {

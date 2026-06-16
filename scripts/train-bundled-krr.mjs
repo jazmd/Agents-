@@ -1,19 +1,33 @@
-// Train a KRR artifact from the measured seed corpus (ADR-149) and write it
-// to v3/@claude-flow/cli/assets/model-router/seed-router.krr.json so the
-// integrated path can serve cost-optimal decisions at install time.
+// Train KRR artifact(s) from the measured seed corpus (ADR-149).
 //
-// Per-model schema: the seed corpus carries `scores: {model_id: 0..1}` for
-// every candidate. Prices below mirror the candidate registry in the
-// benchmark scripts; if a model in the corpus is missing from prices, we
-// fall back to a conservative default ($1/Mtok blended).
+// Default behaviour writes ONE unified artifact:
+//   v3/@claude-flow/cli/assets/model-router/seed-router.krr.json
+//
+// With `--per-bucket`, also writes THREE specialist artifacts (iter 16):
+//   v3/@claude-flow/cli/assets/model-router/seed-router.krr.low.json
+//   v3/@claude-flow/cli/assets/model-router/seed-router.krr.med.json
+//   v3/@claude-flow/cli/assets/model-router/seed-router.krr.high.json
+// Each fits only its tier's rows, producing sharper predictions for queries
+// in that complexity band ("3 specialists beat 1 generalist").
+//
+// USAGE
+//   node scripts/train-bundled-krr.mjs                # unified KRR only
+//   node scripts/train-bundled-krr.mjs --per-bucket   # unified + 3 specialists
 
 import { readFileSync, writeFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import * as mh from '@metaharness/router';
 
+const ARGS = (() => {
+  const a = { perBucket: false };
+  for (let i = 2; i < process.argv.length; i++) {
+    if (process.argv[i] === '--per-bucket') a.perBucket = true;
+  }
+  return a;
+})();
+
 // Per-model blended price ($/Mtok). Blended = input + 3×output (rough mix
 // since responses are 3-5x longer than prompts on average for these tasks).
-// Keep aligned with scripts/benchmark-seed-corpus.mjs DEFAULT_CANDIDATES.
 const BLENDED_PRICES = {
   'inclusionai/ling-2.6-flash':         (0.01 + 3 * 0.03),       // $0.10
   'google/gemini-2.5-flash-lite':       (0.10 + 3 * 0.40),       // $1.30
@@ -23,53 +37,53 @@ const BLENDED_PRICES = {
   'anthropic/claude-sonnet-4-6':        (3.00 + 3 * 15.00),      // $48.00
   'anthropic/claude-opus-4':            (15.00 + 3 * 75.00),     // $240.00
 };
-// Corpus-calibrated qualityBar — measured-data scores on this corpus top
-// around 0.42, so 0.8 is unreachable. We set the bar to a percentile of
-// observed top scores per row; here we use 0.25 as a sane default that
-// keeps the top half of candidates in the "clears the bar" set.
 const QUALITY_BAR = 0.25;
 
-const seedPath = resolve('v3/@claude-flow/cli/assets/model-router/seed-rows.json');
-const outPath  = resolve('v3/@claude-flow/cli/assets/model-router/seed-router.krr.json');
+const ASSETS_DIR = resolve('v3/@claude-flow/cli/assets/model-router');
+const seedPath = resolve(ASSETS_DIR, 'seed-rows.json');
 
 console.log(`[train] reading measured seed corpus from ${seedPath}`);
-const rows = JSON.parse(readFileSync(seedPath, 'utf8'));
-const corpusModels = Object.keys(rows[0].scores);
-console.log(`[train] ${rows.length} rows, dim=${rows[0].embedding.length}, candidates=${corpusModels.length}`);
-console.log(`[train] candidates: ${corpusModels.join(', ')}`);
+const allRows = JSON.parse(readFileSync(seedPath, 'utf8'));
+const corpusModels = Object.keys(allRows[0].scores);
+console.log(`[train] ${allRows.length} rows, dim=${allRows[0].embedding.length}, candidates=${corpusModels.length}`);
 
 // Build the prices map for ONLY the candidates present in the corpus.
 const prices = {};
 for (const m of corpusModels) {
-  if (BLENDED_PRICES[m] === undefined) {
-    console.warn(`[train] WARN: no blended price configured for ${m}; defaulting to $1.00/Mtok`);
-    prices[m] = 1.00;
-  } else {
-    prices[m] = BLENDED_PRICES[m];
-  }
+  prices[m] = BLENDED_PRICES[m] ?? 1.00;
 }
 
-const t0 = performance.now();
-const { router, lambda, looQuality } = mh.trainRouter(rows, prices, {
-  qualityBar: QUALITY_BAR,
-  lambdas: [1e-4, 1e-3, 1e-2, 1e-1, 1e0],
-});
-const trainMs = performance.now() - t0;
-console.log(`[train] λ=${lambda.toExponential(3)}, looQuality=${looQuality.toFixed(4)}, ${trainMs.toFixed(0)}ms, qualityBar=${QUALITY_BAR}`);
+// Train ONE KRR over a row subset + write it to `outPath`.
+// Returns { lambda, looQuality, trainMs, size }.
+function trainOne(rows, outPath, label) {
+  if (rows.length < 3) {
+    console.warn(`[${label}] WARN: only ${rows.length} rows — skipping (KRR needs ≥3 for LOO-CV).`);
+    return null;
+  }
+  const t0 = performance.now();
+  const { router, lambda, looQuality } = mh.trainRouter(rows, prices, {
+    qualityBar: QUALITY_BAR,
+    lambdas: [1e-4, 1e-3, 1e-2, 1e-1, 1e0],
+  });
+  const trainMs = performance.now() - t0;
+  writeFileSync(outPath, JSON.stringify(router.toJSON()));
+  const size = statSync(outPath).size;
+  console.log(`[${label}] ${rows.length} rows  λ=${lambda.toExponential(2)}  looQ=${looQuality.toFixed(4)}  ${trainMs.toFixed(0)}ms  ${size}B  → ${outPath}`);
+  return { lambda, looQuality, trainMs, size };
+}
 
-const json = router.toJSON();
-writeFileSync(outPath, JSON.stringify(json));
-const size = statSync(outPath).size;
-console.log(`[train] wrote ${outPath} (${size} bytes)`);
+// Always write the unified artifact (back-compat for callers that don't
+// know about per-bucket artifacts).
+trainOne(allRows, resolve(ASSETS_DIR, 'seed-router.krr.json'), 'unified');
 
-// Smoke: route a synthetic cheap probe + mid probe + strong probe.
-// The bundled-seed embeddings carry the tier in v[0]/v[1]; using the same
-// signal pattern produces interpretable picks.
-const dim = rows[0].embedding.length;
-const probe = (v0, v1) => {
-  const v = new Array(dim).fill(0); v[0] = v0; v[1] = v1;
-  return v;
-};
-console.log(`[smoke] cheap probe (v[0]=+0.85)  →`, router.route(probe(0.85, 0.0)));
-console.log(`[smoke] mid probe   (v[0]= 0.0)   →`, router.route(probe(0.0, 0.0)));
-console.log(`[smoke] strong probe(v[0]=-0.85)  →`, router.route(probe(-0.85, 0.7)));
+if (ARGS.perBucket) {
+  // The tier label in the corpus rows is the SOURCE of bucket membership.
+  // Bandit complexity buckets (low/med/high) map directly:
+  //   cheap → low, mid → med, strong → high
+  const tierToBucket = { cheap: 'low', mid: 'med', strong: 'high' };
+  for (const [tier, bucket] of Object.entries(tierToBucket)) {
+    const subset = allRows.filter(r => r.tier === tier);
+    const path = resolve(ASSETS_DIR, `seed-router.krr.${bucket}.json`);
+    trainOne(subset, path, bucket);
+  }
+}
