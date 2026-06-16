@@ -225,6 +225,67 @@ describe('router-trajectory (ADR-148)', () => {
     expect(s.path).toBe('/tmp/x.jsonl');
   });
 
+  it('IsotonicCalibrator: fit + transform corrects monotone bias (ADR-149 iter 22)', async () => {
+    const { IsotonicCalibrator } = await import('../src/ruvector/router-calibrator.js');
+
+    // Build a synthetic miscalibration: predictions are systematically too low
+    // (linear with slope 0.5, offset 0). Calibrator should learn to lift them.
+    const pairs: Array<[number, number]> = [];
+    for (let i = 0; i <= 10; i++) {
+      const truth = i / 10;
+      const predicted = truth * 0.5;          // 0.0 → 0.0, 1.0 → 0.5
+      pairs.push([predicted, truth]);
+    }
+    const cal = IsotonicCalibrator.fit(pairs);
+
+    // After fitting, transform should bring predictions back near the truth.
+    expect(cal.transform(0.0)).toBeCloseTo(0.0, 1);
+    expect(cal.transform(0.25)).toBeCloseTo(0.5, 1);
+    expect(cal.transform(0.5)).toBeCloseTo(1.0, 1);
+
+    // Bucket count is bounded by input size and PAV pooling.
+    expect(cal.bucketCount).toBeGreaterThan(0);
+    expect(cal.bucketCount).toBeLessThanOrEqual(pairs.length);
+
+    // Round-trip via JSON preserves outputs.
+    const roundtrip = IsotonicCalibrator.fromJSON(cal.toJSON());
+    expect(roundtrip.transform(0.25)).toBeCloseTo(cal.transform(0.25), 6);
+    expect(roundtrip.bucketCount).toBe(cal.bucketCount);
+  });
+
+  it('IsotonicCalibrator: monotonicity is enforced via PAV pooling (ADR-149 iter 22)', async () => {
+    const { IsotonicCalibrator } = await import('../src/ruvector/router-calibrator.js');
+
+    // Adversarial input where observed values violate monotonicity locally.
+    // PAV should pool the violators into a single bucket.
+    const pairs: Array<[number, number]> = [
+      [0.0, 0.1],
+      [0.1, 0.9],   // violator — high obs at low pred
+      [0.2, 0.2],   // violator — low obs at higher pred (pooled with previous)
+      [0.3, 0.5],
+      [0.5, 0.6],
+      [0.7, 0.7],
+      [1.0, 0.9],
+    ];
+    const cal = IsotonicCalibrator.fit(pairs);
+
+    // After PAV, the calibrated outputs must be non-decreasing.
+    let prev = -Infinity;
+    for (let i = 0; i <= 10; i++) {
+      const v = cal.transform(i / 10);
+      expect(v).toBeGreaterThanOrEqual(prev - 1e-9);
+      prev = v;
+    }
+
+    // PAV should have collapsed the violators into ≤ pairs.length buckets.
+    expect(cal.bucketCount).toBeLessThan(pairs.length);
+
+    // Empty pairs → pass-through identity (no calibration data).
+    const empty = IsotonicCalibrator.fit([]);
+    expect(empty.transform(0.42)).toBe(0.42);
+    expect(empty.bucketCount).toBe(0);
+  });
+
   it('pairTrajectoryRows reconstructs training rows from decision+outcome (ADR-149 iter 18)', async () => {
     const { pairTrajectoryRows, tierFromComplexity } = await import('../src/ruvector/router-trajectory.js');
 

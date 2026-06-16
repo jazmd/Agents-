@@ -79,6 +79,16 @@ interface NeuralRouterConfig {
    * For interactive flows that need sub-second responses, set 1000.
    */
   latencyBudgetMs: number;
+  /**
+   * ADR-149 iter 22 — opt-in post-hoc isotonic calibration. When enabled
+   * AND the bundled calibrator JSON is present, KRR predict() outputs are
+   * piped through IsotonicCalibrator.transform() before cost-optimal
+   * selection. Default off — the calibrator is a corrective layer, not
+   * load-bearing, and disabling it preserves the iter 0-21 behavior.
+   */
+  calibrateEnabled: boolean;
+  /** Path to the bundled calibrator JSON (iter 22). */
+  calibratorPath: string;
 }
 
 // ============================================================================
@@ -226,6 +236,9 @@ function getConfig(): NeuralRouterConfig {
       ?? join(assetsDir, 'seed-rows.json'),
     k: parseInt(process.env.CLAUDE_FLOW_ROUTER_KNN_K ?? '5', 10) || 5,
     latencyBudgetMs: Math.max(0, parseInt(process.env.CLAUDE_FLOW_ROUTER_LATENCY_BUDGET_MS ?? '0', 10) || 0),
+    calibrateEnabled: process.env.CLAUDE_FLOW_ROUTER_CALIBRATE === '1',
+    calibratorPath: process.env.CLAUDE_FLOW_ROUTER_CALIBRATOR_PATH
+      ?? join(assetsDir, 'seed-router.calibrator.json'),
   };
   return _config;
 }
@@ -328,6 +341,32 @@ async function resolveBackend(cfg: NeuralRouterConfig): Promise<ResolvedBackend>
   // 3.5. No user artifact → try the bundled pre-trained KRR (~96kB, ~0.020 ms/route).
   if (existsSync(cfg.bundledKrrPath)) {
     try {
+      // ADR-149 iter 22 — load isotonic calibrator if gated open and the
+      // artifact exists. Calibration is OFF by default (preserves iter 0-21
+      // behavior); ops opt in via CLAUDE_FLOW_ROUTER_CALIBRATE=1. The
+      // calibrator is a thin transform on predicted-quality values, applied
+      // post-hoc to KRR predict() outputs.
+      let calibrator: { transform: (x: number) => number } | null = null;
+      if (cfg.calibrateEnabled && existsSync(cfg.calibratorPath)) {
+        try {
+          const { IsotonicCalibrator } = await import('./router-calibrator.js');
+          const calJson = JSON.parse(readFileSync(cfg.calibratorPath, 'utf8'));
+          calibrator = IsotonicCalibrator.fromJSON(calJson);
+        } catch {
+          // Silent — calibration is corrective, not load-bearing.
+        }
+      }
+      const wrapWithCalibrator = (r: PureRouter): PureRouter => {
+        if (!calibrator) return r;
+        return {
+          route: (e) => {
+            const result = r.route(e);
+            return { ...result, predictedQuality: calibrator!.transform(result.predictedQuality) };
+          },
+          predictAll: (e) => r.predictAll(e).map(c => ({ ...c, predictedQuality: calibrator!.transform(c.predictedQuality) })),
+        };
+      };
+
       // Helper: load a TrainedRouter from a path and wrap it as a PureRouter.
       const loadKrr = (path: string): PureRouter | null => {
         if (!existsSync(path)) return null;
@@ -347,8 +386,9 @@ async function resolveBackend(cfg: NeuralRouterConfig): Promise<ResolvedBackend>
         } catch { return null; }
       };
 
-      const unified = loadKrr(cfg.bundledKrrPath);
-      if (!unified) throw new Error('failed to load unified KRR');
+      const unifiedRaw = loadKrr(cfg.bundledKrrPath);
+      if (!unifiedRaw) throw new Error('failed to load unified KRR');
+      const unified = wrapWithCalibrator(unifiedRaw);
 
       // ADR-149 iter 16 — load per-bucket specialists if present. Each is a
       // KRR fit only to its tier's rows (cheap → low.json, mid → med.json,
@@ -361,13 +401,14 @@ async function resolveBackend(cfg: NeuralRouterConfig): Promise<ResolvedBackend>
       for (const bucket of ['low', 'med', 'high'] as const) {
         const r = loadKrr(`${bucketDir}seed-router.krr.${bucket}.json`);
         if (r) {
-          routerByBucket[bucket] = r;
+          routerByBucket[bucket] = wrapWithCalibrator(r);
           loadedBuckets.push(bucket);
         }
       }
+      const calibratedNote = calibrator ? ' (calibrated)' : '';
       const reason = loadedBuckets.length > 0
-        ? `bundled KRR loaded from ${cfg.bundledKrrPath} + ${loadedBuckets.length} bucket specialist(s): ${loadedBuckets.join(', ')}`
-        : `bundled KRR artifact loaded from ${cfg.bundledKrrPath}`;
+        ? `bundled KRR loaded from ${cfg.bundledKrrPath} + ${loadedBuckets.length} bucket specialist(s): ${loadedBuckets.join(', ')}${calibratedNote}`
+        : `bundled KRR artifact loaded from ${cfg.bundledKrrPath}${calibratedNote}`;
       return {
         available: true,
         router: unified,
