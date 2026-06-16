@@ -131,6 +131,35 @@ if (ARGS.validateCalibrator) {
   }
   variants['calibrated_loo'] = calibrated;
   console.error(`[calibration] LOO calibrator validation: ${(performance.now() - t1).toFixed(0)}ms`);
+
+  // iter 26 — per-tier OOS validation. For each held-out row i: collect
+  // OTHER rows whose tier matches row i's tier, fit a tier-specific
+  // calibrator on those pairs, apply ONLY to row i's pairs. Mirrors the
+  // iter 25 production path (bucket-specialist KRR wrapped with bucket-
+  // matched calibrator) but with proper out-of-sample isolation. If
+  // per-tier OOS beats unified OOS, iter 25's specialization was justified.
+  const t2 = performance.now();
+  const perTier = [];
+  for (let i = 0; i < rows.length; i++) {
+    const heldOutTier = rows[i].tier;
+    if (!heldOutTier) continue;
+    const trainPairs = predictions
+      .filter(p => p.rowIdx !== i && p.tier === heldOutTier)
+      .map(p => [p.predicted, p.observed]);
+    if (trainPairs.length < 3) {
+      // Not enough same-tier data to fit a calibrator — fall back to identity
+      // (this matches the iter 25 production behavior: missing tier file →
+      // unified fallback).
+      for (const p of predictions.filter(p => p.rowIdx === i)) perTier.push({ ...p });
+      continue;
+    }
+    const cal = IsotonicCalibrator.fit(trainPairs);
+    for (const p of predictions.filter(p => p.rowIdx === i)) {
+      perTier.push({ ...p, predicted: cal.transform(p.predicted) });
+    }
+  }
+  variants['calibrated_loo_per_tier'] = perTier;
+  console.error(`[calibration] LOO per-tier calibrator validation: ${(performance.now() - t2).toFixed(0)}ms`);
 }
 
 // --- Aggregate metrics ---
