@@ -36,6 +36,7 @@ import { resolve, join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import * as mh from '@metaharness/router';
 import { pairTrajectoryRows } from '../v3/@claude-flow/cli/dist/src/ruvector/router-trajectory.js';
+import { IsotonicCalibrator } from '../v3/@claude-flow/cli/dist/src/ruvector/router-calibrator.js';
 
 const ARGS = (() => {
   const a = {
@@ -43,20 +44,24 @@ const ARGS = (() => {
       ?? resolve('.swarm', 'model-router-trajectories.jsonl'),
     seedRows: resolve('v3/@claude-flow/cli/assets/model-router/seed-rows.json'),
     artifact: resolve('v3/@claude-flow/cli/assets/model-router/seed-router.krr.json'),
+    calibratorPath: resolve('v3/@claude-flow/cli/assets/model-router/seed-router.calibrator.json'),
     margin: 0.005,           // 0.5 percentage points by default
     minNewRows: 10,
     dryRun: false,
     filterSource: null,      // optionally restrict to llm-judge etc.
+    skipCalibrator: false,   // iter 27 — by default, refit calibrators on KRR swap
   };
   for (let i = 2; i < process.argv.length; i++) {
     const v = process.argv[i];
     if (v === '--in') a.in = process.argv[++i];
     else if (v === '--seed-rows') a.seedRows = process.argv[++i];
     else if (v === '--artifact') a.artifact = process.argv[++i];
+    else if (v === '--calibrator') a.calibratorPath = process.argv[++i];
     else if (v === '--margin') a.margin = parseFloat(process.argv[++i]);
     else if (v === '--min-new-rows') a.minNewRows = parseInt(process.argv[++i], 10);
     else if (v === '--dry-run') a.dryRun = true;
     else if (v === '--filter-source') a.filterSource = process.argv[++i];
+    else if (v === '--no-calibrator-update') a.skipCalibrator = true;
   }
   return a;
 })();
@@ -187,6 +192,68 @@ if (passesGate && !ARGS.dryRun) {
     }
     try { unlinkSync(tmpArtifact); } catch { /* */ }
     emit({ ...report, decision: 'error', reason: `swap failed: ${err instanceof Error ? err.message : String(err)}`, swapped: false });
+  }
+
+  // --- 7. iter 27 — co-update the calibrator(s) on the NEW KRR. ---
+  // Without this, the bundled calibrators are fit against the OLD KRR's
+  // LOO predictions, so the moment KRR shifts, the calibrators become
+  // stale and over- or under-correct. Refit unified + per-tier in one pass.
+  if (!ARGS.skipCalibrator) {
+    try {
+      const corpusModels = Object.keys(unionRows[0].scores);
+      const prices = Object.fromEntries(corpusModels.map(m => [m, BLENDED_PRICES[m] ?? 1.00]));
+      // LOO-CV against the union → collect (pred, obs, tier) pairs.
+      const t1 = performance.now();
+      const allPairs = [];
+      const pairsByTier = { cheap: [], mid: [], strong: [] };
+      for (let i = 0; i < unionRows.length; i++) {
+        const heldOut = unionRows[i];
+        const trainSet = unionRows.filter((_, j) => j !== i);
+        if (trainSet.length < 3) continue;
+        const { router } = mh.trainRouter(trainSet, prices, {
+          qualityBar: 0.25,
+          lambdas: [1e-4, 1e-3, 1e-2, 1e-1, 1e0],
+        });
+        for (const model of corpusModels) {
+          const pred = router.predict(model, heldOut.embedding);
+          const obs = heldOut.scores[model];
+          if (obs != null && Number.isFinite(pred)) {
+            allPairs.push([pred, obs]);
+            if (heldOut.tier && pairsByTier[heldOut.tier]) pairsByTier[heldOut.tier].push([pred, obs]);
+          }
+        }
+      }
+      const cvMs = performance.now() - t1;
+      // Fit unified + per-tier.
+      const calibratorsWritten = [];
+      const tierToBucket = { cheap: 'low', mid: 'med', strong: 'high' };
+      const fitOne = (pairs, outPath, label) => {
+        if (pairs.length < 3) return { ok: false, label, reason: `only ${pairs.length} pairs` };
+        const cal = IsotonicCalibrator.fit(pairs);
+        // Atomic write via tmp + rename.
+        const tmpCal = join(tmpDir, `cal-${label}.json`);
+        writeFileSync(tmpCal, JSON.stringify(cal.toJSON()));
+        if (existsSync(outPath)) copyFileSync(outPath, `${outPath}.bak`);
+        renameSync(tmpCal, outPath);
+        calibratorsWritten.push({ label, path: outPath, buckets: cal.bucketCount, pairs: pairs.length });
+        return { ok: true };
+      };
+      fitOne(allPairs, ARGS.calibratorPath, 'unified');
+      // Per-tier path: replace the final `.json` with `.{bucket}.json`. Works
+      // for both the bundled `seed-router.calibrator.json` → `…calibrator.low.json`
+      // AND for sandbox paths like `/tmp/x.json` → `/tmp/x.low.json`.
+      const perTierPath = (bucket) => ARGS.calibratorPath.replace(/\.json$/, `.${bucket}.json`);
+      for (const [tier, bucket] of Object.entries(tierToBucket)) {
+        fitOne(pairsByTier[tier], perTierPath(bucket), bucket);
+      }
+      report.calibrators = { swapped: true, cvMs: Math.round(cvMs), written: calibratorsWritten };
+    } catch (err) {
+      // Calibrator co-update is corrective, not load-bearing. If it fails,
+      // the KRR swap already succeeded — record but don't roll back.
+      report.calibrators = { swapped: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  } else {
+    report.calibrators = { swapped: false, reason: 'skipped via --no-calibrator-update' };
   }
 }
 
