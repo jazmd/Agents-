@@ -62,6 +62,16 @@ jobs:
         # violations that escape per-plugin coverage (new plugin without
         # smoke, new skill without smoke-list update, etc.).
 
+      - name: Fleet-wide plugin.json manifest audit (iter 88)
+        run: node scripts/audit-plugin-manifest.mjs
+        # Scans every plugins/*/.claude-plugin/plugin.json for: valid JSON,
+        # required fields (name/version/description/keywords[]) present
+        # and non-empty, version matches semver X.Y.Z, name matches
+        # enclosing directory. Each plugin's smoke step 1 pins its own
+        # expected version literal; this catches structural violations
+        # (non-semver, name drift, missing fields) that the per-plugin
+        # grep can't see.
+
       - name: Upload machine-readable report
         if: always()
         run: node scripts/smoke-all-plugins.mjs --format json > /tmp/smoke-all-plugins.json
