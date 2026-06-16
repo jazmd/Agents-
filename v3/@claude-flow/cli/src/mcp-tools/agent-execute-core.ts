@@ -600,6 +600,29 @@ export async function executeAgentTask(input: AgentExecuteInput): Promise<AgentE
     if (agent.modelId) {
       recordModelOutcomeByModelId(input.prompt, agent.modelId, outcome);
     }
+    // ADR-149 iter 17 — close the production-data side of the feedback loop.
+    // The trajectory recorder (CLAUDE_FLOW_ROUTER_TRAJECTORY=1) writes
+    // per-decision rows to .swarm/model-router-trajectories.jsonl from the
+    // model-router itself. Now we ALSO write outcome rows here so future
+    // training (scripts/train-from-trajectories.mjs, follow-up) can pair
+    // decision+outcome by task_hash and produce DRACO-shaped retraining
+    // rows from real production traffic. quality = 1.0 on success, 0.0 on
+    // failure (coarse signal; finer-grained quality from user ratings or
+    // regression-detection is a separate hook).
+    if (process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY === '1') {
+      try {
+        const { recordTrajectoryOutcome } = await import('../ruvector/router-trajectory.js');
+        const scores: Record<string, number> | undefined = agent.modelId
+          ? { [agent.modelId]: outcome === 'success' ? 1.0 : 0.0 }
+          : undefined;
+        recordTrajectoryOutcome({
+          task: input.prompt,
+          quality: outcome === 'success' ? 1.0 : 0.0,
+          scores,
+          source: 'agent-execute',
+        });
+      } catch { /* never break execution */ }
+    }
   } catch {
     // Silent — bandit feedback must never block routing.
   }

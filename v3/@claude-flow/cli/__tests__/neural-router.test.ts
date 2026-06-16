@@ -326,6 +326,42 @@ describe('ModelRouter integration (ADR-148)', () => {
     expect(exhausted).toBeNull();
   });
 
+  it('trajectory recorder pairs decision+outcome by task_hash (ADR-149 iter 17)', async () => {
+    // Smoke that both row types share the same FNV-1a-32 task_hash so a
+    // downstream training script can join on it without ambiguity.
+    const tmp = mkdtempSync(join(tmpdir(), 'iter17-'));
+    try {
+      const path = join(tmp, 'trajectories.jsonl');
+      process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY = '1';
+      process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY_PATH = path;
+      __resetTrajectoryRecorderForTests();
+      const { recordDecision, recordTrajectoryOutcome, taskHash } = await import('../src/ruvector/router-trajectory.js');
+
+      const task = 'add console.log to cache';
+      recordDecision({
+        task, complexity: 0.2, model: 'haiku', confidence: 0.9, uncertainty: 0.1,
+        routedBy: 'hybrid', neuralBackend: 'metaharness-krr',
+      });
+      recordTrajectoryOutcome({ task, quality: 1.0, scores: { 'inclusionai/ling-2.6-flash': 1.0 }, source: 'agent-execute' });
+
+      const content = readFileSync(path, 'utf8');
+      const lines = content.trim().split('\n').map(l => JSON.parse(l));
+      expect(lines.length).toBe(2);
+      // Both rows must share the same task_hash
+      expect(lines[0].task_hash).toBe(lines[1].task_hash);
+      expect(lines[0].task_hash).toBe(taskHash(task));
+      // Types are correct + DRACO-shape fields present on outcome
+      expect(lines[0].type).toBe('decision');
+      expect(lines[1].type).toBe('outcome');
+      expect(lines[1].scores).toBeDefined();
+      expect(lines[1].quality).toBe(1.0);
+    } finally {
+      delete process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY;
+      delete process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY_PATH;
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('per-modelId Thompson is hooked when gated on (ADR-149 iter 14)', async () => {
     // Smoke: with the gate on AND priorsById accumulated, the selector
     // should still return a valid result. We don't assert a specific
