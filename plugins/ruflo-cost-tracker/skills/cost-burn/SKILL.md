@@ -16,6 +16,8 @@ Burn-rate trend observability. The fourth leg of the cost-tracker forward-cost s
 
 ## Algorithm
 
+Implementation: [`scripts/burn.mjs`](../../scripts/burn.mjs).
+
 1. Read all `session-*` records from `cost-tracking` namespace.
 2. Bin into `--bucket` duration windows (default `1d`) over `--lookback` (default `14d`).
 3. For each bucket: `{n: sessions, spendUsd: sum(total_cost_usd)}`.
