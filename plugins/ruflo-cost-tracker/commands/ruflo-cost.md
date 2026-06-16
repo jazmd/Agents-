@@ -91,6 +91,14 @@ Cost tracking commands:
 5. JSON output for dashboards / CI gates (e.g. `jq '.budget.exhaustion[2].daysUntilReached < 7'` to fail builds when 100% exhaustion is < 1 week away)
 6. Env: `PROJECTION_NAMESPACE`, `PROJECTION_QUIET=1`
 
+**`cost counterfactual [--since 7d] [--baseline always-haiku|always-sonnet|always-opus|all] [--format table|json]`** -- Multi-baseline counterfactual cost analysis. Comparative counterpart to budget-check (reactive) and projection (predictive): answers "is the routing earning its keep?".
+1. Run `node plugins/ruflo-cost-tracker/scripts/counterfactual.mjs`
+2. Sum tokens across all sessions in window (default all-time)
+3. For each baseline tier, compute hypothetical cost if every token had run at that tier's pricing
+4. Surface savings $ + % across all three baselines (default `--baseline all`)
+5. Negative `always-haiku` savings = over-escalation signal (router picked sonnet/opus when haiku could have done it). Positive `always-sonnet` quantifies the router's win against the "safe default" baseline.
+6. JSON output for CI gates: `jq '.baselines[1].savingsPct > 30'` to flag workload shifts where routing isn't saving ≥30% vs sonnet
+
 **`cost benchmark [--llm] [--anthropic]`** -- Run the corpus benchmark to verify booster claims with measured numbers.
 1. Without flags: booster-only (free, ~85 ms wall-time, no API keys needed)
 2. `--llm`: also run Gemini 2.0 Flash baseline (uses GCP `GOOGLE_AI_API_KEY` secret)

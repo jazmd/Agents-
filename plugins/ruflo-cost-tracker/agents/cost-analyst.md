@@ -27,6 +27,7 @@ Model pricing per 1M tokens (Haiku/Sonnet/Opus × Input/Output/Cache-Write/Cache
 | `cost-summary` | Stable JSON contract for inter-plugin consumption | Another plugin/dashboard needs a snapshot |
 | `cost-trend` | Drift across `runs/*.json` — flags regressions the binary smoke gate misses | Pre-release audit |
 | `cost-projection` | Forward USD/day extrapolation + days-until-budget-exhausted | Quarterly/annual budget planning; CI gate "is exhaustion imminent?" |
+| `cost-counterfactual` | Multi-baseline (haiku/sonnet/opus) — actual spend vs hypothetical routing | Quarterly proof: "we saved $X vs always-sonnet"; over-escalation detection |
 | `cost-export` | Prometheus textfile + webhook POST | External observability dashboards |
 | `cost-federation` | ADR-097 Phase 3 consumer — per-peer 1h/24h/7d windows | After Phase 3 emits federation_spend events |
 | `cost-benchmark` | Run the corpus harness — booster + optional Gemini/Sonnet/Opus | Verifying speedup claims, regression check |

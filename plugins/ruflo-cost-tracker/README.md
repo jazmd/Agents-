@@ -31,6 +31,7 @@ claude --plugin-dir plugins/ruflo-cost-tracker
 | `cost-benchmark` | `/cost-benchmark [--llm] [--anthropic]` | Run the corpus benchmark and persist measured-vs-claimed table to `docs/benchmarks/runs/` |
 | `cost-trend` | `/cost-trend` | Read all bench runs and surface drift (win rate, latency, speedup) — flags regressions the smoke gate misses |
 | `cost-projection` | `/cost-projection [--window 7d]` | **Forward** spend extrapolation: USD/day rate × 7d/30d/90d/365d horizons + days-until-budget-exhausted (predictive counterpart to `cost-budget-check`) |
+| `cost-counterfactual` | `/cost-counterfactual [--since 7d] [--baseline all]` | **Comparative** cost analysis: actual spend vs always-haiku / always-sonnet / always-opus baselines. Negative savings flag over-escalation; positive savings quantify routing's win. |
 | `cost-conversation` | `/cost-conversation` | Per-conversation cost view (different lens from cost-report's per-agent / per-model) |
 | `cost-export` | `/cost-export [--prometheus <path>] [--webhook <url>]` | Emit cost data as Prometheus textfile or POST to a webhook |
 | `cost-federation` | `/cost-federation` | ADR-097 Phase 3 consumer — per-peer 1h/24h/7d federation_spend rolling windows |
@@ -51,6 +52,7 @@ cost budget check [--period ...]          # Compute utilization + alert; exit 1 
 cost benchmark [--llm] [--anthropic]      # Run measured benchmark — booster + optional Gemini/Sonnet/Opus baselines
 cost trend                                # Drift across bench runs (win rate, latency, regressions)
 cost projection [--window 7d]             # Forward USD/day extrapolation + days-until-budget-exhausted
+cost counterfactual [--since 7d]          # Multi-baseline (haiku/sonnet/opus) — is routing earning its keep?
 cost conversation                         # Per-conversation cost view
 cost summary [--format json|markdown]     # Programmatic JSON contract for inter-plugin consumption
 cost export [--prometheus] [--webhook]    # External observability — Prometheus textfile + webhook POST

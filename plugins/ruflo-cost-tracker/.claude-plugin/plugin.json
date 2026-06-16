@@ -1,7 +1,7 @@
 {
   "name": "ruflo-cost-tracker",
   "description": "Token usage tracking, model cost attribution per agent, budget alerts, and optimization recommendations — uses memory_* (namespace-routed) for cost-tracking and cost-patterns; pairs with federation budget circuit breaker (ADR-097)",
-  "version": "0.17.0",
+  "version": "0.18.0",
   "author": {
     "name": "ruvnet",
     "url": "https://github.com/ruvnet"
@@ -29,6 +29,8 @@
     "trend-analysis",
     "projection",
     "forecast",
+    "counterfactual",
+    "multi-baseline",
     "ci",
     "prometheus",
     "observability",
