@@ -3299,21 +3299,25 @@ export const hooksIntelligenceStats: MCPTool = {
         const cutoffMs = Date.now() - windowMs;
         interface DecisionLite { ts: string; task_hash: string; complexity: number; ab_pair?: { bandit_pick: string } }
         interface OutcomeLite { ts: string; task_hash: string; cost_usd?: number; tokens?: { input: number; output: number } }
+        // iter 63 — port iter 62's fix from CLI to MCP. Outcomes track ALL
+        // occurrences (Array) instead of deduping by task_hash, so repeat
+        // tasks contribute their full cumulative cost.
         const decisions = new Map<string, DecisionLite>();
-        const outcomes = new Map<string, OutcomeLite>();
+        const outcomes: OutcomeLite[] = [];
         for (const l of fs.readFileSync(trajectoryPath, 'utf8').split('\n')) {
           if (!l.trim()) continue;
           try {
             const r = JSON.parse(l);
             if (Date.parse(r.ts) < cutoffMs) continue;
             if (r.type === 'decision') decisions.set(r.task_hash, r);
-            else if (r.type === 'outcome') outcomes.set(r.task_hash, r);
+            else if (r.type === 'outcome') outcomes.push(r);
           } catch { /* malformed */ }
         }
         let pairs = 0, actual = 0, cf = 0;
-        for (const [hash, dec] of decisions) {
-          const out = outcomes.get(hash);
+        for (const out of outcomes) {
           if (!out?.cost_usd || !out.tokens) continue;
+          const dec = decisions.get(out.task_hash);
+          if (!dec) continue;
           pairs++;
           actual += out.cost_usd;
           // Same heuristic counterfactual as iter 32 default.
