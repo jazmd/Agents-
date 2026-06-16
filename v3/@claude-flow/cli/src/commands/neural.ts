@@ -2234,8 +2234,12 @@ const routerDecisionsCommand: Command = {
     const lines = text.split('\n').filter(l => l.trim().length > 0);
     const decisions: DecisionRow[] = [];
     // iter 31 — pair outcomes by task_hash for cost-aggregate joins.
-    interface OutcomeMini { quality?: number; cost_usd?: number; tokens?: { input: number; output: number }; model_id?: string }
-    const outcomesByHash = new Map<string, OutcomeMini>();
+    // iter 65 — outcomes now ARRAY (was Map). Same correctness fix as iter
+    // 62 applied to cost-savings: deduping by task_hash collapses multiple
+    // runs of the same task into one, biasing cost aggregates toward the
+    // LATEST outcome's cost counted N times instead of summing all N costs.
+    interface OutcomeMini { task_hash: string; ts: string; quality?: number; cost_usd?: number; tokens?: { input: number; output: number }; model_id?: string }
+    const outcomesByHash = new Map<string, OutcomeMini[]>();
     let malformed = 0;
     for (const l of lines) {
       try {
@@ -2243,12 +2247,16 @@ const routerDecisionsCommand: Command = {
         if (row.type === 'decision') {
           decisions.push(row);
         } else if (row.type === 'outcome') {
-          outcomesByHash.set(row.task_hash, {
+          const arr = outcomesByHash.get(row.task_hash) ?? [];
+          arr.push({
+            task_hash: row.task_hash,
+            ts: row.ts,
             quality: row.quality,
             cost_usd: row.cost_usd,
             tokens: row.tokens,
             model_id: row.model_id,
           });
+          outcomesByHash.set(row.task_hash, arr);
         }
       } catch { malformed++; }
     }
@@ -2297,20 +2305,33 @@ const routerDecisionsCommand: Command = {
     let costPairedCount = 0;
     const costByModel: Record<string, number> = {};
     const costByTier: Record<string, number> = { cheap: 0, mid: 0, strong: 0 };
+    // iter 65 — track per-hash decision-iteration so we can pair the N-th
+    // decision for a hash with the N-th outcome (instead of always pulling
+    // the latest outcome). Iter 17's recorder writes decision then outcome
+    // in chronological order, so this index-pairing matches what the agent
+    // actually dispatched.
+    const decisionIndexByHash = new Map<string, number>();
     for (const d of filtered) {
       byRoutedBy[d.routed_by] = (byRoutedBy[d.routed_by] ?? 0) + 1;
       const id = d.openrouter_model ?? d.model;
       byModel[id] = (byModel[id] ?? 0) + 1;
       const tier = d.complexity < 0.34 ? 'cheap' : d.complexity < 0.67 ? 'mid' : 'strong';
       byTier[tier]++;
-      // iter 31 — JOIN cost from outcome row.
-      const out = outcomesByHash.get(d.task_hash);
-      if (out?.cost_usd != null) {
-        costTotalUsd += out.cost_usd;
-        costPairedCount++;
-        const modelKey = out.model_id ?? id;
-        costByModel[modelKey] = (costByModel[modelKey] ?? 0) + out.cost_usd;
-        costByTier[tier] += out.cost_usd;
+      // iter 31 + iter 65 — JOIN to the i-th OUTCOME row for this task_hash
+      // (where i is the i-th DECISION for this hash). Avoids double-counting
+      // costs when a task ran multiple times.
+      const outcomeArr = outcomesByHash.get(d.task_hash);
+      if (outcomeArr && outcomeArr.length > 0) {
+        const seen = decisionIndexByHash.get(d.task_hash) ?? 0;
+        const out = outcomeArr[Math.min(seen, outcomeArr.length - 1)];
+        decisionIndexByHash.set(d.task_hash, seen + 1);
+        if (out?.cost_usd != null) {
+          costTotalUsd += out.cost_usd;
+          costPairedCount++;
+          const modelKey = out.model_id ?? id;
+          costByModel[modelKey] = (costByModel[modelKey] ?? 0) + out.cost_usd;
+          costByTier[tier] += out.cost_usd;
+        }
       }
     }
     const fallbackRate = filtered.length > 0
@@ -2412,7 +2433,18 @@ const routerDecisionsCommand: Command = {
       const incidentSorted = [...filtered].sort((a, b) => b.ts.localeCompare(a.ts));
       output.writeln(output.bold(`  Incident detail for task_hash=${taskHashFilter} (${filtered.length} occurrence(s), newest first):`));
       for (const d of incidentSorted) {
-        const out = outcomesByHash.get(d.task_hash);
+        // iter 65 — outcomesByHash is now an array of all outcomes per hash.
+        // For the incident detail at this decision's timestamp, pick the
+        // outcome closest in time (typically the corresponding one written
+        // by iter 17's recorder immediately after the decision).
+        const allOutcomes = outcomesByHash.get(d.task_hash) ?? [];
+        const dts = Date.parse(d.ts);
+        let out: OutcomeMini | undefined;
+        let bestDelta = Infinity;
+        for (const o of allOutcomes) {
+          const delta = Math.abs(Date.parse(o.ts) - dts);
+          if (delta < bestDelta) { bestDelta = delta; out = o; }
+        }
         const bucket = d.complexity < 0.34 ? 'cheap' : d.complexity < 0.67 ? 'mid' : 'strong';
         output.writeln('');
         output.writeln(`    ts:                  ${d.ts}`);
