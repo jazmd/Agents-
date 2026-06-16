@@ -2162,19 +2162,193 @@ const routerModelsCommand: Command = {
   },
 };
 
+// ADR-149 iter 28 — observability into recorded routing decisions. The
+// trajectory JSONL (iter 17+) records every decision the router makes;
+// this subcommand exposes that data as filtered + aggregated views so
+// operators don't have to grep the file.
+const routerDecisionsCommand: Command = {
+  name: 'decisions',
+  description: 'Query the routing-decision JSONL (iter 17+): filter, aggregate, paginate (ADR-149 iter 28)',
+  options: [
+    { name: 'in', short: 'i', type: 'string', description: 'Trajectory JSONL path (default: $CLAUDE_FLOW_ROUTER_TRAJECTORY_PATH or .swarm/model-router-trajectories.jsonl)' },
+    { name: 'since', short: 's', type: 'string', description: 'Time window suffix: 1h, 24h, 7d, 30d (default: all)' },
+    { name: 'routed-by', type: 'string', description: 'Filter by decision mechanism: hybrid | bandit-fallback | heuristic' },
+    { name: 'model', short: 'm', type: 'string', description: 'Filter by chosen model id (substring match, e.g. haiku, gpt-4)' },
+    { name: 'limit', short: 'l', type: 'number', description: 'Max recent decisions to list (default 20)', default: '20' },
+    { name: 'format', short: 'f', type: 'string', description: 'Output format: table, json', default: 'table' },
+  ],
+  examples: [
+    { command: 'claude-flow neural router decisions', description: 'Aggregate stats + 20 most-recent decisions' },
+    { command: 'claude-flow neural router decisions --since 24h', description: 'Last 24 hours only' },
+    { command: 'claude-flow neural router decisions --routed-by bandit-fallback', description: 'Find decisions where neural backend failed' },
+    { command: 'claude-flow neural router decisions --model haiku --format json', description: 'All haiku picks, JSON output' },
+  ],
+  action: async (ctx: CommandContext): Promise<CommandResult> => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+
+    const inPath = (ctx.flags.in as string | undefined)
+      ?? process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY_PATH
+      ?? path.resolve(process.cwd(), '.swarm', 'model-router-trajectories.jsonl');
+    const since = ctx.flags.since as string | undefined;
+    const routedByFilter = (ctx.flags['routed-by'] ?? ctx.flags.routedBy) as string | undefined;
+    const modelFilter = ctx.flags.model as string | undefined;
+    const limit = parseInt(ctx.flags.limit as string || '20', 10) || 20;
+    const fmt = (ctx.flags.format as string) || 'table';
+
+    if (!fs.existsSync(inPath)) {
+      const msg = `Trajectory file not found at ${inPath}`;
+      if (fmt === 'json') {
+        output.writeln(JSON.stringify({ error: msg, hint: 'Set CLAUDE_FLOW_ROUTER_TRAJECTORY=1 to enable recording.' }, null, 2));
+      } else {
+        output.printError(msg);
+        output.writeln(output.dim('  Set CLAUDE_FLOW_ROUTER_TRAJECTORY=1 to enable trajectory recording.'));
+      }
+      return { success: false, exitCode: 1 };
+    }
+
+    // Parse JSONL — only decision rows are relevant here.
+    interface DecisionRow {
+      v: number; type: 'decision'; ts: string; task_hash: string; task?: string;
+      model: string; complexity: number; confidence: number; uncertainty: number;
+      routed_by: string; neural_backend?: string; provider?: string; openrouter_model?: string;
+    }
+    const text = fs.readFileSync(inPath, 'utf8');
+    const lines = text.split('\n').filter(l => l.trim().length > 0);
+    const decisions: DecisionRow[] = [];
+    let malformed = 0;
+    for (const l of lines) {
+      try {
+        const row = JSON.parse(l);
+        if (row.type === 'decision') decisions.push(row);
+      } catch { malformed++; }
+    }
+
+    // Time-window filter.
+    let cutoffMs: number | null = null;
+    if (since) {
+      const m = since.match(/^(\d+)([hdmw])$/);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        const unitMs = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 7 * 86_400_000 }[m[2]] ?? 0;
+        cutoffMs = Date.now() - n * unitMs;
+      }
+    }
+
+    let filtered = decisions;
+    if (cutoffMs !== null) {
+      filtered = filtered.filter(d => Date.parse(d.ts) >= cutoffMs!);
+    }
+    if (routedByFilter) {
+      filtered = filtered.filter(d => d.routed_by === routedByFilter);
+    }
+    if (modelFilter) {
+      const needle = modelFilter.toLowerCase();
+      filtered = filtered.filter(d => {
+        const id = (d.openrouter_model ?? d.model).toLowerCase();
+        return id.includes(needle);
+      });
+    }
+
+    // Aggregate.
+    const byRoutedBy: Record<string, number> = {};
+    const byModel: Record<string, number> = {};
+    const byTier: Record<string, number> = { cheap: 0, mid: 0, strong: 0 };
+    for (const d of filtered) {
+      byRoutedBy[d.routed_by] = (byRoutedBy[d.routed_by] ?? 0) + 1;
+      const id = d.openrouter_model ?? d.model;
+      byModel[id] = (byModel[id] ?? 0) + 1;
+      const tier = d.complexity < 0.34 ? 'cheap' : d.complexity < 0.67 ? 'mid' : 'strong';
+      byTier[tier]++;
+    }
+    const fallbackRate = filtered.length > 0
+      ? ((byRoutedBy['bandit-fallback'] ?? 0) / filtered.length) * 100
+      : 0;
+
+    // Sort by ts ascending so "most recent" is well-defined regardless of
+    // file order (rotation, concurrent writes can break monotonicity).
+    const sorted = [...filtered].sort((a, b) => a.ts.localeCompare(b.ts));
+    const recent = sorted.slice(-limit).reverse(); // newest first
+
+    const payload = {
+      input: inPath,
+      totalRows: lines.length,
+      decisionRows: decisions.length,
+      malformed,
+      filtered: filtered.length,
+      filters: { since, routedBy: routedByFilter, model: modelFilter },
+      aggregates: { byRoutedBy, byModel, byTier, fallbackRatePct: Math.round(fallbackRate * 100) / 100 },
+      recent,
+    };
+
+    if (fmt === 'json') {
+      output.writeln(JSON.stringify(payload, null, 2));
+      return { success: true, data: payload };
+    }
+
+    output.writeln();
+    output.writeln(output.bold('Routing decisions (ADR-149 iter 17+, query iter 28)'));
+    output.writeln(output.dim('─'.repeat(72)));
+    output.writeln(`  Input:           ${inPath}`);
+    output.writeln(`  JSONL rows:      ${lines.length}  (${decisions.length} decision, ${malformed} malformed)`);
+    if (since || routedByFilter || modelFilter) {
+      output.writeln(`  Filters:         ${[since && `since=${since}`, routedByFilter && `routed-by=${routedByFilter}`, modelFilter && `model~${modelFilter}`].filter(Boolean).join(', ')}`);
+    }
+    output.writeln(`  After filters:   ${filtered.length}`);
+    output.writeln('');
+
+    if (filtered.length === 0) {
+      output.writeln(output.dim('  No decisions match the filters.'));
+      output.writeln('');
+      return { success: true, data: payload };
+    }
+
+    output.writeln(`  Fallback rate:   ${fallbackRate.toFixed(2)}%   (neural backend → bandit when prediction unusable)`);
+    output.writeln('');
+    output.writeln('  By routed_by:');
+    for (const [k, v] of Object.entries(byRoutedBy).sort((a, b) => b[1] - a[1])) {
+      const pct = ((v / filtered.length) * 100).toFixed(1).padStart(5);
+      output.writeln(`    ${k.padEnd(18)}  ${String(v).padStart(6)}  ${pct}%`);
+    }
+    output.writeln('');
+    output.writeln('  By model:');
+    for (const [k, v] of Object.entries(byModel).sort((a, b) => b[1] - a[1])) {
+      const pct = ((v / filtered.length) * 100).toFixed(1).padStart(5);
+      output.writeln(`    ${k.padEnd(42)}  ${String(v).padStart(6)}  ${pct}%`);
+    }
+    output.writeln('');
+    output.writeln('  By tier (complexity bucket):');
+    for (const [k, v] of Object.entries(byTier)) {
+      const pct = filtered.length > 0 ? ((v / filtered.length) * 100).toFixed(1).padStart(5) : '  0.0';
+      output.writeln(`    ${k.padEnd(8)}  ${String(v).padStart(6)}  ${pct}%`);
+    }
+    output.writeln('');
+    output.writeln(`  ${Math.min(limit, recent.length)} most-recent decisions (newest first):`);
+    output.writeln('    ' + 'ts'.padEnd(20) + 'routed_by'.padEnd(18) + 'model'.padEnd(34) + 'conf');
+    for (const d of recent) {
+      const ts = d.ts.slice(0, 19);
+      const id = (d.openrouter_model ?? d.model).slice(0, 32);
+      output.writeln(`    ${ts.padEnd(20)}${d.routed_by.padEnd(18)}${id.padEnd(34)}${d.confidence.toFixed(2)}`);
+    }
+    output.writeln('');
+    return { success: true, data: payload };
+  },
+};
+
 const routerCommand: Command = {
   name: 'router',
-  description: 'Cost-optimal neural router lifecycle (ADR-148/149): status, models, train, train-from-trajectories, reload',
-  subcommands: [routerStatusCommand, routerModelsCommand, routerTrainCommand, routerTrainFromTrajectoriesCommand, routerReloadCommand],
+  description: 'Cost-optimal neural router lifecycle (ADR-148/149): status, models, train, train-from-trajectories, decisions, reload',
+  subcommands: [routerStatusCommand, routerModelsCommand, routerTrainCommand, routerTrainFromTrajectoriesCommand, routerDecisionsCommand, routerReloadCommand],
   examples: [
     { command: 'claude-flow neural router status', description: 'Show router state, gate, counters' },
     { command: 'claude-flow neural router models', description: 'List candidate registry with measured stats (ADR-149)' },
     { command: 'claude-flow neural router train -o ./router.krr.json', description: 'Train a KRR artifact' },
     { command: 'claude-flow neural router train-from-trajectories -w production-rows.json', description: 'Pair production JSONL into a training corpus (iter 18)' },
+    { command: 'claude-flow neural router decisions --since 24h', description: 'Query recorded decisions (iter 28)' },
     { command: 'claude-flow neural router reload', description: 'Clear in-process backend cache' },
   ],
   action: async (): Promise<CommandResult> => {
-    output.writeln('Use a subcommand: status | models | train | train-from-trajectories | reload');
+    output.writeln('Use a subcommand: status | models | train | train-from-trajectories | decisions | reload');
     return { success: true };
   },
 };
