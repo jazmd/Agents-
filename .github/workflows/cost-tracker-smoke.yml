@@ -71,6 +71,13 @@ jobs:
             console.log('cost-health: ' + r.checks.length + ' subchecks, all OK on empty fixture');
           "
 
+      - name: cost-health integration test (synthetic fixtures incl. iter-75 regression)
+        run: node plugins/ruflo-cost-tracker/scripts/test-health-integration.mjs
+        # 7 end-to-end assertions including the EXACT iter-75 regression
+        # target: budget HARD_STOP via BUDGET_QUIET=1 must propagate as
+        # exit 1 to cost-health's composite gate. Catches cross-script
+        # contract violations that per-script smoke can't see.
+
       - name: Verify Tier 1 win rate ≥ 0.80 (regression gate)
         run: |
           node -e "

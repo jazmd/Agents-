@@ -8,10 +8,10 @@ step() { printf "→ %s ... " "$1"; }
 ok()   { printf "PASS\n"; PASS=$((PASS+1)); }
 bad()  { printf "FAIL: %s\n" "$1"; FAIL=$((FAIL+1)); }
 
-step "1. plugin.json declares 0.21.2 with new keywords"
+step "1. plugin.json declares 0.21.3 with new keywords"
 v=$(grep -E '"version"' "$ROOT/.claude-plugin/plugin.json" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-if [[ "$v" != "0.21.2" ]]; then
-  bad "expected 0.21.2, got '$v'"
+if [[ "$v" != "0.21.3" ]]; then
+  bad "expected 0.21.3, got '$v'"
 else
   miss=""
   for k in namespace-routing mcp agentic-flow agent-booster tier1-routing model-routing benchmarking verified telemetry budget projection forecast counterfactual drift-detection trend-alert anomaly-detection outlier-detection health-check composite-gate; do
@@ -521,6 +521,18 @@ for d in "$ROOT"/skills/*/; do
   grep -qE "\\| \`$name\`" "$F" 2>/dev/null || miss="$miss $name"
 done
 [[ -z "$miss" ]] && ok || bad "README skills table missing:$miss"
+
+step "42a. test-health-integration.mjs runtime test exists w/ iter-75 regression case"
+F="$ROOT/scripts/test-health-integration.mjs"
+miss=""
+[[ -x "$F" ]] || miss="$miss not-executable"
+node --check "$F" 2>/dev/null || miss="$miss syntax-error"
+grep -q "iter-75 regression" "$F" || miss="$miss no-iter-75-reference"
+grep -q "BUDGET_QUIET" "$F" || miss="$miss no-budget-quiet-case"
+grep -q "HARD_STOP" "$F" || miss="$miss no-hard-stop-case"
+grep -q "overall\.ok" "$F" || miss="$miss no-composite-assertion"
+grep -q "process\.exit(1)" "$F" || miss="$miss no-fail-closed"
+[[ -z "$miss" ]] && ok || bad "$miss"
 
 step "42b. _sessions.mjs shared loader is the single source of truth"
 F="$ROOT/scripts/_sessions.mjs"
