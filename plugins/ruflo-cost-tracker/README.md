@@ -34,6 +34,7 @@ claude --plugin-dir plugins/ruflo-cost-tracker
 | `cost-counterfactual` | `/cost-counterfactual [--since 7d] [--baseline all]` | **Comparative** cost analysis: actual spend vs always-haiku / always-sonnet / always-opus baselines. Negative savings flag over-escalation; positive savings quantify routing's win. |
 | `cost-burn` | `/cost-burn [--bucket 1d] [--lookback 14d] [--alert-on-acceleration-pct N]` | **Trend** burn-rate analysis: window-over-window delta + optional drift-alert exit code. Catches "hot loop burning 10× normal" before budget alarm fires. |
 | `cost-anomaly` | `/cost-anomaly [--since 7d] [--threshold 3.5] [--alert-on-outliers N]` | **Point-anomaly** MAD-based outlier detection: flags individual sessions with `\|modified z\| > threshold` (Iglewicz-Hoaglin 3.5 default). Robust to outliers themselves; works on n=10. |
+| `cost-diff` | `/cost-diff --baseline <path> --current <path> [--alert-on-pct N] [--alert-on-usd N]` | **PR regression detection** — diffs two cost-summary JSON snapshots. Per-tier + per-model breakdowns sorted by `\|delta\|`. Optional pct/USD alert thresholds for CI gating. |
 | `cost-health` | `/cost-health [--alert-acceleration 100] [--alert-outliers 1] [--skip burn,anomaly]` | **Composite CI gate** — runs budget+burn+anomaly+projection in parallel, returns `max(exit)`. One shell-out covers all four alert ladders. |
 | `cost-conversation` | `/cost-conversation` | Per-conversation cost view (different lens from cost-report's per-agent / per-model) |
 | `cost-export` | `/cost-export [--prometheus <path>] [--webhook <url>]` | Emit cost data as Prometheus textfile or POST to a webhook |
@@ -41,7 +42,7 @@ claude --plugin-dir plugins/ruflo-cost-tracker
 | `cost-summary` | `/cost-summary [--format json\|markdown]` | Single-shot programmatic dump of all cost data (stable JSON contract for inter-plugin consumption) |
 | `cost-compact-context` | `/cost-compact-context <query>` | Wrap `getTokenOptimizer().getCompactContext()` for retrieval-compacted analysis (graceful fallback when agentic-flow not installed) |
 
-## Commands (18 subcommands)
+## Commands (19 subcommands)
 
 ```bash
 cost track                                # Auto-capture this session's token usage (producer)
@@ -58,6 +59,7 @@ cost projection [--window 7d]             # Forward USD/day extrapolation + days
 cost counterfactual [--since 7d]          # Multi-baseline (haiku/sonnet/opus) — is routing earning its keep?
 cost burn [--bucket 1d] [--alert ...]     # Burn-rate trend + acceleration alert (exit 1 on drift)
 cost anomaly [--since 7d] [--alert ...]   # MAD-based per-session outlier detection (exit 1 on outliers)
+cost diff --baseline <p> --current <p> ... # Snapshot delta — PR-level regression detection (exit 1 on >N% growth)
 cost health [--alert-acceleration N] ...  # Composite CI gate: budget+burn+anomaly+projection in parallel (max exit)
 cost conversation                         # Per-conversation cost view
 cost summary [--format json|markdown]     # Programmatic JSON contract for inter-plugin consumption

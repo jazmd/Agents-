@@ -116,6 +116,14 @@ Cost tracking commands:
 6. MAD beats mean+sigma because outliers themselves can't inflate it — robust on n=10. Sessions table labels `high` (over-spending) vs `low` (crash/drop) direction.
 7. Edge cases: n<3 → "insufficient data" exit 0. MAD=0 (half the sessions share exact spend) → explainer exit 0.
 
+**`cost diff --baseline <path> --current <path> [--alert-on-pct N] [--alert-on-usd N] [--format table|json]`** -- Snapshot delta between two cost-summary JSON outputs. PR-level regression detection.
+1. Run `node plugins/ruflo-cost-tracker/scripts/diff.mjs --baseline <path> --current <path>`
+2. Both files must be cost-summary JSON shape (validated: total_cost_usd + sessionCount required)
+3. Computes total delta + per-tier + per-model breakdowns; entries tagged added / removed / changed
+4. Tables sorted by `|delta|` descending so biggest movers bubble to the top
+5. `--alert-on-pct N` exits 1 when total grew >N%; `--alert-on-usd N` exits 1 when total grew >$N; both can be set, first to trigger wins
+6. Composes with `cost summary --format json` — the stable JSON contract is the protocol between snapshot capture and snapshot diffing
+
 **`cost health [--alert-acceleration 100] [--alert-outliers 1] [--alert-days-to-exhaust 14] [--skip burn,anomaly] [--format table|json]`** -- Composite CI gate. Runs all four alert ladders (budget / burn / anomaly / projection) in parallel and returns `max(exit_codes)`. One shell-out replaces four separate CI steps.
 1. Run `node plugins/ruflo-cost-tracker/scripts/health.mjs`
 2. Spawn budget-check, burn, anomaly, projection subchecks via `Promise.all`
