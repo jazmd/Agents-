@@ -116,6 +116,15 @@ Cost tracking commands:
 6. MAD beats mean+sigma because outliers themselves can't inflate it — robust on n=10. Sessions table labels `high` (over-spending) vs `low` (crash/drop) direction.
 7. Edge cases: n<3 → "insufficient data" exit 0. MAD=0 (half the sessions share exact spend) → explainer exit 0.
 
+**`cost health [--alert-acceleration 100] [--alert-outliers 1] [--alert-days-to-exhaust 14] [--skip burn,anomaly] [--format table|json]`** -- Composite CI gate. Runs all four alert ladders (budget / burn / anomaly / projection) in parallel and returns `max(exit_codes)`. One shell-out replaces four separate CI steps.
+1. Run `node plugins/ruflo-cost-tracker/scripts/health.mjs`
+2. Spawn budget-check, burn, anomaly, projection subchecks via `Promise.all`
+3. Each subcheck runs `--format json`; parse exit codes
+4. Projection synthesizes exit code from `daysUntilReached[100%] < --alert-days-to-exhaust`
+5. Final exit = `max(subcheck exits)` — any failure fails the gate
+6. Print one-line summary per check + overall HEALTHY/UNHEALTHY badge
+7. `--skip <list>` to disable specific subchecks (e.g. `--skip burn` for fast-feedback smoke runs).
+
 **`cost benchmark [--llm] [--anthropic]`** -- Run the corpus benchmark to verify booster claims with measured numbers.
 1. Without flags: booster-only (free, ~85 ms wall-time, no API keys needed)
 2. `--llm`: also run Gemini 2.0 Flash baseline (uses GCP `GOOGLE_AI_API_KEY` secret)
