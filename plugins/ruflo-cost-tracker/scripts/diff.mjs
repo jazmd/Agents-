@@ -127,8 +127,11 @@ function main() {
   }
 
   const payload = {
-    baseline: { path: ARGS.baseline, exportedAt: baseline.exportedAt, total_cost_usd: baseline.total_cost_usd },
-    current:  { path: ARGS.current,  exportedAt: current.exportedAt,  total_cost_usd: current.total_cost_usd },
+    // iter 81 — git context surfaced when snapshots include it (cost-summary
+    // started emitting `git` in iter 81 too). Older snapshots without git
+    // metadata work fine; the fields are simply omitted.
+    baseline: { path: ARGS.baseline, exportedAt: baseline.exportedAt, git: baseline.git || null, total_cost_usd: baseline.total_cost_usd },
+    current:  { path: ARGS.current,  exportedAt: current.exportedAt,  git: current.git || null,  total_cost_usd: current.total_cost_usd },
     delta: {
       total_cost_usd: Math.round(total.delta * 1e6) / 1e6,
       total_pct: isFinite(total.pct) ? Math.round(total.pct * 100) / 100 : null,
@@ -150,6 +153,15 @@ function main() {
     console.log(JSON.stringify(payload, null, 2));
   } else {
     console.log(`# cost-diff`);
+    // iter 81 — surface git context when present so operators can correlate
+    // diffs to commits without leaving the terminal.
+    if (baseline.git || current.git) {
+      const fmtGit = (g) => g
+        ? `\`${g.shaShort}\` (${g.branch || 'detached'}${g.isDirty ? ', dirty' : ''})`
+        : '_no git context_';
+      console.log('');
+      console.log(`_baseline: ${fmtGit(baseline.git)} → current: ${fmtGit(current.git)}_`);
+    }
     console.log('');
     console.log(`| Metric | Baseline | Current | Delta | % |`);
     console.log(`|---|---:|---:|---:|---:|`);

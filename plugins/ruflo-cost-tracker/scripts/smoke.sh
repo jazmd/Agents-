@@ -8,13 +8,13 @@ step() { printf "→ %s ... " "$1"; }
 ok()   { printf "PASS\n"; PASS=$((PASS+1)); }
 bad()  { printf "FAIL: %s\n" "$1"; FAIL=$((FAIL+1)); }
 
-step "1. plugin.json declares 0.23.0 with new keywords"
+step "1. plugin.json declares 0.24.0 with new keywords"
 v=$(grep -E '"version"' "$ROOT/.claude-plugin/plugin.json" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-if [[ "$v" != "0.23.0" ]]; then
-  bad "expected 0.23.0, got '$v'"
+if [[ "$v" != "0.24.0" ]]; then
+  bad "expected 0.24.0, got '$v'"
 else
   miss=""
-  for k in namespace-routing mcp agentic-flow agent-booster tier1-routing model-routing benchmarking verified telemetry budget projection forecast counterfactual drift-detection trend-alert anomaly-detection outlier-detection health-check composite-gate auto-track stop-hook snapshot-diff pr-regression; do
+  for k in namespace-routing mcp agentic-flow agent-booster tier1-routing model-routing benchmarking verified telemetry budget projection forecast counterfactual drift-detection trend-alert anomaly-detection outlier-detection health-check composite-gate auto-track stop-hook snapshot-diff pr-regression git-context traceability; do
     grep -q "\"$k\"" "$ROOT/.claude-plugin/plugin.json" || miss="$miss $k"
   done
   [[ -z "$miss" ]] && ok || bad "missing keywords:$miss"
@@ -372,6 +372,9 @@ node --check "$F1" 2>/dev/null || miss="$miss syntax-error"
 grep -q "total_cost_usd" "$F1" || miss="$miss no-headline-metric"
 grep -qE "byTier|byModel" "$F1" || miss="$miss no-aggregation"
 grep -q "alertLevel" "$F1" || miss="$miss no-alert-level"
+# iter 81 — git context for snapshot traceability (used by cost-diff).
+grep -q "captureGitContext" "$F1" || miss="$miss no-git-context-fn"
+grep -qE "shaShort|isDirty" "$F1" || miss="$miss no-git-fields"
 [[ -f "$F2" ]] || miss="$miss skill-missing"
 grep -q "summary\.mjs" "$F2" || miss="$miss skill-no-script-ref"
 grep -qE "stable|contract|JSON" "$F2" || miss="$miss no-contract-doc"

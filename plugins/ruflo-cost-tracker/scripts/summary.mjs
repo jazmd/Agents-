@@ -23,9 +23,37 @@
 // iter 73 — shared session-loader + memoryRetrieve (was duplicated across 7 scripts).
 // ADR-100 / #1748 Issue 3 — CLI_CORE=1 routes to lite cli-core (~2s cold-cache).
 import { memoryListAllKeys, memoryRetrieve } from './_sessions.mjs';
+// iter 81 — optional git context (sha/branch/isDirty) for snapshot traceability.
+import { spawnSync } from 'node:child_process';
 
 const NS = process.env.SUMMARY_NAMESPACE || 'cost-tracking';
 const FED_NS = process.env.SUMMARY_FED_NAMESPACE || 'federation-spend';
+
+// iter 81 — git context (optional; graceful degrade outside a repo).
+// Makes snapshots traceable — cost-diff can then surface "baseline was
+// at sha X, current is at sha Y" without operators having to track it
+// out-of-band. All three lookups are best-effort: any failure leaves
+// `git: null` in the JSON, which downstream consumers treat as "unknown".
+function captureGitContext() {
+  function tryGit(args) {
+    const r = spawnSync('git', args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      encoding: 'utf-8',
+    });
+    if (r.status !== 0) return null;
+    return (r.stdout || '').trim() || null;
+  }
+  const sha = tryGit(['rev-parse', 'HEAD']);
+  if (!sha) return null;
+  const branch = tryGit(['rev-parse', '--abbrev-ref', 'HEAD']);
+  const status = tryGit(['status', '--porcelain']);
+  return {
+    sha,
+    shaShort: sha.slice(0, 7),
+    branch: branch || null,
+    isDirty: status !== null && status.length > 0,
+  };
+}
 
 function alertLevel(util) {
   if (util >= 1.00) return 'HARD_STOP';
@@ -87,6 +115,8 @@ function gather() {
 
   return {
     exportedAt: new Date().toISOString(),
+    // iter 81 — git context for snapshot traceability (null outside a git repo).
+    git: captureGitContext(),
     total_cost_usd: totalUsd,
     sessionCount: sessions.length,
     conversationCount: sessions.length,
@@ -111,6 +141,10 @@ function fmtUsd(n) { return `$${(n || 0).toFixed(4)}`; }
 function asMarkdown(s) {
   const lines = [];
   lines.push(`# cost-summary (${s.exportedAt})`);
+  if (s.git) {
+    const dirty = s.git.isDirty ? ' **(dirty working tree)**' : '';
+    lines.push(`_git: \`${s.git.shaShort}\` (${s.git.branch || 'detached HEAD'})${dirty}_`);
+  }
   lines.push('');
   lines.push(`| Metric | Value |`);
   lines.push(`|---|---:|`);
