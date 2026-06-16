@@ -101,6 +101,14 @@ function main() {
   const sessions = diffNumber(baseline.sessionCount, current.sessionCount);
   const tierDeltas = diffMap(baseline.byTier || {}, current.byTier || {});
   const modelDeltas = diffMap(baseline.byModel || {}, current.byModel || {});
+  // iter 85 — surface per-token-class deltas. Without this a regression
+  // that 10×'d cache_write tokens only showed up in USD totals; operators
+  // couldn't see WHERE the growth came from. byTokenClass is emitted by
+  // cost-summary (iter 84). Falls back gracefully if either snapshot
+  // lacks the field (legacy snapshots).
+  const tokenClassDeltas = (baseline.byTokenClass || current.byTokenClass)
+    ? diffMap(baseline.byTokenClass || {}, current.byTokenClass || {})
+    : null;
 
   // Alert check.
   let alertTriggered = false;
@@ -140,6 +148,7 @@ function main() {
     },
     byTier: tierDeltas,
     byModel: modelDeltas,
+    byTokenClass: tokenClassDeltas,
     alert: (ARGS.alertPct !== null || ARGS.alertUsd !== null) ? {
       triggered: alertTriggered,
       reason: alertReason,
@@ -195,6 +204,25 @@ function main() {
         console.log(`| \`${m.key}\` | $${m.baseline.toFixed(6)} | $${m.current.toFixed(6)} | ${md} | ${mp} | ${m.status} |`);
       }
       console.log('');
+    }
+    // iter 85 — per-token-class delta surfaces cache_write growth driver.
+    if (tokenClassDeltas && tokenClassDeltas.length > 0) {
+      console.log('## By token class');
+      console.log('');
+      console.log('| Class | Baseline | Current | Delta | % | Status |');
+      console.log('|---|---:|---:|---:|---:|:---:|');
+      for (const c of tokenClassDeltas) {
+        const cd = c.delta >= 0 ? `+${c.delta.toLocaleString()}` : c.delta.toLocaleString();
+        const cp = isFinite(c.pct) ? `${c.pct.toFixed(2)}%` : (c.status === 'added' ? 'new' : '—');
+        console.log(`| ${c.key} | ${c.baseline.toLocaleString()} | ${c.current.toLocaleString()} | ${cd} tok | ${cp} | ${c.status} |`);
+      }
+      console.log('');
+      // Surface the cache-write-growth signal explicitly when present.
+      const cacheWriteRow = tokenClassDeltas.find((c) => c.key === 'cache_write');
+      if (cacheWriteRow && cacheWriteRow.delta > 0 && isFinite(cacheWriteRow.pct) && cacheWriteRow.pct > 50) {
+        console.log(`_⚠ \`cache_write\` tokens grew ${cacheWriteRow.pct.toFixed(1)}% — that's the iter-82 cost driver. Investigate WHICH messages cache-wrote heavily via \`cost session --session-id <id>\`._`);
+        console.log('');
+      }
     }
     if (alertReason !== null) {
       if (alertTriggered) console.log(`⚠ **ALERT**: ${alertReason}`);
