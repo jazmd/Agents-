@@ -99,6 +99,14 @@ Cost tracking commands:
 5. Negative `always-haiku` savings = over-escalation signal (router picked sonnet/opus when haiku could have done it). Positive `always-sonnet` quantifies the router's win against the "safe default" baseline.
 6. JSON output for CI gates: `jq '.baselines[1].savingsPct > 30'` to flag workload shifts where routing isn't saving ≥30% vs sonnet
 
+**`cost burn [--bucket 1d] [--lookback 14d] [--alert-on-acceleration-pct N] [--format table|json]`** -- Burn-rate trend over time with optional drift-alert exit code. Trend counterpart to reactive/predictive/comparative: answers "is daily burn accelerating?".
+1. Run `node plugins/ruflo-cost-tracker/scripts/burn.mjs`
+2. Bin sessions into `--bucket` duration windows (default 1d) over `--lookback` (default 14d)
+3. Compute delta: latest bucket vs mean of prior non-empty buckets
+4. With `--alert-on-acceleration-pct N`: exit 1 when latest exceeds prior mean by N%+. Independent of budget — catches "hot loop burning 10× normal" before budget alarm fires
+5. Distinct from `cost trend` (which surfaces BENCHMARK drift across `docs/benchmarks/runs/*.json`); this tracks PRODUCTION spend.
+6. Edge cases: no prior data → alert SKIPPED (no spurious cold-start alerts). `--bucket` > `--lookback` → exit 2 (config error).
+
 **`cost benchmark [--llm] [--anthropic]`** -- Run the corpus benchmark to verify booster claims with measured numbers.
 1. Without flags: booster-only (free, ~85 ms wall-time, no API keys needed)
 2. `--llm`: also run Gemini 2.0 Flash baseline (uses GCP `GOOGLE_AI_API_KEY` secret)

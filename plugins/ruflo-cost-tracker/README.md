@@ -32,13 +32,14 @@ claude --plugin-dir plugins/ruflo-cost-tracker
 | `cost-trend` | `/cost-trend` | Read all bench runs and surface drift (win rate, latency, speedup) — flags regressions the smoke gate misses |
 | `cost-projection` | `/cost-projection [--window 7d]` | **Forward** spend extrapolation: USD/day rate × 7d/30d/90d/365d horizons + days-until-budget-exhausted (predictive counterpart to `cost-budget-check`) |
 | `cost-counterfactual` | `/cost-counterfactual [--since 7d] [--baseline all]` | **Comparative** cost analysis: actual spend vs always-haiku / always-sonnet / always-opus baselines. Negative savings flag over-escalation; positive savings quantify routing's win. |
+| `cost-burn` | `/cost-burn [--bucket 1d] [--lookback 14d] [--alert-on-acceleration-pct N]` | **Trend** burn-rate analysis: window-over-window delta + optional drift-alert exit code. Catches "hot loop burning 10× normal" before budget alarm fires. |
 | `cost-conversation` | `/cost-conversation` | Per-conversation cost view (different lens from cost-report's per-agent / per-model) |
 | `cost-export` | `/cost-export [--prometheus <path>] [--webhook <url>]` | Emit cost data as Prometheus textfile or POST to a webhook |
 | `cost-federation` | `/cost-federation` | ADR-097 Phase 3 consumer — per-peer 1h/24h/7d federation_spend rolling windows |
 | `cost-summary` | `/cost-summary [--format json\|markdown]` | Single-shot programmatic dump of all cost data (stable JSON contract for inter-plugin consumption) |
 | `cost-compact-context` | `/cost-compact-context <query>` | Wrap `getTokenOptimizer().getCompactContext()` for retrieval-compacted analysis (graceful fallback when agentic-flow not installed) |
 
-## Commands (15 subcommands)
+## Commands (16 subcommands)
 
 ```bash
 cost track                                # Auto-capture this session's token usage (producer)
@@ -53,6 +54,7 @@ cost benchmark [--llm] [--anthropic]      # Run measured benchmark — booster +
 cost trend                                # Drift across bench runs (win rate, latency, regressions)
 cost projection [--window 7d]             # Forward USD/day extrapolation + days-until-budget-exhausted
 cost counterfactual [--since 7d]          # Multi-baseline (haiku/sonnet/opus) — is routing earning its keep?
+cost burn [--bucket 1d] [--alert ...]     # Burn-rate trend + acceleration alert (exit 1 on drift)
 cost conversation                         # Per-conversation cost view
 cost summary [--format json|markdown]     # Programmatic JSON contract for inter-plugin consumption
 cost export [--prometheus] [--webhook]    # External observability — Prometheus textfile + webhook POST
