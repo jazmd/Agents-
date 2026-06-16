@@ -3337,6 +3337,68 @@ export const hooksIntelligenceStats: MCPTool = {
       }
     } catch { /* trajectory parse failed — leave costSavings null */ }
 
+    // ADR-149 iter 56 — recent activity + warmest bandit cell. Mirrors what
+    // iter 49's CLI `stats-summary` shows so MCP consumers don't have to
+    // glue together multiple tool calls. Single inline pass over the JSONL
+    // (24h window only) + read of model-router-state.json.
+    let recent24h: {
+      decisions: number;
+      fallbacks: number;
+      fallbackRatePct: number;
+    } | null = null;
+    let warmestBanditCell: {
+      bucket: string;
+      key: string;
+      samples: number;
+      meanQuality: number;
+    } | null = null;
+    try {
+      const fs = await import('node:fs');
+      const pathMod = await import('node:path');
+      const trajectoryPath = process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY_PATH
+        ?? pathMod.resolve(process.cwd(), '.swarm', 'model-router-trajectories.jsonl');
+      if (fs.existsSync(trajectoryPath)) {
+        const cutoffMs = Date.now() - 24 * 3600_000;
+        let dec = 0, fallback = 0;
+        for (const l of fs.readFileSync(trajectoryPath, 'utf8').split('\n')) {
+          if (!l.trim()) continue;
+          try {
+            const r = JSON.parse(l);
+            if (r.type !== 'decision') continue;
+            if (Date.parse(r.ts) < cutoffMs) continue;
+            dec++;
+            if (r.routed_by === 'bandit-fallback') fallback++;
+          } catch { /* */ }
+        }
+        if (dec > 0) {
+          recent24h = {
+            decisions: dec,
+            fallbacks: fallback,
+            fallbackRatePct: Math.round((fallback / dec) * 10000) / 100,
+          };
+        }
+      }
+
+      // Warmest bandit cell from persisted state.
+      const statePath = pathMod.resolve(process.cwd(), '.swarm', 'model-router-state.json');
+      if (fs.existsSync(statePath)) {
+        const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+        const priors = state.priorsById ?? state.priors ?? {};
+        let bestSamples = 0;
+        for (const bucket of ['low', 'med', 'high']) {
+          const b = priors[bucket];
+          if (!b) continue;
+          for (const [k, p] of Object.entries(b as Record<string, { alpha: number; beta: number }>)) {
+            const samples = p.alpha + p.beta - 2;
+            if (samples > bestSamples) {
+              bestSamples = samples;
+              warmestBanditCell = { bucket, key: k, samples, meanQuality: p.alpha / (p.alpha + p.beta) };
+            }
+          }
+        }
+      }
+    } catch { /* best-effort */ }
+
     // ADR-149 iter 51 — surface forward projection to MCP, mirroring iter 41
     // (CLI cost-projection) but as an additive field. Linear extrapolation
     // from the same 7d measurement window the costSavings block used. JSON
@@ -3418,6 +3480,11 @@ export const hooksIntelligenceStats: MCPTool = {
       // CLI shape). Pairs with costSavings: one says how much we saved, the
       // other extrapolates that savings forward to operational horizons.
       costProjection,
+      // ADR-149 iter 56 — recent activity + warmest bandit cell to complete
+      // feature parity with the CLI `stats-summary` (iter 49). One MCP tool
+      // call now returns everything needed for an in-conversation dashboard.
+      recent24h,
+      warmestBanditCell,
       dataSource: sona ? 'real-implementations' : 'memory-fallback',
       lastUpdated: new Date().toISOString(),
     };
