@@ -19,7 +19,7 @@ Model pricing per 1M tokens (Haiku/Sonnet/Opus × Input/Output/Cache-Write/Cache
 
 | Skill | Role | Invoke when |
 |---|---|---|
-| `cost-track` | **Producer** — reads session jsonl, persists per-session usage to `cost-tracking` | After significant work; cron-friendly |
+| `cost-track` | **Producer** — reads session jsonl, persists per-session usage to `cost-tracking`. Auto-fires on session Stop via `hooks/hooks.json` (iter 78); manual invocation rarely needed | After significant work; cron-friendly. Also runs automatically at every session end. |
 | `cost-report` | Per-agent / per-model narrative report (with By-tier block) | User asks for a cost report |
 | `cost-optimize` | Recommend downgrades + auto-emit `hooks_model-outcome` | Cost is higher than expected |
 | `cost-budget-check` | 50/75/90/100% alert ladder; exit 1 on HARD_STOP | Before spawning swarms; cron-friendly |

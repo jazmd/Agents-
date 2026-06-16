@@ -8,13 +8,13 @@ step() { printf "→ %s ... " "$1"; }
 ok()   { printf "PASS\n"; PASS=$((PASS+1)); }
 bad()  { printf "FAIL: %s\n" "$1"; FAIL=$((FAIL+1)); }
 
-step "1. plugin.json declares 0.21.3 with new keywords"
+step "1. plugin.json declares 0.22.0 with new keywords"
 v=$(grep -E '"version"' "$ROOT/.claude-plugin/plugin.json" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-if [[ "$v" != "0.21.3" ]]; then
-  bad "expected 0.21.3, got '$v'"
+if [[ "$v" != "0.22.0" ]]; then
+  bad "expected 0.22.0, got '$v'"
 else
   miss=""
-  for k in namespace-routing mcp agentic-flow agent-booster tier1-routing model-routing benchmarking verified telemetry budget projection forecast counterfactual drift-detection trend-alert anomaly-detection outlier-detection health-check composite-gate; do
+  for k in namespace-routing mcp agentic-flow agent-booster tier1-routing model-routing benchmarking verified telemetry budget projection forecast counterfactual drift-detection trend-alert anomaly-detection outlier-detection health-check composite-gate auto-track stop-hook; do
     grep -q "\"$k\"" "$ROOT/.claude-plugin/plugin.json" || miss="$miss $k"
   done
   [[ -z "$miss" ]] && ok || bad "missing keywords:$miss"
@@ -235,6 +235,18 @@ grep -qE '\.claude/projects|session.*jsonl|jsonl' "$F" || miss="$miss session-re
 grep -qE 'memory_store|memory store' "$F" || miss="$miss memory-store"
 grep -q 'cost-tracking' "$F" || miss="$miss namespace"
 grep -q '^allowed-tools:[[:space:]]*\*' "$F" && miss="$miss wildcard"
+[[ -z "$miss" ]] && ok || bad "$miss"
+
+step "28b. hooks/hooks.json auto-runs cost-track on Stop (iter 78)"
+F="$ROOT/hooks/hooks.json"
+miss=""
+[[ -f "$F" ]] || miss="$miss missing-file"
+node -e "JSON.parse(require('fs').readFileSync('$F'))" 2>/dev/null || miss="$miss invalid-json"
+grep -q '"Stop"' "$F" || miss="$miss no-Stop-hook"
+grep -q "track\.mjs" "$F" || miss="$miss not-invoking-track"
+grep -q "TRACK_QUIET=1" "$F" || miss="$miss no-quiet-flag"
+grep -q "|| true" "$F" || miss="$miss not-resilient"
+grep -q "CLAUDE_PLUGIN_ROOT" "$F" || miss="$miss no-plugin-root-var"
 [[ -z "$miss" ]] && ok || bad "$miss"
 
 step "29. track.mjs harness present + parses + uses spawnSync (no shell-escape risks)"

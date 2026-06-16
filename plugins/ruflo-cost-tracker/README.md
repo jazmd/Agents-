@@ -24,7 +24,7 @@ claude --plugin-dir plugins/ruflo-cost-tracker
 |-------|-------|-------------|
 | `cost-report` | `/cost-report [--period today]` | Generate a cost report with token usage and USD costs by tier, model, and agent |
 | `cost-optimize` | `/cost-optimize` | Analyze usage patterns, recommend cost optimizations, and emit `hooks_model-outcome` events |
-| `cost-track` | `/cost-track` | **Auto-capture** per-session token usage from the Claude Code jsonl into `cost-tracking` namespace (producer side) |
+| `cost-track` | `/cost-track` | **Auto-capture** per-session token usage from the Claude Code jsonl into `cost-tracking` namespace (producer side). Also auto-fires on session-end via the Stop hook in `hooks/hooks.json` — no manual invocation needed. |
 | `cost-budget-check` | `/cost-budget-check [--period today\|week\|month\|all]` | Read totals + budget config, emit 50/75/90/100% alert ladder; exit 1 on HARD_STOP |
 | `cost-booster-route` | `/cost-booster-route <task>` | Route tasks via `hooks_route` and report Agent Booster (Tier 1) bypass utilization |
 | `cost-booster-edit` | `/cost-booster-edit <intent> <file>` | **Apply** a Tier 1 transform via `agent-booster.apply()` (sub-millisecond, $0, deterministic) |
