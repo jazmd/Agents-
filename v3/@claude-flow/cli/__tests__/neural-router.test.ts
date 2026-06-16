@@ -466,6 +466,46 @@ describe('router-trajectory (ADR-148)', () => {
     expect(empty.bucketCount).toBe(0);
   });
 
+  it('decision rows carry ensemble_disagreement when provided (ADR-149 iter 46)', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'iter46-'));
+    try {
+      const path = join(tmp, 'trajectories.jsonl');
+      process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY = '1';
+      process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY_PATH = path;
+      __resetTrajectoryRecorderForTests();
+      const { recordDecision } = await import('../src/ruvector/router-trajectory.js');
+
+      recordDecision({
+        task: 'with disagreement',
+        complexity: 0.5,
+        model: 'sonnet',
+        confidence: 0.8,
+        uncertainty: 0.2,
+        routedBy: 'hybrid',
+        neuralBackend: 'metaharness-krr',
+        ensembleDisagreement: 0.234,
+      });
+      // Also one without — verify the field is omitted (not null).
+      recordDecision({
+        task: 'no disagreement',
+        complexity: 0.3,
+        model: 'haiku',
+        confidence: 0.9,
+        uncertainty: 0.1,
+        routedBy: 'heuristic',
+      });
+
+      const lines = readFileSync(path, 'utf8').trim().split('\n').map(l => JSON.parse(l));
+      expect(lines.length).toBe(2);
+      expect(lines[0].ensemble_disagreement).toBe(0.234);
+      expect(lines[1].ensemble_disagreement).toBeUndefined();
+    } finally {
+      delete process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY;
+      delete process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY_PATH;
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it('outcome rows carry tokens/cost_usd/model_id when provided (ADR-149 iter 31)', async () => {
     const tmp = mkdtempSync(join(tmpdir(), 'iter31-'));
     try {

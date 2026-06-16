@@ -583,6 +583,10 @@ export class ModelRouter {
     let neuralBackend: ModelRoutingResult['neuralBackend'] | undefined = undefined;
     let neuralModelId: string | undefined = undefined;
     let neuralDeclined = false;
+    // iter 46 — capture iter 45's ensemble-disagreement diagnostic so we can
+    // persist it to the trajectory below; downstream tuners (future) can
+    // analyze the distribution to recommend an iter 44 threshold.
+    let neuralEnsembleDisagreement: number | undefined = undefined;
     if (embedding && embedding.length > 0 && process.env.CLAUDE_FLOW_ROUTER_NEURAL === '1') {
       try {
         const { tryCostOptimalRoute } = await loadNeuralRouter();
@@ -594,6 +598,7 @@ export class ModelRouter {
           // ADR-149: capture the concrete picked model id (the cost-optimal
           // pick across all candidates, not just within a tier).
           neuralModelId = nr.modelId;
+          neuralEnsembleDisagreement = nr.ensembleDisagreement;
           // Build per-tier quality map for the bandit prior. The neural
           // backend returns per-model alternatives (e.g. 7 distinct slugs);
           // for the Beta-prior bump we collapse to tier by taking the MAX
@@ -748,6 +753,7 @@ export class ModelRouter {
           neuralBackend, abPair,
           provider: exec.provider,
           openrouterModel: exec.openrouterModel,
+          ensembleDisagreement: neuralEnsembleDisagreement,
         });
       } catch {
         // Silent — trajectory recording must never break routing.

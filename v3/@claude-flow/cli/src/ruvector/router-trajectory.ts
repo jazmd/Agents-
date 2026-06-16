@@ -55,6 +55,15 @@ export interface TrajectoryDecisionRow {
   provider?: 'anthropic' | 'openrouter';
   /** Concrete OpenRouter model slug when provider=openrouter. */
   openrouter_model?: string;
+  /**
+   * iter 46 — ensemble-disagreement diagnostic from iter 45. Absolute
+   * difference between unified KRR and bucket specialist predictions for
+   * the picked model. Set when both backends were queried (bucket
+   * specialist available + bucket supplied). Persisting per-decision lets
+   * a future tuner analyze the distribution and recommend an iter 44
+   * threshold.
+   */
+  ensemble_disagreement?: number;
 }
 
 /** A routing outcome — written later by the caller via `recordOutcome()`. */
@@ -208,6 +217,8 @@ export function recordDecision(args: {
   abPair?: TrajectoryDecisionRow['ab_pair'];
   provider?: TrajectoryDecisionRow['provider'];
   openrouterModel?: TrajectoryDecisionRow['openrouter_model'];
+  /** iter 46 — optional ensemble disagreement diagnostic (iter 45). */
+  ensembleDisagreement?: number;
 }): void {
   const cfg = getConfig();
   if (!cfg.enabled) return;
@@ -226,6 +237,7 @@ export function recordDecision(args: {
     ...(args.abPair ? { ab_pair: args.abPair } : {}),
     ...(args.provider ? { provider: args.provider } : {}),
     ...(args.openrouterModel ? { openrouter_model: args.openrouterModel } : {}),
+    ...(args.ensembleDisagreement !== undefined ? { ensemble_disagreement: args.ensembleDisagreement } : {}),
   };
   appendRow(row);
 }
