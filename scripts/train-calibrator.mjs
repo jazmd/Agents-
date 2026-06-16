@@ -28,6 +28,7 @@ const ARGS = (() => {
     if (v === '--corpus') a.corpus = process.argv[++i];
     else if (v === '--out') a.out = process.argv[++i];
     else if (v === '--dry-run') a.dryRun = true;
+    else if (v === '--per-tier') a.perTier = true;     // iter 25 — also write tier-specific calibrators
   }
   return a;
 })();
@@ -53,9 +54,10 @@ const prices = Object.fromEntries(candidates.map(m => [m, BLENDED_PRICES[m] ?? 1
 
 console.log(`[calibrate] corpus: ${ARGS.corpus} (${rows.length} rows, ${candidates.length} candidates)`);
 
-// --- LOO-CV: collect (pred, obs) pairs across all 40 held-out rows × 7 models. ---
+// --- LOO-CV: collect (pred, obs, tier) tuples across all rows × candidates. ---
 const t0 = performance.now();
-const pairs = []; // [pred, obs]
+const pairsByTier = { cheap: [], mid: [], strong: [] };
+const allPairs = []; // [pred, obs] — for the unified calibrator
 for (let i = 0; i < rows.length; i++) {
   const heldOut = rows[i];
   const trainRows = rows.filter((_, j) => j !== i);
@@ -67,11 +69,16 @@ for (let i = 0; i < rows.length; i++) {
     const predicted = router.predict(model, heldOut.embedding);
     const observed = heldOut.scores[model];
     if (observed != null && Number.isFinite(predicted)) {
-      pairs.push([predicted, observed]);
+      allPairs.push([predicted, observed]);
+      if (heldOut.tier && pairsByTier[heldOut.tier]) {
+        pairsByTier[heldOut.tier].push([predicted, observed]);
+      }
     }
   }
 }
 const cvMs = performance.now() - t0;
+// Back-compat alias: scripts/older readers expect `pairs`.
+const pairs = allPairs;
 
 // --- Fit isotonic calibrator. ---
 const t1 = performance.now();
@@ -109,5 +116,37 @@ if (ARGS.dryRun) {
 const json = calibrator.toJSON();
 writeFileSync(ARGS.out, JSON.stringify(json));
 console.log(`[calibrate] wrote ${ARGS.out} (${JSON.stringify(json).length} bytes, ${json.buckets.length} buckets)`);
+
+// --- iter 25 — per-tier calibrators ---
+// Mid-tier OOS ECE after the unified calibrator (iter 23 measurement)
+// was 0.178 — much worse than overall 0.033. A single curve can't capture
+// tier-specific bias. Fit one calibrator per tier (cheap/mid/strong), keyed
+// by the query's complexity bucket at lookup time (matches iter 16's
+// per-bucket KRR specialists).
+if (ARGS.perTier) {
+  // Map: corpus tier label → bucket label used by the bandit + neural router.
+  const tierToBucket = { cheap: 'low', mid: 'med', strong: 'high' };
+  for (const [tier, bucket] of Object.entries(tierToBucket)) {
+    const tierPairs = pairsByTier[tier];
+    const tierOut = ARGS.out.replace(/\.calibrator\.json$/, `.calibrator.${bucket}.json`);
+    if (tierPairs.length < 3) {
+      console.log(`[calibrate] ${bucket}: only ${tierPairs.length} pairs — skipping (need ≥3 for meaningful PAV).`);
+      continue;
+    }
+    const cal = IsotonicCalibrator.fit(tierPairs);
+    // In-sample MAE check on the tier subset.
+    let mB = 0, mA = 0;
+    for (const [p, o] of tierPairs) { mB += Math.abs(p - o); mA += Math.abs(cal.transform(p) - o); }
+    mB /= tierPairs.length; mA /= tierPairs.length;
+    if (ARGS.dryRun) {
+      console.log(`[calibrate] ${bucket}: ${tierPairs.length} pairs, ${cal.bucketCount} buckets, MAE ${mB.toFixed(4)} → ${mA.toFixed(4)} (dry-run, not writing)`);
+    } else {
+      const tierJson = cal.toJSON();
+      writeFileSync(tierOut, JSON.stringify(tierJson));
+      console.log(`[calibrate] ${bucket}: ${tierPairs.length} pairs, ${cal.bucketCount} buckets, MAE ${mB.toFixed(4)} → ${mA.toFixed(4)} → ${tierOut}`);
+    }
+  }
+}
+
 console.log('');
-console.log('[calibrate] Enable at runtime with:  export CLAUDE_FLOW_ROUTER_CALIBRATE=1');
+console.log('[calibrate] Default ON since iter 24 — opt out with: export CLAUDE_FLOW_ROUTER_CALIBRATE=0');

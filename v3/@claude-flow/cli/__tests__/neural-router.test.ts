@@ -162,6 +162,31 @@ describe('neural-router (ADR-148)', () => {
     const sOff = await neuralRouterStatus();
     expect(sOff.reason).not.toContain('calibrated');
   });
+
+  it('per-tier calibrators load when present and are reported in status reason (ADR-149 iter 25)', async () => {
+    // Iter 25 ships seed-router.calibrator.{low,med,high}.json alongside the
+    // unified calibrator. When all are present, status reason should reflect
+    // every loaded calibrator. When CALIBRATE=0, none should load.
+    process.env.CLAUDE_FLOW_ROUTER_NEURAL = '1';
+
+    __resetNeuralRouterForTests();
+    const s = await neuralRouterStatus();
+    if (s.routedBy !== 'metaharness-krr') return; // dep absent / KRR not loaded
+
+    // The reason string lists which calibrators loaded; with the bundled
+    // artifacts, expect unified + low + med + high.
+    expect(s.reason).toMatch(/calibrated: .*unified/);
+    // At least one bucket must be present (best-effort — file existence
+    // depends on whether iter 25 was run on this checkout).
+    const hasBucket = /calibrated: .*(low|med|high)/.test(s.reason);
+    expect(hasBucket).toBe(true);
+
+    // Opt-out kills all calibrators.
+    process.env.CLAUDE_FLOW_ROUTER_CALIBRATE = '0';
+    __resetNeuralRouterForTests();
+    const sOff = await neuralRouterStatus();
+    expect(sOff.reason).not.toContain('calibrated');
+  });
 });
 
 // ---------------------------------------------------------------------------

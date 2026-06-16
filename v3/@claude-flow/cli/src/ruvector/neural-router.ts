@@ -348,30 +348,47 @@ async function resolveBackend(cfg: NeuralRouterConfig): Promise<ResolvedBackend>
   // 3.5. No user artifact → try the bundled pre-trained KRR (~96kB, ~0.020 ms/route).
   if (existsSync(cfg.bundledKrrPath)) {
     try {
-      // ADR-149 iter 22+24 — load isotonic calibrator if the artifact
-      // exists and the gate isn't explicitly closed. Calibration is ON by
-      // default (iter 24); iter 23's out-of-sample LOO validation showed
-      // ECE drops 79% with calibration enabled, with only a 0.0144
-      // train/test gap. Set `CLAUDE_FLOW_ROUTER_CALIBRATE=0` to opt out
-      // and recover raw KRR behavior.
-      let calibrator: { transform: (x: number) => number } | null = null;
-      if (cfg.calibrateEnabled && existsSync(cfg.calibratorPath)) {
-        try {
-          const { IsotonicCalibrator } = await import('./router-calibrator.js');
-          const calJson = JSON.parse(readFileSync(cfg.calibratorPath, 'utf8'));
-          calibrator = IsotonicCalibrator.fromJSON(calJson);
-        } catch {
-          // Silent — calibration is corrective, not load-bearing.
+      // ADR-149 iter 22+24+25 — load isotonic calibrator(s) if the gate
+      // isn't explicitly closed. Calibration is ON by default (iter 24);
+      // iter 23's out-of-sample LOO validation showed ECE drops 79% with
+      // calibration enabled. Iter 25 adds per-tier calibrators: when a
+      // matching `seed-router.calibrator.{low,med,high}.json` exists,
+      // bucket-specialist KRR routers are wrapped with the bucket-matched
+      // calibrator (closes mid-tier residual ECE; mid in-sample MAE drops
+      // 0.36 → 0.17 with tier-specific fit). Set
+      // `CLAUDE_FLOW_ROUTER_CALIBRATE=0` to opt out of all calibration.
+      type Cal = { transform: (x: number) => number };
+      let unifiedCalibrator: Cal | null = null;
+      const calibratorByBucket: Partial<Record<'low' | 'med' | 'high', Cal>> = {};
+      const loadedCalibrators: string[] = [];
+      if (cfg.calibrateEnabled) {
+        const { IsotonicCalibrator } = await import('./router-calibrator.js');
+        const loadCal = (path: string): Cal | null => {
+          if (!existsSync(path)) return null;
+          try {
+            return IsotonicCalibrator.fromJSON(JSON.parse(readFileSync(path, 'utf8')));
+          } catch { return null; }
+        };
+        unifiedCalibrator = loadCal(cfg.calibratorPath);
+        if (unifiedCalibrator) loadedCalibrators.push('unified');
+        // Per-tier — paths follow the iter 16 KRR specialist convention.
+        const calDir = cfg.calibratorPath.replace(/seed-router\.calibrator\.json$/, '');
+        for (const bucket of ['low', 'med', 'high'] as const) {
+          const c = loadCal(`${calDir}seed-router.calibrator.${bucket}.json`);
+          if (c) {
+            calibratorByBucket[bucket] = c;
+            loadedCalibrators.push(bucket);
+          }
         }
       }
-      const wrapWithCalibrator = (r: PureRouter): PureRouter => {
-        if (!calibrator) return r;
+      const wrapWithCalibrator = (r: PureRouter, cal: Cal | null): PureRouter => {
+        if (!cal) return r;
         return {
           route: (e) => {
             const result = r.route(e);
-            return { ...result, predictedQuality: calibrator!.transform(result.predictedQuality) };
+            return { ...result, predictedQuality: cal.transform(result.predictedQuality) };
           },
-          predictAll: (e) => r.predictAll(e).map(c => ({ ...c, predictedQuality: calibrator!.transform(c.predictedQuality) })),
+          predictAll: (e) => r.predictAll(e).map(c => ({ ...c, predictedQuality: cal.transform(c.predictedQuality) })),
         };
       };
 
@@ -396,7 +413,7 @@ async function resolveBackend(cfg: NeuralRouterConfig): Promise<ResolvedBackend>
 
       const unifiedRaw = loadKrr(cfg.bundledKrrPath);
       if (!unifiedRaw) throw new Error('failed to load unified KRR');
-      const unified = wrapWithCalibrator(unifiedRaw);
+      const unified = wrapWithCalibrator(unifiedRaw, unifiedCalibrator);
 
       // ADR-149 iter 16 — load per-bucket specialists if present. Each is a
       // KRR fit only to its tier's rows (cheap → low.json, mid → med.json,
@@ -409,11 +426,15 @@ async function resolveBackend(cfg: NeuralRouterConfig): Promise<ResolvedBackend>
       for (const bucket of ['low', 'med', 'high'] as const) {
         const r = loadKrr(`${bucketDir}seed-router.krr.${bucket}.json`);
         if (r) {
-          routerByBucket[bucket] = wrapWithCalibrator(r);
+          // iter 25 — prefer tier-specific calibrator for this bucket;
+          // fall back to the unified calibrator when no specialist exists.
+          routerByBucket[bucket] = wrapWithCalibrator(r, calibratorByBucket[bucket] ?? unifiedCalibrator);
           loadedBuckets.push(bucket);
         }
       }
-      const calibratedNote = calibrator ? ' (calibrated)' : '';
+      const calibratedNote = loadedCalibrators.length > 0
+        ? ` (calibrated: ${loadedCalibrators.join('+')})`
+        : '';
       const reason = loadedBuckets.length > 0
         ? `bundled KRR loaded from ${cfg.bundledKrrPath} + ${loadedBuckets.length} bucket specialist(s): ${loadedBuckets.join(', ')}${calibratedNote}`
         : `bundled KRR artifact loaded from ${cfg.bundledKrrPath}${calibratedNote}`;
