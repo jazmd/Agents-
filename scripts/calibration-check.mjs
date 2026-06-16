@@ -1,0 +1,204 @@
+// Calibration check for the cost-optimal router (ADR-149 iter 21).
+//
+// WHY: `looQuality` from trainRouter() tells us avg fit quality, but not WHERE
+// the KRR is miscalibrated. A router that predicts every model at 0.5 has
+// looQuality 0.5 but is useless — every cost-optimal decision is a coin flip.
+// What we actually need to know:
+//
+//   1. Are predicted scores close to observed scores? (Brier / MAE)
+//   2. When the router says "0.8", does the model actually deliver 0.8?
+//      (Expected Calibration Error — ECE)
+//   3. Which models / tiers are most miscalibrated? (per-model / per-tier MAE)
+//
+// METHOD: Leave-one-out cross-validation on the seed corpus. For each of
+// the 40 rows, train KRR on the other 39, then predict scores for the
+// held-out row's embedding across every candidate. Compare predicted vs
+// observed score-per-model.
+//
+// USAGE
+//   node scripts/calibration-check.mjs                       # seed corpus
+//   node scripts/calibration-check.mjs --corpus other.json   # custom corpus
+//   node scripts/calibration-check.mjs --format human        # readable tables
+//
+// Exits 0 on success, 1 on I/O error.
+
+import { readFileSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import * as mh from '@metaharness/router';
+
+const ARGS = (() => {
+  const a = {
+    corpus: resolve('v3/@claude-flow/cli/assets/model-router/seed-rows.json'),
+    format: 'json',
+    bins: 10,
+  };
+  for (let i = 2; i < process.argv.length; i++) {
+    const v = process.argv[i];
+    if (v === '--corpus') a.corpus = process.argv[++i];
+    else if (v === '--format') a.format = process.argv[++i];
+    else if (v === '--bins') a.bins = parseInt(process.argv[++i], 10);
+  }
+  return a;
+})();
+
+const BLENDED_PRICES = {
+  'inclusionai/ling-2.6-flash':         (0.01 + 3 * 0.03),
+  'google/gemini-2.5-flash-lite':       (0.10 + 3 * 0.40),
+  'anthropic/claude-haiku-4.5':         (1.00 + 3 * 5.00),
+  'openai/gpt-4.1':                     (2.00 + 3 * 8.00),
+  'meta-llama/llama-3.3-70b-instruct':  (0.13 + 3 * 0.40),
+  'anthropic/claude-sonnet-4-6':        (3.00 + 3 * 15.00),
+  'anthropic/claude-opus-4':            (15.00 + 3 * 75.00),
+};
+
+if (!existsSync(ARGS.corpus)) {
+  console.error(`[calibration] corpus not found at ${ARGS.corpus}`);
+  process.exit(1);
+}
+const rows = JSON.parse(readFileSync(ARGS.corpus, 'utf8'));
+const candidates = Object.keys(rows[0].scores);
+const prices = Object.fromEntries(candidates.map(m => [m, BLENDED_PRICES[m] ?? 1.0]));
+
+// --- LOO-CV ---
+const t0 = performance.now();
+const predictions = []; // {model, predicted, observed, tier}
+for (let i = 0; i < rows.length; i++) {
+  const heldOut = rows[i];
+  const trainRows = rows.filter((_, j) => j !== i);
+  const { router } = mh.trainRouter(trainRows, prices, {
+    qualityBar: 0.25,
+    lambdas: [1e-4, 1e-3, 1e-2, 1e-1, 1e0],
+  });
+  for (const model of candidates) {
+    const predicted = router.predict(model, heldOut.embedding);
+    const observed = heldOut.scores[model];
+    if (observed != null && Number.isFinite(predicted)) {
+      predictions.push({ model, predicted, observed, tier: heldOut.tier });
+    }
+  }
+}
+const cvMs = performance.now() - t0;
+
+// --- Aggregate metrics ---
+const n = predictions.length;
+
+function brierAndMae(rows) {
+  let brier = 0, mae = 0;
+  for (const r of rows) {
+    brier += (r.predicted - r.observed) ** 2;
+    mae += Math.abs(r.predicted - r.observed);
+  }
+  return { brier: brier / rows.length, mae: mae / rows.length, count: rows.length };
+}
+
+// Expected Calibration Error: bin predictions, compare bin-avg-predicted to
+// bin-avg-observed, weighted by bin size.
+function ece(rows, nBins) {
+  if (rows.length === 0) return { ece: 0, bins: [] };
+  const bins = Array.from({ length: nBins }, () => ({ sumPred: 0, sumObs: 0, count: 0 }));
+  for (const r of rows) {
+    const idx = Math.min(nBins - 1, Math.max(0, Math.floor(r.predicted * nBins)));
+    bins[idx].sumPred += r.predicted;
+    bins[idx].sumObs += r.observed;
+    bins[idx].count += 1;
+  }
+  let weightedGap = 0;
+  const report = [];
+  for (let i = 0; i < nBins; i++) {
+    const b = bins[i];
+    if (b.count === 0) {
+      report.push({ bin: i, range: [i / nBins, (i + 1) / nBins], count: 0, avgPredicted: null, avgObserved: null, gap: null });
+      continue;
+    }
+    const avgPred = b.sumPred / b.count;
+    const avgObs = b.sumObs / b.count;
+    const gap = Math.abs(avgPred - avgObs);
+    weightedGap += (b.count / rows.length) * gap;
+    report.push({
+      bin: i,
+      range: [i / nBins, (i + 1) / nBins],
+      count: b.count,
+      avgPredicted: avgPred,
+      avgObserved: avgObs,
+      gap,
+    });
+  }
+  return { ece: weightedGap, bins: report };
+}
+
+const overall = brierAndMae(predictions);
+const overallEce = ece(predictions, ARGS.bins);
+
+const perTier = {};
+for (const tier of ['cheap', 'mid', 'strong']) {
+  const subset = predictions.filter(p => p.tier === tier);
+  if (subset.length > 0) {
+    perTier[tier] = { ...brierAndMae(subset), ece: ece(subset, ARGS.bins).ece };
+  }
+}
+
+const perModel = {};
+for (const model of candidates) {
+  const subset = predictions.filter(p => p.model === model);
+  if (subset.length > 0) {
+    perModel[model] = { ...brierAndMae(subset), ece: ece(subset, ARGS.bins).ece };
+  }
+}
+
+// --- Verdict ---
+// Calibration thresholds — these are arbitrary but useful as a smoke gate.
+// ECE < 0.05 is "well calibrated" in ML literature; > 0.15 is "poorly".
+const verdict =
+  overallEce.ece < 0.05 ? 'well-calibrated' :
+  overallEce.ece < 0.10 ? 'mildly-miscalibrated' :
+  overallEce.ece < 0.15 ? 'noticeably-miscalibrated' :
+  'poorly-calibrated';
+
+const report = {
+  corpus: ARGS.corpus,
+  rows: rows.length,
+  candidates: candidates.length,
+  predictions: n,
+  cvMs: Math.round(cvMs),
+  overall: { ...overall, ece: overallEce.ece },
+  perTier,
+  perModel,
+  reliabilityBins: overallEce.bins,
+  verdict,
+};
+
+if (ARGS.format === 'json') {
+  console.log(JSON.stringify(report, null, 2));
+} else {
+  console.log('');
+  console.log(`Calibration check — ${ARGS.corpus}`);
+  console.log('─'.repeat(72));
+  console.log(`  corpus rows:        ${rows.length}`);
+  console.log(`  candidates:         ${candidates.length}`);
+  console.log(`  LOO-CV predictions: ${n}  (${cvMs.toFixed(0)}ms)`);
+  console.log(`  verdict:            ${verdict.toUpperCase()}`);
+  console.log('');
+  console.log('  Overall:');
+  console.log(`    MAE:   ${overall.mae.toFixed(4)}   (lower is better — 0 = perfect)`);
+  console.log(`    Brier: ${overall.brier.toFixed(4)}   (lower is better)`);
+  console.log(`    ECE:   ${overallEce.ece.toFixed(4)}   (lower is better — <0.05 well-calibrated)`);
+  console.log('');
+  console.log('  By tier:');
+  for (const [t, m] of Object.entries(perTier)) {
+    console.log(`    ${t.padEnd(7)}  n=${String(m.count).padStart(3)}  MAE=${m.mae.toFixed(4)}  ECE=${m.ece.toFixed(4)}`);
+  }
+  console.log('');
+  console.log('  By model:');
+  const ranked = Object.entries(perModel).sort((a, b) => a[1].ece - b[1].ece);
+  for (const [model, m] of ranked) {
+    console.log(`    ${model.padEnd(40)}  n=${String(m.count).padStart(3)}  MAE=${m.mae.toFixed(4)}  ECE=${m.ece.toFixed(4)}`);
+  }
+  console.log('');
+  console.log('  Reliability diagram (bin: avgPred → avgObs, gap):');
+  for (const b of overallEce.bins) {
+    if (b.count === 0) continue;
+    const bar = '█'.repeat(Math.min(40, b.count));
+    console.log(`    [${b.range[0].toFixed(2)}–${b.range[1].toFixed(2)}]  pred=${b.avgPredicted.toFixed(3)}  obs=${b.avgObserved.toFixed(3)}  gap=${b.gap.toFixed(3)}  n=${b.count}  ${bar}`);
+  }
+  console.log('');
+}
