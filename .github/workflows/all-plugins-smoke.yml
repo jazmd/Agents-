@@ -39,6 +39,16 @@ jobs:
       - name: Discover and run every plugin smoke contract (parallel)
         run: node scripts/smoke-all-plugins.mjs
 
+      - name: Fleet-wide exit-bypass antipattern lint (iter-75 bug class)
+        run: node scripts/audit-exit-bypass-antipattern.mjs
+        # Static analyzer: scans every plugins/*/scripts/*.mjs for the
+        # iter-75 antipattern — `return console.log(JSON.stringify(...))`
+        # placed BEFORE a `process.exit(N>0)` in the same function (which
+        # silently swallows the exit signal). Use the inline marker
+        # `// audit-allow: exit-bypass — <reason>` to suppress known-safe
+        # cases (e.g. early returns on no-config paths that can't reach
+        # the exit).
+
       - name: Upload machine-readable report
         if: always()
         run: node scripts/smoke-all-plugins.mjs --format json > /tmp/smoke-all-plugins.json

@@ -162,6 +162,7 @@ function cmdCheck() {
   const totalSpend = filtered.reduce((s, r) => s + (r.total_cost_usd || 0), 0);
   if (!cfg || !Number.isFinite(cfg.budget_usd)) {
     const out = { period, totalSpend, recordCount: filtered.length, error: 'no budget configured' };
+    // audit-allow: exit-bypass — no-budget path can't reach the HARD_STOP exit (no `alert` is computed in this branch).
     if (process.env.BUDGET_QUIET === '1') return console.log(JSON.stringify(out));
     console.log(`Period: ${period}`);
     console.log(`Spent so far: $${totalSpend.toFixed(2)} across ${filtered.length} sessions`);
