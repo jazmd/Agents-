@@ -8,21 +8,21 @@ step() { printf "→ %s ... " "$1"; }
 ok()   { printf "PASS\n"; PASS=$((PASS+1)); }
 bad()  { printf "FAIL: %s\n" "$1"; FAIL=$((FAIL+1)); }
 
-step "1. plugin.json declares 0.19.0 with new keywords"
+step "1. plugin.json declares 0.20.0 with new keywords"
 v=$(grep -E '"version"' "$ROOT/.claude-plugin/plugin.json" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-if [[ "$v" != "0.19.0" ]]; then
-  bad "expected 0.19.0, got '$v'"
+if [[ "$v" != "0.20.0" ]]; then
+  bad "expected 0.20.0, got '$v'"
 else
   miss=""
-  for k in namespace-routing mcp agentic-flow agent-booster tier1-routing model-routing benchmarking verified telemetry budget projection forecast counterfactual drift-detection trend-alert; do
+  for k in namespace-routing mcp agentic-flow agent-booster tier1-routing model-routing benchmarking verified telemetry budget projection forecast counterfactual drift-detection trend-alert anomaly-detection outlier-detection; do
     grep -q "\"$k\"" "$ROOT/.claude-plugin/plugin.json" || miss="$miss $k"
   done
   [[ -z "$miss" ]] && ok || bad "missing keywords:$miss"
 fi
 
-step "2. all sixteen skills present with valid frontmatter"
+step "2. all seventeen skills present with valid frontmatter"
 miss=""
-for s in cost-report cost-optimize cost-booster-route cost-booster-edit cost-compact-context cost-benchmark cost-track cost-budget-check cost-trend cost-conversation cost-export cost-federation cost-summary cost-projection cost-counterfactual cost-burn; do
+for s in cost-report cost-optimize cost-booster-route cost-booster-edit cost-compact-context cost-benchmark cost-track cost-budget-check cost-trend cost-conversation cost-export cost-federation cost-summary cost-projection cost-counterfactual cost-burn cost-anomaly; do
   f="$ROOT/skills/$s/SKILL.md"
   [[ -f "$f" ]] || { miss="$miss missing-$s"; continue; }
   for k in 'name:' 'description:' 'allowed-tools:'; do
@@ -399,6 +399,34 @@ grep -q "burn\.mjs" "$F2" || miss="$miss skill-no-script-ref"
 grep -qE "drift|acceleration|burn[- ]rate" "$F2" || miss="$miss no-concept-keyword"
 grep -q "alert-on-acceleration-pct" "$F2" || miss="$miss skill-no-alert-flag"
 grep -q '^allowed-tools:[[:space:]]*\*' "$F2" && miss="$miss wildcard"
+[[ -z "$miss" ]] && ok || bad "$miss"
+
+step "39f. cost-anomaly skill + anomaly.mjs (MAD-based outlier detection)"
+F1="$ROOT/scripts/anomaly.mjs"
+F2="$ROOT/skills/cost-anomaly/SKILL.md"
+miss=""
+[[ -x "$F1" ]] || miss="$miss anomaly-not-executable"
+node --check "$F1" 2>/dev/null || miss="$miss syntax-error"
+grep -q "spawnSync" "$F1" || miss="$miss no-spawnSync"
+grep -qE "MAD|median absolute deviation" "$F1" || miss="$miss no-mad-concept"
+grep -qE "0\.6745|Iglewicz" "$F1" || miss="$miss no-modified-z-constant"
+grep -q "alert-on-outliers" "$F1" || miss="$miss no-alert-flag"
+grep -q "process.exit(1)" "$F1" || miss="$miss no-fail-closed"
+grep -q "process.exit(2)" "$F1" || miss="$miss no-config-exit"
+grep -qE "filtered\.length < 3|sufficient" "$F1" || miss="$miss no-small-sample-guard"
+[[ -f "$F2" ]] || miss="$miss skill-missing"
+grep -q "anomaly\.mjs" "$F2" || miss="$miss skill-no-script-ref"
+grep -qE "MAD|outlier|anomaly" "$F2" || miss="$miss no-concept-keyword"
+grep -q "alert-on-outliers" "$F2" || miss="$miss skill-no-alert-flag"
+grep -q '^allowed-tools:[[:space:]]*\*' "$F2" && miss="$miss wildcard"
+[[ -z "$miss" ]] && ok || bad "$miss"
+
+step "39g. ruflo-cost.md documents 'cost anomaly' subcommand with alert flag"
+F="$ROOT/commands/ruflo-cost.md"
+miss=""
+grep -q "cost anomaly" "$F" || miss="$miss subcommand"
+grep -q "alert-on-outliers" "$F" || miss="$miss alert-flag"
+grep -qE "threshold|modified z|MAD" "$F" || miss="$miss algo-concept"
 [[ -z "$miss" ]] && ok || bad "$miss"
 
 step "39e. ruflo-cost.md documents 'cost burn' subcommand with alert flag"

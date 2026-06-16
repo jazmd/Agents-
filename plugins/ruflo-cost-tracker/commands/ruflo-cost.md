@@ -107,6 +107,15 @@ Cost tracking commands:
 5. Distinct from `cost trend` (which surfaces BENCHMARK drift across `docs/benchmarks/runs/*.json`); this tracks PRODUCTION spend.
 6. Edge cases: no prior data → alert SKIPPED (no spurious cold-start alerts). `--bucket` > `--lookback` → exit 2 (config error).
 
+**`cost anomaly [--since 7d] [--threshold 3.5] [--alert-on-outliers N] [--format table|json]`** -- MAD-based outlier detection on session spend. Point-anomaly counterpart to cost-burn's aggregate-trend signal: answers "which specific session is the outlier?".
+1. Run `node plugins/ruflo-cost-tracker/scripts/anomaly.mjs`
+2. Compute `median(total_cost_usd)` and `MAD = median(|x - median|)` over the filtered window
+3. Per-session modified z-score `z = 0.6745 × (x - median) / MAD` (Iglewicz-Hoaglin 1993)
+4. Flag sessions with `|z| > --threshold` (default 3.5)
+5. With `--alert-on-outliers N`: exit 1 when ≥N outliers found
+6. MAD beats mean+sigma because outliers themselves can't inflate it — robust on n=10. Sessions table labels `high` (over-spending) vs `low` (crash/drop) direction.
+7. Edge cases: n<3 → "insufficient data" exit 0. MAD=0 (half the sessions share exact spend) → explainer exit 0.
+
 **`cost benchmark [--llm] [--anthropic]`** -- Run the corpus benchmark to verify booster claims with measured numbers.
 1. Without flags: booster-only (free, ~85 ms wall-time, no API keys needed)
 2. `--llm`: also run Gemini 2.0 Flash baseline (uses GCP `GOOGLE_AI_API_KEY` secret)
