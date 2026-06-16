@@ -2532,10 +2532,12 @@ const routerCostSavingsCommand: Command = {
     { name: 'format', short: 'f', type: 'string', description: 'Output format: table, json', default: 'table' },
     { name: 'top-n', type: 'number', description: 'Show top-N largest individual savings (default 5)', default: '5' },
     { name: 'baseline', short: 'b', type: 'string', description: 'Counterfactual baseline: heuristic | always-haiku | always-sonnet | always-opus | always-gpt-4.1 | all (default: all)', default: 'all' },
+    { name: 'window', short: 'w', type: 'string', description: 'Bin decisions into successive windows of this duration (e.g. 1h, 24h, 7d). Output adds a trend table — iter 34 drift detection.' },
   ],
   examples: [
     { command: 'claude-flow neural router cost-savings', description: 'All-time, all baselines (heuristic + Sonnet-always + Opus-always)' },
     { command: 'claude-flow neural router cost-savings --baseline always-sonnet', description: 'Compare only against Sonnet-always' },
+    { command: 'claude-flow neural router cost-savings --window 24h', description: 'Daily savings trend — iter 34 drift detection' },
     { command: 'claude-flow neural router cost-savings --since 7d --format json | jq .baselines.heuristic.savings.totalUsd', description: 'Pipe-friendly headline' },
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
@@ -2728,6 +2730,73 @@ const routerCostSavingsCommand: Command = {
       })),
     };
 
+    // iter 34 — windowed drift detection. When --window is set, bin the
+    // paired calls into successive duration windows and emit a trend table
+    // (one row per window). Useful for "is the router degrading over time?"
+    // — a sudden drop in savings %% across windows surfaces calibration drift,
+    // workload shifts, or model deprecation.
+    const windowArg = (ctx.flags.window as string | undefined);
+    let windowedTrend: Array<{
+      windowStart: string; windowEnd: string; n: number;
+      actualUsd: number; counterfactualUsd: number; savingsUsd: number; savingsPct: number;
+      deltaVsPriorPct: number | null;
+    }> | undefined;
+    if (windowArg) {
+      const m = windowArg.match(/^(\d+)([hdmw])$/);
+      if (!m) {
+        output.printError(`--window must match Nh|Nd|Nm|Nw (got ${windowArg})`);
+        return { success: false, exitCode: 1 };
+      }
+      const n = parseInt(m[1], 10);
+      const unitMs = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 7 * 86_400_000 }[m[2]] ?? 0;
+      const windowMs = n * unitMs;
+      if (windowMs <= 0) {
+        output.printError(`--window must be positive (got ${windowArg})`);
+        return { success: false, exitCode: 1 };
+      }
+      // Bin perCall by (outcome.ts - earliest.ts) / windowMs.
+      // Sort first so window indices are monotonic and gaps are visible.
+      const sorted = [...perCall].sort((a, b) => a.ts.localeCompare(b.ts));
+      if (sorted.length === 0) {
+        windowedTrend = [];
+      } else {
+        const earliestMs = Date.parse(sorted[0].ts);
+        const bins = new Map<number, typeof sorted>();
+        for (const c of sorted) {
+          const idx = Math.floor((Date.parse(c.ts) - earliestMs) / windowMs);
+          if (!bins.has(idx)) bins.set(idx, []);
+          bins.get(idx)!.push(c);
+        }
+        const rows: NonNullable<typeof windowedTrend> = [];
+        let priorPct: number | null = null;
+        for (const idx of [...bins.keys()].sort((a, b) => a - b)) {
+          const items = bins.get(idx)!;
+          let actual = 0, cf = 0;
+          for (const c of items) {
+            actual += c.actualCost;
+            cf += c.counterfactuals[primaryBaseline]?.cost ?? 0;
+          }
+          const savings = cf - actual;
+          const pct = cf > 0 ? (savings / cf) * 100 : 0;
+          const windowStart = new Date(earliestMs + idx * windowMs).toISOString();
+          const windowEnd = new Date(earliestMs + (idx + 1) * windowMs - 1).toISOString();
+          const deltaVsPriorPct = priorPct === null ? null : round2(pct - priorPct);
+          priorPct = pct;
+          rows.push({
+            windowStart, windowEnd, n: items.length,
+            actualUsd: round6(actual),
+            counterfactualUsd: round6(cf),
+            savingsUsd: round6(savings),
+            savingsPct: round2(pct),
+            deltaVsPriorPct,
+          });
+        }
+        windowedTrend = rows;
+      }
+      (payload as typeof payload & { windowedTrend?: typeof windowedTrend; windowConfig?: { duration: string; primaryBaseline: string } }).windowedTrend = windowedTrend;
+      (payload as typeof payload & { windowedTrend?: typeof windowedTrend; windowConfig?: { duration: string; primaryBaseline: string } }).windowConfig = { duration: windowArg, primaryBaseline };
+    }
+
     if (fmt === 'json') {
       output.writeln(JSON.stringify(payload, null, 2));
       return { success: true, data: payload };
@@ -2771,6 +2840,22 @@ const routerCostSavingsCommand: Command = {
         const sv = t.counterfactuals[primaryBaseline]?.savings ?? 0;
         output.writeln(`    ${t.ts.slice(0, 19)}  ${t.actualModel.padEnd(40)} → ${cfModel.padEnd(40)}  $${sv.toFixed(6)}`);
       }
+      output.writeln('');
+    }
+    // iter 34 — windowed trend table for drift detection.
+    if (windowedTrend && windowedTrend.length > 0) {
+      output.writeln(output.bold(`  Windowed trend (${windowArg} bins, baseline=${primaryBaseline}):`));
+      output.writeln('    window start         n    actual       counterfactual  savings      %       Δ% vs prior');
+      for (const w of windowedTrend) {
+        const arrow = w.deltaVsPriorPct === null ? ''
+          : w.deltaVsPriorPct > 0 ? output.success(`↑ +${w.deltaVsPriorPct.toFixed(2)}`)
+          : w.deltaVsPriorPct < 0 ? output.warning(`↓ ${w.deltaVsPriorPct.toFixed(2)}`)
+          : '·';
+        output.writeln(`    ${w.windowStart.slice(0, 19)}  ${String(w.n).padStart(3)}  $${w.actualUsd.toFixed(6).padEnd(11)} $${w.counterfactualUsd.toFixed(6).padEnd(14)} $${w.savingsUsd.toFixed(6).padEnd(11)} ${w.savingsPct.toString().padStart(6)}%  ${arrow}`);
+      }
+      output.writeln('');
+      output.writeln(output.dim('    Δ% vs prior: change in savings % from the prior window. Large negative'));
+      output.writeln(output.dim('    deltas suggest router degradation, workload shift, or calibration drift.'));
       output.writeln('');
     }
     return { success: true, data: payload };
