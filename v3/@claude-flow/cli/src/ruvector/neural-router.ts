@@ -80,11 +80,16 @@ interface NeuralRouterConfig {
    */
   latencyBudgetMs: number;
   /**
-   * ADR-149 iter 22 — opt-in post-hoc isotonic calibration. When enabled
-   * AND the bundled calibrator JSON is present, KRR predict() outputs are
-   * piped through IsotonicCalibrator.transform() before cost-optimal
-   * selection. Default off — the calibrator is a corrective layer, not
-   * load-bearing, and disabling it preserves the iter 0-21 behavior.
+   * ADR-149 iter 22+24 — post-hoc isotonic calibration. When the bundled
+   * calibrator JSON is present, KRR predict() outputs are piped through
+   * IsotonicCalibrator.transform() before cost-optimal selection.
+   *
+   * DEFAULT ON (iter 24, ADR-149). Iter 23's out-of-sample LOO validation
+   * showed ECE drops from 0.1604 (POORLY-CALIBRATED) to 0.0335
+   * (WELL-CALIBRATED) — a 79% reduction with only a 0.0144 train/test gap,
+   * confirming the calibrator generalizes. Set
+   * `CLAUDE_FLOW_ROUTER_CALIBRATE=0` to opt out and recover iter 0-21 raw
+   * KRR behavior.
    */
   calibrateEnabled: boolean;
   /** Path to the bundled calibrator JSON (iter 22). */
@@ -236,7 +241,9 @@ function getConfig(): NeuralRouterConfig {
       ?? join(assetsDir, 'seed-rows.json'),
     k: parseInt(process.env.CLAUDE_FLOW_ROUTER_KNN_K ?? '5', 10) || 5,
     latencyBudgetMs: Math.max(0, parseInt(process.env.CLAUDE_FLOW_ROUTER_LATENCY_BUDGET_MS ?? '0', 10) || 0),
-    calibrateEnabled: process.env.CLAUDE_FLOW_ROUTER_CALIBRATE === '1',
+    // ADR-149 iter 24 — DEFAULT ON. Opt out with `=0`. Iter 23 OOS
+    // validation: ECE 0.1604 → 0.0335 (-79%), well-calibrated.
+    calibrateEnabled: process.env.CLAUDE_FLOW_ROUTER_CALIBRATE !== '0',
     calibratorPath: process.env.CLAUDE_FLOW_ROUTER_CALIBRATOR_PATH
       ?? join(assetsDir, 'seed-router.calibrator.json'),
   };
@@ -341,11 +348,12 @@ async function resolveBackend(cfg: NeuralRouterConfig): Promise<ResolvedBackend>
   // 3.5. No user artifact → try the bundled pre-trained KRR (~96kB, ~0.020 ms/route).
   if (existsSync(cfg.bundledKrrPath)) {
     try {
-      // ADR-149 iter 22 — load isotonic calibrator if gated open and the
-      // artifact exists. Calibration is OFF by default (preserves iter 0-21
-      // behavior); ops opt in via CLAUDE_FLOW_ROUTER_CALIBRATE=1. The
-      // calibrator is a thin transform on predicted-quality values, applied
-      // post-hoc to KRR predict() outputs.
+      // ADR-149 iter 22+24 — load isotonic calibrator if the artifact
+      // exists and the gate isn't explicitly closed. Calibration is ON by
+      // default (iter 24); iter 23's out-of-sample LOO validation showed
+      // ECE drops 79% with calibration enabled, with only a 0.0144
+      // train/test gap. Set `CLAUDE_FLOW_ROUTER_CALIBRATE=0` to opt out
+      // and recover raw KRR behavior.
       let calibrator: { transform: (x: number) => number } | null = null;
       if (cfg.calibrateEnabled && existsSync(cfg.calibratorPath)) {
         try {

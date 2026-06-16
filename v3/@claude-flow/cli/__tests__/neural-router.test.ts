@@ -46,6 +46,8 @@ const ENV_KEYS = [
   'CLAUDE_FLOW_ROUTER_OPENROUTER_ALTS',
   'CLAUDE_FLOW_ROUTER_LATENCY_BUDGET_MS',
   'CLAUDE_FLOW_ROUTER_BANDIT_PER_MODEL',
+  'CLAUDE_FLOW_ROUTER_CALIBRATE',           // iter 24 — default-on; tests should not leak overrides
+  'CLAUDE_FLOW_ROUTER_CALIBRATOR_PATH',
   'OPENROUTER_API_KEY',
   'ANTHROPIC_API_KEY',
 ];
@@ -132,6 +134,33 @@ describe('neural-router (ADR-148)', () => {
     const s2 = await neuralRouterStatus();
     // routedBy should be sticky across calls (single-init guarantee)
     expect(s1.routedBy).toBe(s2.routedBy);
+  });
+
+  it('calibration is default-ON; CLAUDE_FLOW_ROUTER_CALIBRATE=0 opts out (ADR-149 iter 24)', async () => {
+    // Iter 23 OOS validation moved this from opt-in to opt-out: ECE 0.1604 →
+    // 0.0335 with calibration enabled. Verify the env-var semantics flipped:
+    //   unset      → calibration applied (status reason contains 'calibrated')
+    //   = '1'      → calibration applied (back-compat)
+    //   = '0'      → calibration bypassed (raw KRR behavior)
+    process.env.CLAUDE_FLOW_ROUTER_NEURAL = '1';
+
+    // Default: no env var → calibrated.
+    __resetNeuralRouterForTests();
+    const sDefault = await neuralRouterStatus();
+    if (sDefault.routedBy !== 'metaharness-krr') return; // dep absent / KRR not loaded
+    expect(sDefault.reason).toContain('calibrated');
+
+    // Back-compat: '1' still works.
+    process.env.CLAUDE_FLOW_ROUTER_CALIBRATE = '1';
+    __resetNeuralRouterForTests();
+    const sOn = await neuralRouterStatus();
+    expect(sOn.reason).toContain('calibrated');
+
+    // Opt-out: '0' bypasses.
+    process.env.CLAUDE_FLOW_ROUTER_CALIBRATE = '0';
+    __resetNeuralRouterForTests();
+    const sOff = await neuralRouterStatus();
+    expect(sOff.reason).not.toContain('calibrated');
   });
 });
 
