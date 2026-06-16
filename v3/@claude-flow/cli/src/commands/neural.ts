@@ -3206,6 +3206,64 @@ const routerAbStatsCommand: Command = {
   },
 };
 
+// ADR-149 iter 43 — show the canonical price table that drives cost
+// computations, blended-price routing, and counterfactual baselines.
+// Operators ask "what does the router think gpt-4.1 costs?" frequently;
+// previously the answer required reading src/ruvector/model-prices.ts.
+const routerPricesCommand: Command = {
+  name: 'prices',
+  description: 'Show the per-model price table that drives blended cost + counterfactual computations (ADR-149 iter 43)',
+  options: [
+    { name: 'format', short: 'f', type: 'string', description: 'Output format: table, json', default: 'table' },
+    { name: 'sort', type: 'string', description: 'Sort by: blended (default), input, output, name', default: 'blended' },
+  ],
+  examples: [
+    { command: 'claude-flow neural router prices', description: 'Show all models sorted by blended price' },
+    { command: 'claude-flow neural router prices --sort name', description: 'Sort alphabetically' },
+    { command: 'claude-flow neural router prices --format json | jq \'.[] | select(.id | contains("opus"))\'', description: 'Filter via jq' },
+  ],
+  action: async (ctx: CommandContext): Promise<CommandResult> => {
+    const { MODEL_PRICES, blendedPrice } = await import('../ruvector/model-prices.js');
+    const fmt = (ctx.flags.format as string) || 'table';
+    const sortKey = ((ctx.flags.sort as string) || 'blended').toLowerCase();
+
+    const rows = Object.entries(MODEL_PRICES).map(([id, p]) => ({
+      id,
+      inPerMtok: p.in,
+      outPerMtok: p.out,
+      blendedPerMtok: blendedPrice(id),
+    }));
+
+    switch (sortKey) {
+      case 'input':   rows.sort((a, b) => a.inPerMtok - b.inPerMtok); break;
+      case 'output':  rows.sort((a, b) => a.outPerMtok - b.outPerMtok); break;
+      case 'name':    rows.sort((a, b) => a.id.localeCompare(b.id)); break;
+      case 'blended':
+      default:        rows.sort((a, b) => a.blendedPerMtok - b.blendedPerMtok);
+    }
+
+    if (fmt === 'json') {
+      output.writeln(JSON.stringify(rows, null, 2));
+      return { success: true, data: rows };
+    }
+
+    output.writeln();
+    output.writeln(output.bold('Model price table (ADR-149 iter 31/43 — single source of truth)'));
+    output.writeln(output.dim('─'.repeat(72)));
+    output.writeln(`  ${rows.length} entries, sorted by ${sortKey}`);
+    output.writeln('');
+    output.writeln('    model id                                      $/Mtok in   $/Mtok out   blended ($/Mtok)');
+    for (const r of rows) {
+      output.writeln(`    ${r.id.padEnd(44)}  ${('$' + r.inPerMtok.toFixed(2)).padStart(9)}  ${('$' + r.outPerMtok.toFixed(2)).padStart(11)}  ${('$' + r.blendedPerMtok.toFixed(2)).padStart(15)}`);
+    }
+    output.writeln('');
+    output.writeln(output.dim('  Blended = $/Mtok_in + 3 × $/Mtok_out (1 input : 3 output ratio for code tasks).'));
+    output.writeln(output.dim('  Unknown model ids fall back to $1/Mtok blended (1×in + 1×out).'));
+    output.writeln('');
+    return { success: true, data: rows };
+  },
+};
+
 // ADR-149 iter 41 — forward-looking budget projection. Iter 32-34 measure
 // past cost (actual vs counterfactual, per-window drift). This subcommand
 // extrapolates: given the measured rate and average cost per decision over
@@ -3398,11 +3456,12 @@ const routerCostProjectionCommand: Command = {
 
 const routerCommand: Command = {
   name: 'router',
-  description: 'Cost-optimal neural router lifecycle (ADR-148/149): status, models, train, train-from-trajectories, decide, decisions, cost-savings, cost-projection, trajectory-health, ab-stats, reload',
-  subcommands: [routerStatusCommand, routerModelsCommand, routerTrainCommand, routerTrainFromTrajectoriesCommand, routerDecideCommand, routerDecisionsCommand, routerCostSavingsCommand, routerCostProjectionCommand, routerTrajectoryHealthCommand, routerAbStatsCommand, routerReloadCommand],
+  description: 'Cost-optimal neural router lifecycle (ADR-148/149): status, models, prices, train, train-from-trajectories, decide, decisions, cost-savings, cost-projection, trajectory-health, ab-stats, reload',
+  subcommands: [routerStatusCommand, routerModelsCommand, routerPricesCommand, routerTrainCommand, routerTrainFromTrajectoriesCommand, routerDecideCommand, routerDecisionsCommand, routerCostSavingsCommand, routerCostProjectionCommand, routerTrajectoryHealthCommand, routerAbStatsCommand, routerReloadCommand],
   examples: [
     { command: 'claude-flow neural router status', description: 'Show router state, gate, counters' },
     { command: 'claude-flow neural router models', description: 'List candidate registry with measured stats (ADR-149)' },
+    { command: 'claude-flow neural router prices', description: 'Show the canonical $/Mtok price table (iter 43)' },
     { command: 'claude-flow neural router train -o ./router.krr.json', description: 'Train a KRR artifact' },
     { command: 'claude-flow neural router train-from-trajectories -w production-rows.json', description: 'Pair production JSONL into a training corpus (iter 18)' },
     { command: 'claude-flow neural router decide "fix typo in cache.ts"', description: 'Inspect decision for a hypothetical task (iter 30)' },
@@ -3414,7 +3473,7 @@ const routerCommand: Command = {
     { command: 'claude-flow neural router reload', description: 'Clear in-process backend cache' },
   ],
   action: async (): Promise<CommandResult> => {
-    output.writeln('Use a subcommand: status | models | train | train-from-trajectories | decide | decisions | cost-savings | cost-projection | trajectory-health | ab-stats | reload');
+    output.writeln('Use a subcommand: status | models | prices | train | train-from-trajectories | decide | decisions | cost-savings | cost-projection | trajectory-health | ab-stats | reload');
     return { success: true };
   },
 };
