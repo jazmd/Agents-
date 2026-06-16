@@ -124,7 +124,7 @@ Cost tracking commands:
 5. Flags the top message as in-session outlier when cost > 2× the p99
 6. The Cache W column is critical: a 569-token output message at $16 looks insane until you see "881898 cache writes" beside it.
 
-**`cost diff --baseline <path> --current <path> [--alert-on-pct N] [--alert-on-usd N] [--format table|json]`** -- Snapshot delta between two cost-summary JSON outputs. PR-level regression detection.
+**`cost diff --baseline <path> --current <path> [--alert-on-pct N] [--alert-on-usd N] [--alert-on-class-pct <class>:N[,<class>:N]] [--format table|json]`** -- Snapshot delta between two cost-summary JSON outputs. PR-level regression detection.
 1. Run `node plugins/ruflo-cost-tracker/scripts/diff.mjs --baseline <path> --current <path>`
 2. Both files must be cost-summary JSON shape (validated: total_cost_usd + sessionCount required)
 3. Computes total delta + per-tier + per-model breakdowns; entries tagged added / removed / changed

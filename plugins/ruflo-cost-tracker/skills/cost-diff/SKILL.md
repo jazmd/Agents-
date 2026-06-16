@@ -1,7 +1,7 @@
 ---
 name: cost-diff
 description: Snapshot delta between two cost-summary JSON outputs. PR-level cost regression detection — answers "what changed between these two specific snapshots?". Pairs with cost-summary's stable JSON contract.
-argument-hint: "--baseline <baseline.json> --current <current.json> [--alert-on-pct N] [--alert-on-usd N] [--format table|json]"
+argument-hint: "--baseline <baseline.json> --current <current.json> [--alert-on-pct N] [--alert-on-usd N] [--alert-on-class-pct <class>:N[,<class>:N]] [--format table|json]"
 allowed-tools: Bash
 ---
 
@@ -52,6 +52,38 @@ The combination of both flags catches:
   (e.g. growing from $100 to $110 is only +10% but +$10).
 
 Either signal can fail the PR independently — they're OR'd.
+
+## --alert-on-class-pct (iter 86)
+
+The two USD-level thresholds above miss a regression class: when ONE
+token type grows disproportionately even though total spend grows
+modestly. Example: a PR introduces a verbose context-cache pattern,
+total spend grows only 10% (under --alert-on-pct 50), but `cache_write`
+tokens grow 900%. The iter-82 driver hides inside the USD signal.
+
+`--alert-on-class-pct cache_write:50` exits 1 when cache_write tokens
+grow more than 50% baseline → current. Multiple classes can be checked
+in one flag (comma-separated):
+
+```bash
+cost diff --baseline baseline.json --current current.json \
+          --alert-on-class-pct cache_write:50,output:25
+```
+
+First class to breach wins. Valid classes: `input | output | cache_write | cache_read`.
+
+Recommended PR-gate triad:
+
+```bash
+cost diff --baseline ... --current ... \
+          --alert-on-pct 25 \
+          --alert-on-usd 5.00 \
+          --alert-on-class-pct cache_write:100
+```
+
+Three orthogonal signals — `pct` (total grew), `usd` (large absolute
+jump), `class-pct` (composition shifted). Each catches what the others
+miss; AND-of-OR semantics means any one firing fails the PR.
 
 ## Smoke transcript (synthetic baseline + current)
 

@@ -8,10 +8,10 @@ step() { printf "→ %s ... " "$1"; }
 ok()   { printf "PASS\n"; PASS=$((PASS+1)); }
 bad()  { printf "FAIL: %s\n" "$1"; FAIL=$((FAIL+1)); }
 
-step "1. plugin.json declares 0.25.3 with new keywords"
+step "1. plugin.json declares 0.26.0 with new keywords"
 v=$(grep -E '"version"' "$ROOT/.claude-plugin/plugin.json" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-if [[ "$v" != "0.25.3" ]]; then
-  bad "expected 0.25.3, got '$v'"
+if [[ "$v" != "0.26.0" ]]; then
+  bad "expected 0.26.0, got '$v'"
 else
   miss=""
   for k in namespace-routing mcp agentic-flow agent-booster tier1-routing model-routing benchmarking verified telemetry budget projection forecast counterfactual drift-detection trend-alert anomaly-detection outlier-detection health-check composite-gate auto-track stop-hook snapshot-diff pr-regression git-context traceability drill-down per-message; do
@@ -491,6 +491,9 @@ grep -qE "byTier|byModel" "$F1" || miss="$miss no-breakdown"
 # iter 85 — per-token-class delta surfaces cache_write growth driver.
 grep -q "tokenClassDeltas\|byTokenClass" "$F1" || miss="$miss no-token-class-diff"
 grep -q "cache_write" "$F1" || miss="$miss no-cache-write-callout"
+# iter 86 — per-class % alert threshold (--alert-on-class-pct cache_write:50).
+grep -q "alert-on-class-pct" "$F1" || miss="$miss no-class-pct-flag"
+grep -q "alertClassPct" "$F1" || miss="$miss no-class-pct-storage"
 grep -q "process.exit(1)" "$F1" || miss="$miss no-fail-closed"
 grep -q "process.exit(2)" "$F1" || miss="$miss no-config-exit"
 [[ -f "$F2" ]] || miss="$miss skill-missing"

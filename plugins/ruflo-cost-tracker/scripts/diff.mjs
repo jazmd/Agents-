@@ -31,6 +31,11 @@ const ARGS = (() => {
   const a = {
     baseline: null, current: null,
     alertPct: null, alertUsd: null,
+    // iter 86 — per-token-class % thresholds. Format: --alert-on-class-pct
+    // cache_write:50 (or comma-separated: cache_write:50,output:25). Lets
+    // CI catch regressions that grow ONE class disproportionately even if
+    // the total USD delta is modest (the iter-82 bug class precedent).
+    alertClassPct: {},  // { className: thresholdPct }
     format: 'table',
   };
   for (let i = 2; i < process.argv.length; i++) {
@@ -39,6 +44,26 @@ const ARGS = (() => {
     else if (v === '--current') a.current = process.argv[++i];
     else if (v === '--alert-on-pct') a.alertPct = parseFloat(process.argv[++i]);
     else if (v === '--alert-on-usd') a.alertUsd = parseFloat(process.argv[++i]);
+    else if (v === '--alert-on-class-pct') {
+      const spec = process.argv[++i] || '';
+      for (const pair of spec.split(',').map((s) => s.trim()).filter(Boolean)) {
+        const m = /^(\w+):([\d.]+)$/.exec(pair);
+        if (!m) {
+          console.error(`cost-diff: --alert-on-class-pct expects "<class>:<pct>" pairs; got "${pair}"`);
+          process.exit(2);
+        }
+        const cls = m[1], pct = parseFloat(m[2]);
+        if (!['input', 'output', 'cache_write', 'cache_read'].includes(cls)) {
+          console.error(`cost-diff: --alert-on-class-pct class must be one of input|output|cache_write|cache_read; got "${cls}"`);
+          process.exit(2);
+        }
+        if (!isFinite(pct) || pct <= 0) {
+          console.error(`cost-diff: --alert-on-class-pct threshold must be > 0; got ${pct}`);
+          process.exit(2);
+        }
+        a.alertClassPct[cls] = pct;
+      }
+    }
     else if (v === '--format') a.format = process.argv[++i];
   }
   return a;
@@ -133,6 +158,23 @@ function main() {
       alertReason = `total spend grew $${total.delta.toFixed(6)}; threshold +$${ARGS.alertUsd.toFixed(2)}`;
     }
   }
+  // iter 86 — per-class % thresholds. First class to breach wins.
+  if (!alertTriggered && Object.keys(ARGS.alertClassPct).length > 0) {
+    if (!tokenClassDeltas) {
+      // Both snapshots lack byTokenClass — class threshold can't fire.
+      // Don't error; the rule is silently inapplicable. CI gates that
+      // depend on this should ensure their baseline format is current.
+    } else {
+      for (const [cls, threshold] of Object.entries(ARGS.alertClassPct)) {
+        const row = tokenClassDeltas.find((c) => c.key === cls);
+        if (row && isFinite(row.pct) && row.pct > threshold) {
+          alertTriggered = true;
+          alertReason = `\`${cls}\` tokens grew ${row.pct.toFixed(2)}% (+${row.delta.toLocaleString()} tok); threshold +${threshold}%`;
+          break;
+        }
+      }
+    }
+  }
 
   const payload = {
     // iter 81 — git context surfaced when snapshots include it (cost-summary
@@ -149,11 +191,12 @@ function main() {
     byTier: tierDeltas,
     byModel: modelDeltas,
     byTokenClass: tokenClassDeltas,
-    alert: (ARGS.alertPct !== null || ARGS.alertUsd !== null) ? {
+    alert: (ARGS.alertPct !== null || ARGS.alertUsd !== null || Object.keys(ARGS.alertClassPct).length > 0) ? {
       triggered: alertTriggered,
       reason: alertReason,
       thresholdPct: ARGS.alertPct,
       thresholdUsd: ARGS.alertUsd,
+      thresholdClassPct: Object.keys(ARGS.alertClassPct).length > 0 ? ARGS.alertClassPct : null,
     } : null,
     generatedAt: new Date().toISOString(),
   };
