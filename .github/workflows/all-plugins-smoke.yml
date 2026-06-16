@@ -1,0 +1,51 @@
+# Meta-smoke: run every plugins/*/scripts/smoke.sh in parallel and fail the
+# build if any plugin's structural contract regresses.
+#
+# Before iter 74, only ruflo-cost-tracker and ruflo-agent had dedicated CI
+# gates — the other 30 plugins shipped smoke.sh files that nobody enforced.
+# This workflow turns the 32 unrelated smoke scripts into a single
+# CI-gateable check. New plugins authored with the canonical scripts/smoke.sh
+# layout are automatically covered.
+#
+# Triggers on any plugin change (paths-filter) and is fast enough (~8s wall
+# on the iter-74 baseline) that it can be a required check on PRs.
+name: all-plugins-smoke
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'plugins/**'
+      - 'scripts/smoke-all-plugins.mjs'
+      - '.github/workflows/all-plugins-smoke.yml'
+  pull_request:
+    paths:
+      - 'plugins/**'
+      - 'scripts/smoke-all-plugins.mjs'
+      - '.github/workflows/all-plugins-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke-all:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Discover and run every plugin smoke contract (parallel)
+        run: node scripts/smoke-all-plugins.mjs
+
+      - name: Upload machine-readable report
+        if: always()
+        run: node scripts/smoke-all-plugins.mjs --format json > /tmp/smoke-all-plugins.json
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: all-plugins-smoke-report
+          path: /tmp/smoke-all-plugins.json
+          retention-days: 30
