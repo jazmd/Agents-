@@ -494,6 +494,9 @@ const initAction = async (ctx: CommandContext): Promise<CommandResult> => {
         `Run ${output.highlight(`${bin} swarm init`)} to initialize a swarm`,
         `Or use ${output.highlight(`${bin} init --start-all`)} to do all of the above`,
         options.components.settings ? `Review ${output.highlight('.claude/settings.json')} for hook configurations` : '',
+        // ADR-150 — surface the new metaharness scorecard to every new user.
+        // Optional dep; the command degrades gracefully when not installed.
+        `Run ${output.highlight(`${bin} metaharness score`)} for a 5-dim harness readiness scorecard (ADR-150)`,
       ].filter(Boolean));
     }
 

@@ -170,6 +170,18 @@ if (!od.metaharness) { console.error('missing metaharness in optionalDependencie
 if (j.dependencies && j.dependencies.metaharness) { console.error('metaharness leaked into dependencies'); process.exit(1); }
 " 2>/dev/null && ok || bad "ruflo wrapper missing metaharness optionalDep"
 
+step "17k. init + hooks discovery surfaces metaharness (iter 18)"
+INIT="$ROOT/../../v3/@claude-flow/cli/src/commands/init.ts"
+HOOKS="$ROOT/../../v3/@claude-flow/cli/src/commands/hooks.ts"
+miss=""
+# init.ts Next-steps points at metaharness score
+grep -q "metaharness score.*5-dim\|metaharness score)\`} for a 5-dim" "$INIT" 2>/dev/null || miss="$miss init-no-metaharness-tip"
+grep -q "ADR-150" "$INIT" 2>/dev/null || miss="$miss init-no-adr-anchor"
+# hooks.ts worker-dispatch trigger list includes oia-audit
+grep -q "testgaps, oia-audit" "$HOOKS" 2>/dev/null || miss="$miss hooks-trigger-list-missing"
+grep -q "ruflo metaharness oia-audit" "$HOOKS" 2>/dev/null || miss="$miss hooks-tip-missing"
+[[ -z "$miss" ]] && ok || bad "$miss"
+
 step "17j. audit-list — enumerate metaharness-audit records (iter 16)"
 F="$ROOT/scripts/audit-list.mjs"
 miss=""
