@@ -2531,11 +2531,12 @@ const routerCostSavingsCommand: Command = {
     { name: 'since', short: 's', type: 'string', description: 'Time window suffix: 1h, 24h, 7d, 30d' },
     { name: 'format', short: 'f', type: 'string', description: 'Output format: table, json', default: 'table' },
     { name: 'top-n', type: 'number', description: 'Show top-N largest individual savings (default 5)', default: '5' },
+    { name: 'baseline', short: 'b', type: 'string', description: 'Counterfactual baseline: heuristic | always-haiku | always-sonnet | always-opus | always-gpt-4.1 | all (default: all)', default: 'all' },
   ],
   examples: [
-    { command: 'claude-flow neural router cost-savings', description: 'All-time actual vs counterfactual spend' },
-    { command: 'claude-flow neural router cost-savings --since 7d', description: 'Last 7 days only' },
-    { command: 'claude-flow neural router cost-savings --format json | jq .savings.totalUsd', description: 'Headline savings number for dashboards' },
+    { command: 'claude-flow neural router cost-savings', description: 'All-time, all baselines (heuristic + Sonnet-always + Opus-always)' },
+    { command: 'claude-flow neural router cost-savings --baseline always-sonnet', description: 'Compare only against Sonnet-always' },
+    { command: 'claude-flow neural router cost-savings --since 7d --format json | jq .baselines.heuristic.savings.totalUsd', description: 'Pipe-friendly headline' },
   ],
   action: async (ctx: CommandContext): Promise<CommandResult> => {
     const fs = await import('node:fs');
@@ -2592,12 +2593,31 @@ const routerCostSavingsCommand: Command = {
       }
     }
 
-    // For each outcome with cost_usd, compute the counterfactual cost.
+    // iter 33 — multi-baseline counterfactuals. Each per-call row carries
+    // the actual cost AND a map of counterfactual costs (one per baseline),
+    // so a single LOO over the trajectory data computes all baselines at once.
+    const baselineArg = (ctx.flags.baseline as string | undefined) ?? 'all';
+    const allBaselines = ['heuristic', 'always-haiku', 'always-sonnet', 'always-opus', 'always-gpt-4.1'];
+    const baselines = baselineArg === 'all' ? allBaselines : [baselineArg];
+    // Map each baseline label → the modelId used for pricing.
+    const baselineModelFor = (baseline: string, dec: DecisionRow): string => {
+      switch (baseline) {
+        case 'heuristic':
+          return dec.ab_pair?.bandit_pick
+            ?? (dec.complexity < 0.34 ? 'haiku' : dec.complexity < 0.67 ? 'sonnet' : 'opus');
+        case 'always-haiku':    return 'haiku';
+        case 'always-sonnet':   return 'sonnet';
+        case 'always-opus':     return 'opus';
+        case 'always-gpt-4.1':  return 'openai/gpt-4.1';
+        default:                return baseline; // operator passes raw modelId
+      }
+    };
+
     interface PerCallSavings {
       task_hash: string; ts: string;
       actualModel: string; actualCost: number;
-      counterfactualModel: string; counterfactualCost: number;
-      savings: number; tokens: { input: number; output: number };
+      counterfactuals: Record<string, { model: string; cost: number; savings: number }>;
+      tokens: { input: number; output: number };
       complexity: number; tier: 'cheap' | 'mid' | 'strong';
     }
     const perCall: PerCallSavings[] = [];
@@ -2612,68 +2632,99 @@ const routerCostSavingsCommand: Command = {
       if (!dec) { droppedNoDecision++; continue; }
       if (!out.tokens) { droppedNoTokens++; continue; }
 
-      // Counterfactual selection: prefer ab_pair.bandit_pick (exact heuristic
-      // pick recorded at decision time), else fall back to tier-by-complexity.
-      const tierByComplexity = dec.complexity < 0.34 ? 'haiku'
-        : dec.complexity < 0.67 ? 'sonnet' : 'opus';
-      const counterfactualModel = dec.ab_pair?.bandit_pick ?? tierByComplexity;
-      const p = MODEL_PRICES[counterfactualModel] ?? { in: 1, out: 1 };
-      const counterfactualCost = (out.tokens.input * p.in + out.tokens.output * p.out) / 1_000_000;
       const actualCost = out.cost_usd;
       const actualModel = out.model_id ?? dec.openrouter_model ?? dec.model;
       const tier = dec.complexity < 0.34 ? 'cheap' : dec.complexity < 0.67 ? 'mid' : 'strong';
 
+      // Compute every baseline at once. Cost = (input × $/Mtok_in + output ×
+      // $/Mtok_out) / 1e6 — same formula iter 31's costUsd() uses.
+      const counterfactuals: Record<string, { model: string; cost: number; savings: number }> = {};
+      for (const b of baselines) {
+        const m = baselineModelFor(b, dec);
+        const p = MODEL_PRICES[m] ?? { in: 1, out: 1 };
+        const cost = (out.tokens.input * p.in + out.tokens.output * p.out) / 1_000_000;
+        counterfactuals[b] = { model: m, cost, savings: cost - actualCost };
+      }
+
       perCall.push({
         task_hash: hash, ts: out.ts,
         actualModel, actualCost,
-        counterfactualModel, counterfactualCost,
-        savings: counterfactualCost - actualCost,
+        counterfactuals,
         tokens: out.tokens,
         complexity: dec.complexity, tier,
       });
     }
 
+    const round6 = (x: number) => Math.round(x * 1_000_000) / 1_000_000;
+    const round2 = (x: number) => Math.round(x * 100) / 100;
     const totalActual = perCall.reduce((s, p) => s + p.actualCost, 0);
-    const totalCounterfactual = perCall.reduce((s, p) => s + p.counterfactualCost, 0);
-    const totalSavings = totalCounterfactual - totalActual;
-    const savingsPct = totalCounterfactual > 0 ? (totalSavings / totalCounterfactual) * 100 : 0;
 
-    const byTier: Record<string, { actual: number; counterfactual: number; n: number }> = {
-      cheap: { actual: 0, counterfactual: 0, n: 0 },
-      mid: { actual: 0, counterfactual: 0, n: 0 },
-      strong: { actual: 0, counterfactual: 0, n: 0 },
+    // Per-baseline aggregates.
+    type BaselineAgg = {
+      totalUsd: number; savingsPct: number;
+      actualUsd: number; counterfactualUsd: number;
+      byTier: Record<string, { n: number; actualUsd: number; counterfactualUsd: number; savingsUsd: number; savingsPct: number }>;
     };
-    for (const c of perCall) {
-      byTier[c.tier].actual += c.actualCost;
-      byTier[c.tier].counterfactual += c.counterfactualCost;
-      byTier[c.tier].n += 1;
+    const baselineAggs: Record<string, BaselineAgg> = {};
+    for (const b of baselines) {
+      let totalCf = 0;
+      const byTier: Record<string, { actual: number; counterfactual: number; n: number }> = {
+        cheap: { actual: 0, counterfactual: 0, n: 0 },
+        mid: { actual: 0, counterfactual: 0, n: 0 },
+        strong: { actual: 0, counterfactual: 0, n: 0 },
+      };
+      for (const c of perCall) {
+        const cf = c.counterfactuals[b]?.cost ?? 0;
+        totalCf += cf;
+        byTier[c.tier].actual += c.actualCost;
+        byTier[c.tier].counterfactual += cf;
+        byTier[c.tier].n += 1;
+      }
+      const savings = totalCf - totalActual;
+      const pct = totalCf > 0 ? (savings / totalCf) * 100 : 0;
+      baselineAggs[b] = {
+        totalUsd: round6(savings),
+        savingsPct: round2(pct),
+        actualUsd: round6(totalActual),
+        counterfactualUsd: round6(totalCf),
+        byTier: Object.fromEntries(Object.entries(byTier).map(([k, v]) => [k, {
+          n: v.n,
+          actualUsd: round6(v.actual),
+          counterfactualUsd: round6(v.counterfactual),
+          savingsUsd: round6(v.counterfactual - v.actual),
+          savingsPct: v.counterfactual > 0 ? round2(((v.counterfactual - v.actual) / v.counterfactual) * 100) : 0,
+        }])),
+      };
     }
 
-    const topSavings = [...perCall].sort((a, b) => b.savings - a.savings).slice(0, topN);
+    // Top-N largest individual savings — use the first baseline's per-call savings.
+    const primaryBaseline = baselines[0];
+    const topSavings = [...perCall].sort((a, b) =>
+      (b.counterfactuals[primaryBaseline]?.savings ?? 0) - (a.counterfactuals[primaryBaseline]?.savings ?? 0)
+    ).slice(0, topN);
 
     const payload = {
       input: inPath,
       filters: { since },
       pairs: perCall.length,
       dropped: { noOutcomeCost: droppedNoOutcomeCost, noDecision: droppedNoDecision, noTokens: droppedNoTokens },
-      savings: {
-        totalUsd: Math.round(totalSavings * 1000000) / 1000000,
-        savingsPct: Math.round(savingsPct * 100) / 100,
-        actualUsd: Math.round(totalActual * 1000000) / 1000000,
-        counterfactualUsd: Math.round(totalCounterfactual * 1000000) / 1000000,
-      },
-      byTier: Object.fromEntries(Object.entries(byTier).map(([k, v]) => [k, {
-        n: v.n,
-        actualUsd: Math.round(v.actual * 1000000) / 1000000,
-        counterfactualUsd: Math.round(v.counterfactual * 1000000) / 1000000,
-        savingsUsd: Math.round((v.counterfactual - v.actual) * 1000000) / 1000000,
-        savingsPct: v.counterfactual > 0 ? Math.round(((v.counterfactual - v.actual) / v.counterfactual) * 10000) / 100 : 0,
+      baselines: Object.fromEntries(Object.entries(baselineAggs).map(([k, v]) => [k, {
+        savings: { totalUsd: v.totalUsd, savingsPct: v.savingsPct, actualUsd: v.actualUsd, counterfactualUsd: v.counterfactualUsd },
+        byTier: v.byTier,
       }])),
+      // Back-compat: top-level `savings` and `byTier` mirror the PRIMARY baseline
+      // (first in the requested list, which for --baseline all is "heuristic" — same
+      // as iter 32's output shape). Iter 32 callers parsing the old shape keep working.
+      savings: baselineAggs[primaryBaseline]
+        ? { totalUsd: baselineAggs[primaryBaseline].totalUsd, savingsPct: baselineAggs[primaryBaseline].savingsPct, actualUsd: baselineAggs[primaryBaseline].actualUsd, counterfactualUsd: baselineAggs[primaryBaseline].counterfactualUsd }
+        : { totalUsd: 0, savingsPct: 0, actualUsd: round6(totalActual), counterfactualUsd: 0 },
+      byTier: baselineAggs[primaryBaseline]?.byTier ?? {},
       topSavings: topSavings.map(t => ({
-        ts: t.ts, actualModel: t.actualModel, counterfactualModel: t.counterfactualModel,
-        actualUsd: Math.round(t.actualCost * 1000000) / 1000000,
-        counterfactualUsd: Math.round(t.counterfactualCost * 1000000) / 1000000,
-        savingsUsd: Math.round(t.savings * 1000000) / 1000000,
+        ts: t.ts, actualModel: t.actualModel,
+        counterfactualModel: t.counterfactuals[primaryBaseline]?.model ?? '—',
+        actualUsd: round6(t.actualCost),
+        counterfactualUsd: round6(t.counterfactuals[primaryBaseline]?.cost ?? 0),
+        savingsUsd: round6(t.counterfactuals[primaryBaseline]?.savings ?? 0),
       })),
     };
 
@@ -2695,22 +2746,30 @@ const routerCostSavingsCommand: Command = {
       output.writeln('');
       return { success: true, data: payload };
     }
-    output.writeln(output.bold('  Headline:'));
-    output.writeln(`    Actual spend:           $${totalActual.toFixed(6)}`);
-    output.writeln(`    Counterfactual spend:   $${totalCounterfactual.toFixed(6)}  (heuristic: cheap→haiku, mid→sonnet, strong→opus)`);
-    output.writeln(`    Savings:                ${totalSavings >= 0 ? output.success('$' + totalSavings.toFixed(6)) : output.warning('-$' + Math.abs(totalSavings).toFixed(6))}  (${savingsPct.toFixed(2)}% of counterfactual)`);
+    output.writeln(output.bold('  Headline (actual = $' + totalActual.toFixed(6) + '):'));
+    output.writeln('    baseline            counterfactual   savings        %');
+    for (const [b, agg] of Object.entries(baselineAggs)) {
+      const savingsStr = agg.totalUsd >= 0 ? '$' + agg.totalUsd.toFixed(6) : '-$' + Math.abs(agg.totalUsd).toFixed(6);
+      const colored = agg.totalUsd >= 0 ? output.success(savingsStr) : output.warning(savingsStr);
+      output.writeln(`    ${b.padEnd(18)}  $${agg.counterfactualUsd.toFixed(6).padEnd(14)}  ${colored.padEnd(20)} ${agg.savingsPct.toString().padStart(6)}%`);
+    }
     output.writeln('');
-    output.writeln(output.bold('  By tier:'));
+    output.writeln(output.dim(`  Primary baseline for per-tier and top-savings views: "${primaryBaseline}"`));
+    output.writeln('');
+    const primaryAgg = baselineAggs[primaryBaseline];
+    output.writeln(output.bold('  By tier (' + primaryBaseline + '):'));
     output.writeln('    tier      n   actual          counterfactual  savings         %');
-    for (const [k, v] of Object.entries(payload.byTier)) {
+    for (const [k, v] of Object.entries(primaryAgg.byTier)) {
       output.writeln(`    ${k.padEnd(8)}  ${String(v.n).padStart(3)}  $${v.actualUsd.toFixed(6).padEnd(14)} $${v.counterfactualUsd.toFixed(6).padEnd(14)} $${v.savingsUsd.toFixed(6).padEnd(14)} ${v.savingsPct.toString().padStart(6)}%`);
     }
     output.writeln('');
     if (topSavings.length > 0) {
-      output.writeln(output.bold(`  Top ${topSavings.length} largest individual savings:`));
+      output.writeln(output.bold(`  Top ${topSavings.length} largest individual savings (${primaryBaseline}):`));
       output.writeln('    ts                  actual                                    → counterfactual                           saved');
       for (const t of topSavings) {
-        output.writeln(`    ${t.ts.slice(0, 19)}  ${t.actualModel.padEnd(40)} → ${t.counterfactualModel.padEnd(40)}  $${t.savings.toFixed(6)}`);
+        const cfModel = t.counterfactuals[primaryBaseline]?.model ?? '—';
+        const sv = t.counterfactuals[primaryBaseline]?.savings ?? 0;
+        output.writeln(`    ${t.ts.slice(0, 19)}  ${t.actualModel.padEnd(40)} → ${cfModel.padEnd(40)}  $${sv.toFixed(6)}`);
       }
       output.writeln('');
     }
