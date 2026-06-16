@@ -224,6 +224,70 @@ describe('router-trajectory (ADR-148)', () => {
     expect(s.enabled).toBe(true);
     expect(s.path).toBe('/tmp/x.jsonl');
   });
+
+  it('pairTrajectoryRows reconstructs training rows from decision+outcome (ADR-149 iter 18)', async () => {
+    const { pairTrajectoryRows, tierFromComplexity } = await import('../src/ruvector/router-trajectory.js');
+
+    const emb = new Array(384).fill(0).map((_, i) => Math.sin(i));
+    const rows = [
+      // Paired: decision has embedding, matching outcome — should produce 1 row.
+      { v: 1, type: 'decision', ts: '2026-06-15T00:00:00Z', task_hash: 'aaaaaaaa', task: 'remove console.log calls', embedding: emb,
+        complexity: 0.15, model: 'haiku', confidence: 0.9, uncertainty: 0.1, routed_by: 'hybrid' },
+      { v: 1, type: 'outcome', ts: '2026-06-15T00:00:05Z', task_hash: 'aaaaaaaa', quality: 1.0,
+        scores: { 'inclusionai/ling-2.6-flash': 1.0 }, source: 'agent-execute' },
+
+      // Dropped: no embedding.
+      { v: 1, type: 'decision', ts: '2026-06-15T00:00:10Z', task_hash: 'bbbbbbbb', task: 'no-embed case',
+        complexity: 0.5, model: 'sonnet', confidence: 0.7, uncertainty: 0.3, routed_by: 'heuristic' },
+      { v: 1, type: 'outcome', ts: '2026-06-15T00:00:15Z', task_hash: 'bbbbbbbb', quality: 0.5 },
+
+      // Dropped: orphan decision.
+      { v: 1, type: 'decision', ts: '2026-06-15T00:00:20Z', task_hash: 'cccccccc', task: 'orphan', embedding: emb,
+        complexity: 0.8, model: 'opus', confidence: 0.6, uncertainty: 0.4, routed_by: 'hybrid' },
+
+      // Latest-wins: two outcomes for same hash, newer one is kept.
+      { v: 1, type: 'decision', ts: '2026-06-15T00:00:30Z', task_hash: 'dddddddd', task: 'two outcomes', embedding: emb,
+        complexity: 0.4, model: 'haiku', confidence: 0.8, uncertainty: 0.2, routed_by: 'hybrid' },
+      { v: 1, type: 'outcome', ts: '2026-06-15T00:00:35Z', task_hash: 'dddddddd', quality: 0.0, source: 'agent-execute' },
+      { v: 1, type: 'outcome', ts: '2026-06-15T00:00:50Z', task_hash: 'dddddddd', quality: 1.0, source: 'llm-judge' },
+    ];
+
+    const { pairs, stats } = pairTrajectoryRows(rows as never);
+
+    expect(stats.totalRows).toBe(rows.length);
+    expect(stats.decisions).toBe(4);
+    expect(stats.outcomes).toBe(4);
+    expect(stats.paired).toBe(2);                 // aaaa + dddd
+    expect(stats.droppedNoEmbedding).toBe(1);     // bbbb
+    expect(stats.droppedNoMatch).toBe(1);         // cccc
+
+    // Shape matches seed-rows.json (task / embedding / scores / tier).
+    const aaPair = pairs.find(p => p.task === 'remove console.log calls');
+    expect(aaPair).toBeDefined();
+    expect(aaPair!.tier).toBe('cheap');           // complexity 0.15 → cheap
+    expect(aaPair!.embedding.length).toBe(384);
+    expect(aaPair!.scores['inclusionai/ling-2.6-flash']).toBe(1.0);
+
+    // Latest-wins on outcomes for the same task_hash.
+    const ddPair = pairs.find(p => p.task === 'two outcomes');
+    expect(ddPair).toBeDefined();
+    expect(ddPair!.source).toBe('llm-judge');     // newer outcome kept
+    // No explicit scores on the newer outcome → synthesize from model+quality.
+    expect(ddPair!.scores).toEqual({ haiku: 1.0 });
+    expect(ddPair!.tier).toBe('mid');             // complexity 0.4 → mid
+
+    // tierFromComplexity boundaries.
+    expect(tierFromComplexity(0.0)).toBe('cheap');
+    expect(tierFromComplexity(0.33)).toBe('cheap');
+    expect(tierFromComplexity(0.34)).toBe('mid');
+    expect(tierFromComplexity(0.66)).toBe('mid');
+    expect(tierFromComplexity(0.67)).toBe('strong');
+    expect(tierFromComplexity(1.0)).toBe('strong');
+
+    // bySource and byTier reflect the paired set, not the raw rows.
+    expect(stats.bySource).toEqual({ 'agent-execute': 1, 'llm-judge': 1 });
+    expect(stats.byTier).toEqual({ cheap: 1, mid: 1 });
+  });
 });
 
 // ---------------------------------------------------------------------------

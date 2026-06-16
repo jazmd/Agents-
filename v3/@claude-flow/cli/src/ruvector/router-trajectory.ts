@@ -239,6 +239,117 @@ export function trajectoryRecorderStatus(): { enabled: boolean; path: string; ta
   return { ...getConfig() };
 }
 
+// ============================================================================
+// Trajectory → Training-row pairing (iter 18 — consumer side of iter 17)
+// ============================================================================
+
+/** A training row reconstructed from one decision+outcome pair. Shape matches
+ *  the bundled seed-corpus (`seed-rows.json`) so the same train-bundled-krr.mjs
+ *  pipeline can consume it. */
+export interface PairedTrainingRow {
+  task: string;
+  embedding: number[];
+  scores: Record<string, number>;
+  tier: 'cheap' | 'mid' | 'strong';
+  /** Provenance — useful for filtering low-signal sources at training time. */
+  source: string;
+  /** ISO timestamp of the outcome row (newer rows can be weighted higher). */
+  ts: string;
+}
+
+/** Map decision-side complexity ∈ [0,1] back to the corpus tier label. The
+ *  buckets are deliberately the same boundaries the bandit uses so a pair
+ *  drawn from production lands in the same KRR specialist that served it. */
+export function tierFromComplexity(complexity: number): 'cheap' | 'mid' | 'strong' {
+  if (complexity < 0.34) return 'cheap';
+  if (complexity < 0.67) return 'mid';
+  return 'strong';
+}
+
+/** Pair decision+outcome rows by task_hash. Returns the rebuilt training rows
+ *  + diagnostics so the caller (script or test) can report what was dropped
+ *  and why. */
+export function pairTrajectoryRows(
+  rows: TrajectoryRow[],
+): {
+  pairs: PairedTrainingRow[];
+  stats: {
+    totalRows: number;
+    decisions: number;
+    outcomes: number;
+    paired: number;
+    droppedNoEmbedding: number;
+    droppedNoMatch: number;
+    bySource: Record<string, number>;
+    byTier: Record<string, number>;
+  };
+} {
+  const decisions = new Map<string, TrajectoryDecisionRow>();
+  const outcomes = new Map<string, TrajectoryOutcomeRow>();
+
+  // Latest-wins per hash. Production may re-run the same task — using the most
+  // recent outcome avoids polluting the corpus with stale judgments.
+  let dCount = 0, oCount = 0;
+  for (const row of rows) {
+    if (row.type === 'decision') {
+      dCount++;
+      const prev = decisions.get(row.task_hash);
+      if (!prev || row.ts > prev.ts) decisions.set(row.task_hash, row);
+    } else if (row.type === 'outcome') {
+      oCount++;
+      const prev = outcomes.get(row.task_hash);
+      if (!prev || row.ts > prev.ts) outcomes.set(row.task_hash, row);
+    }
+  }
+
+  const pairs: PairedTrainingRow[] = [];
+  const bySource: Record<string, number> = {};
+  const byTier: Record<string, number> = {};
+  let droppedNoEmbedding = 0;
+  let droppedNoMatch = 0;
+
+  for (const [hash, dec] of decisions) {
+    const out = outcomes.get(hash);
+    if (!out) { droppedNoMatch++; continue; }
+    if (!dec.embedding || dec.embedding.length === 0) { droppedNoEmbedding++; continue; }
+
+    // scores map: prefer the outcome's full per-model map (set by callers who
+    // ran multi-model comparisons); fall back to a single-model entry derived
+    // from the model the decision actually dispatched.
+    const scores: Record<string, number> = out.scores
+      ?? { [dec.openrouter_model ?? dec.model]: out.quality };
+
+    const tier = tierFromComplexity(dec.complexity);
+    const source = out.source ?? 'unknown';
+
+    pairs.push({
+      task: dec.task,
+      embedding: dec.embedding,
+      scores,
+      tier,
+      source,
+      ts: out.ts,
+    });
+
+    bySource[source] = (bySource[source] ?? 0) + 1;
+    byTier[tier] = (byTier[tier] ?? 0) + 1;
+  }
+
+  return {
+    pairs,
+    stats: {
+      totalRows: rows.length,
+      decisions: dCount,
+      outcomes: oCount,
+      paired: pairs.length,
+      droppedNoEmbedding,
+      droppedNoMatch,
+      bySource,
+      byTier,
+    },
+  };
+}
+
 /** Test seam — reset cached config so unit tests can change env vars between cases. */
 export function __resetTrajectoryRecorderForTests(): void {
   _cfg = null;
