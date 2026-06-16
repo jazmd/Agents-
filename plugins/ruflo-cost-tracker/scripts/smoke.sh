@@ -8,10 +8,10 @@ step() { printf "→ %s ... " "$1"; }
 ok()   { printf "PASS\n"; PASS=$((PASS+1)); }
 bad()  { printf "FAIL: %s\n" "$1"; FAIL=$((FAIL+1)); }
 
-step "1. plugin.json declares 0.25.1 with new keywords"
+step "1. plugin.json declares 0.25.2 with new keywords"
 v=$(grep -E '"version"' "$ROOT/.claude-plugin/plugin.json" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-if [[ "$v" != "0.25.1" ]]; then
-  bad "expected 0.25.1, got '$v'"
+if [[ "$v" != "0.25.2" ]]; then
+  bad "expected 0.25.2, got '$v'"
 else
   miss=""
   for k in namespace-routing mcp agentic-flow agent-booster tier1-routing model-routing benchmarking verified telemetry budget projection forecast counterfactual drift-detection trend-alert anomaly-detection outlier-detection health-check composite-gate auto-track stop-hook snapshot-diff pr-regression git-context traceability drill-down per-message; do
@@ -375,6 +375,10 @@ grep -q "alertLevel" "$F1" || miss="$miss no-alert-level"
 # iter 81 — git context for snapshot traceability (used by cost-diff).
 grep -q "captureGitContext" "$F1" || miss="$miss no-git-context-fn"
 grep -qE "shaShort|isDirty" "$F1" || miss="$miss no-git-fields"
+# iter 84 — per-token-class breakdown surfaces cache_write as a driver
+# (otherwise summaries hide the iter-82 bug class at the AGGREGATE level).
+grep -q "byTokenClass" "$F1" || miss="$miss no-token-class-aggregation"
+grep -q "By token class" "$F1" || miss="$miss no-token-class-markdown"
 [[ -f "$F2" ]] || miss="$miss skill-missing"
 grep -q "summary\.mjs" "$F2" || miss="$miss skill-no-script-ref"
 grep -qE "stable|contract|JSON" "$F2" || miss="$miss no-contract-doc"

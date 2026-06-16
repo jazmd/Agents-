@@ -71,6 +71,9 @@ function gather() {
   const totalUsd = sessions.reduce((s, r) => s + (r.total_cost_usd || 0), 0);
   const byTier = { haiku: 0, sonnet: 0, opus: 0, unknown: 0 };
   const byModel = {};
+  // iter 84 — per-token-class aggregation (mirrors iter 83's export.mjs).
+  // Surfaces cache_write as a distinct cost driver in summary output.
+  const byTokenClass = { input: 0, output: 0, cache_write: 0, cache_read: 0 };
   for (const r of sessions) {
     if (r.byTier) for (const [t, v] of Object.entries(r.byTier)) byTier[t] = (byTier[t] || 0) + v;
     if (r.byModel) {
@@ -84,6 +87,10 @@ function gather() {
         agg.cache_creation_input_tokens += slot.cache_creation_input_tokens || 0;
         agg.cache_read_input_tokens += slot.cache_read_input_tokens || 0;
         byModel[m] = agg;
+        byTokenClass.input       += slot.input_tokens || 0;
+        byTokenClass.output      += slot.output_tokens || 0;
+        byTokenClass.cache_write += slot.cache_creation_input_tokens || 0;
+        byTokenClass.cache_read  += slot.cache_read_input_tokens || 0;
       }
     }
   }
@@ -122,6 +129,9 @@ function gather() {
     conversationCount: sessions.length,
     byTier,
     byModel,
+    // iter 84 — per-token-class summary so consumers can see "X% of spend
+    // is cache_write" without re-aggregating byModel themselves.
+    byTokenClass,
     topSession: topSession ? {
       sessionId: topSession.sessionId,
       total_cost_usd: topSession.total_cost_usd,
@@ -166,6 +176,27 @@ function asMarkdown(s) {
     if (c > 0) lines.push(`| ${t} | ${fmtUsd(c)} |`);
   }
   lines.push('');
+  // iter 84 — surface token-class breakdown so cache_write is visible.
+  // A 569-output-token, $16 cache-write message used to look like "$16 went
+  // to opus" in summary; now it shows "$16 = cache_write tokens" which is
+  // what operators need to know to fix the underlying cause.
+  if (s.byTokenClass) {
+    const totalTokens = Object.values(s.byTokenClass).reduce((a, b) => a + b, 0);
+    if (totalTokens > 0) {
+      lines.push(`## By token class`);
+      lines.push('');
+      lines.push('| Class | Tokens | % of tokens |');
+      lines.push('|---|---:|---:|');
+      for (const cls of ['input', 'output', 'cache_write', 'cache_read']) {
+        const n = s.byTokenClass[cls] || 0;
+        if (n > 0) {
+          const pct = (n / totalTokens) * 100;
+          lines.push(`| ${cls} | ${n.toLocaleString()} | ${pct.toFixed(1)}% |`);
+        }
+      }
+      lines.push('');
+    }
+  }
   if (s.topSession) {
     lines.push(`## Top session`);
     lines.push('');
