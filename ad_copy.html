@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ruflo v3.11 · Ad Creatives</title>
+    <meta name="description" content="Ad creative variants dashboard for Ruflo campaign management. Monitor banners, squares, skyscrapers, and wide ads." />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
+    <!-- Preconnect for external resources -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <!-- Preload critical font resources -->
+    <link rel="preload" href="https://fonts.gstatic.com/s/inter/v12/UcCO3FwrK3iLTeHuS_fvQtMwCp50KnMw2boKoduKmMEVuLyfAZ9hiI.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📊</text></svg>" />
+    <!-- Structured data for rich snippets -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "Ruflo Ad Creatives Dashboard",
+        "applicationCategory": "BusinessApplication",
+        "operatingSystem": "Web",
+        "description": "Dashboard to manage ad creative variants in Ruflo campaigns."
+    }
+    </script>
+    <style>
+        /* ─── Reset & Base ─── */
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        :root {
+            --bg: #0b0d14;
+            --surface: #13161f;
+            --surface-2: #1a1e2b;
+            --border: #262c3e;
+            --text: #e2e6f0;
+            --text-secondary: #8d95b0;
+            --accent: #6b8aff;
+            --accent-glow: rgba(107, 138, 255, 0.15);
+            --green: #4ade80;
+            --orange: #fb923c;
+            --radius: 12px;
+            --radius-sm: 8px;
+            --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Helvetica Neue', sans-serif;
+            --font-mono: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+            --transition-default: 0.2s ease;
+        }
+
+        body {
+            font-family: var(--font);
+            background: var(--bg);
+            color: var(--text);
+            line-height: 1.6;
+            padding: 24px;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* ─── Layout ─── */
+        .container {
+            max-width: 1280px;
+            width: 100%;
+        }
+
+        /* ─── Header ─── */
+        .campaign-header {
+            text-align: center;
+            padding: 40px 20px 32px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 48px;
+        }
+
+        .campaign-header h1 {
+            font-size: 2.4rem;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+            background: linear-gradient(135deg, var(--accent), var(--green));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .campaign-header .sub {
+            color: var(--text-secondary);
+            font-size: 1.05rem;
+            margin-top: 8px;
+        }
+
+        .campaign-header .meta {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 12px 28px;
+            margin-top: 20px;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .campaign-header .meta span {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        /* ─── Tags ─── */
+        .tag {
+            display: inline-block;
+            background: var(--accent-glow);
+            color: var(--accent);
+            font-size: 0.7rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            padding: 2px 10px;
+            border-radius: 99px;
+        }
+
+        /* ─── Section ─── */
+        .section {
+            margin-bottom: 56px;
+        }
+
+        .section-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            margin-bottom: 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .section-title .count {
+            font-size: 0.75rem;
+            font-weight: 500;
+            color: var(--text-secondary);
+            background: var(--surface);
+            padding: 0 10px;
+            border-radius: 99px;
+            line-height: 22px;
+        }
+
+        /* ─── Ad Grid ─── */
+        .ad-grid {
+            display: grid;
+            gap: 24px;
+        }
+
+        .ad-grid.cols-2 {
+            grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+        }
+        .ad-grid.cols-3 {
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        }
+        .ad-grid.cols-4 {
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+        }
+
+        /* ─── Ad Card ─── */
+        .ad-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+            transition: border-color var(--transition-default), box-shadow var(--transition-default);
+            contain: content;
+            content-visibility: auto;
+            contain-intrinsic-size: 200px;
+        }
+
+        .ad-card:hover,
+        .ad-card:focus-within {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 1px var(--accent-glow), 0 8px 32px rgba(0, 0, 0, 0.4);
+        }
+
+        .ad-card .preview {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .ad-card .preview.banner {
+            padding: 32px 24px;
+            min-height: 120px;
+        }
+
+        .ad-card .preview.square {
+            padding: 32px;
+            aspect-ratio: 1 / 1;
+        }
+
+        .ad-card .preview.skyscraper {
+            padding: 24px 16px;
+            min-height: 320px;
+        }
+
+        .ad-card .preview.wide {
+            padding: 24px;
+            min-height: 100px;
+        }
+
+        .ad-card .preview .ad-unit {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        /* ─── Inline Ad Mockups ─── */
+        .ad-banner {
+            background: linear-gradient(135deg, #0f1420, #1a2140);
+            border: 1px solid #2a3355;
+            border-radius: var(--radius-sm);
+            padding: 20px 28px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            flex-wrap: wrap;
+            width: 100%;
+            transition: border-color var(--transition-default);
+            will-change: border-color;
+        }
+
+        .ad-banner .logo {
+            font-weight: 700;
+            font-size: 1.1rem;
+            color: var(--accent);
+            letter-spacing: -0.02em;
+        }
+
+        .ad-banner .logo span {
+            color: var(--green);
+        }
+
+        .ad-banner .headline {
+            font-weight: 600;
+            font-size: 0.95rem;
+            flex: 1;
+            color: var(--text);
+        }
+
+        .ad-banner .cta {
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            padding: 8px 18px;
+            border-radius: var(--radius-sm);
+            font-weight: 600;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: background var(--transition-default);
+        }
+
+        .ad-banner .cta:hover {
+            background: #5a75e6;
+        }
+
+        /* Square ad mockup */
+        .ad-square {
+            background: linear-gradient(135deg, #0f1420, #2a2050);
+            border: 1px solid #3a2a6a;
+            border-radius: var(--radius-sm);
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            text-align: center;
+            width: 100%;
+            height: 100%;
+        }
+
+        .ad-square .icon {
+            font-size: 2rem;
+        }
+
+        .ad-square .headline {
+            font-weight: 600;
+            font-size: 1rem;
+        }
+
+        .ad-square .subhead {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        /* Skyscraper mockup */
+        .ad-skyscraper {
+            background: linear-gradient(180deg, #0f1420, #1a2140);
+            border: 1px solid #2a3355;
+            border-radius: var(--radius-sm);
+            padding: 24px 16px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 16px;
+            text-align: center;
+            width: 100%;
+            height: 100%;
+        }
+
+        .ad-skyscraper .icon {
+            font-size: 2.5rem;
+        }
+
+        .ad-skyscraper .headline {
+            font-weight: 600;
+            font-size: 1.1rem;
+        }
+
+        .ad-skyscraper .subhead {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .ad-skyscraper .cta {
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            padding: 8px 20px;
+            border-radius: var(--radius-sm);
+            font-weight: 600;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: background var(--transition-default);
+        }
+
+        /* Wide ad mockup */
+        .ad-wide {
+            background: linear-gradient(135deg, #0f1420, #1a3020);
+            border: 1px solid #2a5533;
+            border-radius: var(--radius-sm);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            width: 100%;
+        }
+
+        .ad-wide .logo {
+            font-weight: 700;
+            color: var(--green);
+        }
+
+        .ad-wide .headline {
+            font-weight: 600;
+            font-size: 0.9rem;
+            flex: 1;
+        }
+
+        .ad-wide .cta {
+            background: var(--green);
+            color: #0b0d14;
+            border: none;
+            padding: 6px 16px;
+            border-radius: var(--radius-sm);
+            font-weight: 600;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: background var(--transition-default);
+        }
+
+        /* ─── Loading / Error states ─── */
+        .loading-indicator {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 48px 0;
+            color: var(--text-secondary);
+            gap: 12px;
+        }
+
+        .loading-indicator .spinner {
+            width: 24px;
+            height: 24px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .error-message {
+            background: #2d1b1b;
+            border: 1px solid #5a2a2a;
+            color: #f87171;
+            padding: 16px 24px;
+            border-radius: var(--radius);
+            text-align: center;
+        }
+
+        .retry-btn {
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            padding: 6px 16px;
+            border-radius: var(--radius-sm);
+            font-weight: 600;
+            margin-top: 8px;
+            cursor: pointer;
+            transition: background var(--transition-default);
+        }
+
+        .retry-btn:hover {
+            background: #5a75e6;
+        }
+
+        /* ─── Footer ─── */
+        .footer {
+            margin-top: 48px;
+            padding: 24px 0;
+            border-top: 1px solid var(--border);
+            text-align: center;
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+        }
+
+        /* ─── Responsive ─── */
+        @media (max-width: 768px) {
+            body { padding: 16px; }
+            .campaign-header h1 { font-size: 1.8rem; }
+            .ad-grid.cols-2,
+            .ad-grid.cols-3,
+            .ad-grid.cols-4 { grid-template-columns: 1fr; }
+            .ad-banner { flex-direction: column; text-align: center; }
+        }
+
+        /* ─── Accessibility ─── */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border-width: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container" role="main">
+        <header class="campaign-header">
+            <h1>Ruflo v3.11 · Ad Creatives</h1>
+            <p class="sub">Campaign performance at a glance</p>
+            <div class="meta">
+                <span>📅 Launch: March 2025</span>
+                <span>👁️ Impressions: <strong id="impressions">--</strong></span>
+                <span>🎯 CTR: <strong id="ctr">--</strong></span>
+            </div>
+        </header>
+
+        <!-- Banners Section -->
+        <section class="section" aria-labelledby="banners-title">
+            <h2 id="banners-title" class="section-title">
+                Banners
+                <span class="count" id="banner-count">0</span>
+            </h2>
+            <div class="ad-grid cols-2" id="banners-grid" role="list" aria-label="Banner advertisements">
+                <!-- Cards injected by JavaScript -->
+            </div>
+        </section>
+
+        <!-- Squares Section -->
+        <section class="section" aria-labelledby="squares-title">
+            <h2 id="squares-title" class="section-title">
+                Squares
+                <span class="count" id="square-count">0</span>
+            </h2>
+            <div class="ad-grid cols-3" id="squares-grid" role="list" aria-label="Square advertisements">
+                <!-- Cards injected by JavaScript -->
+            </div>
+        </section>
+
+        <!-- Skyscrapers Section -->
+        <section class="section" aria-labelledby="skyscrapers-title">
+            <h2 id="skyscrapers-title" class="section-title">
+                Skyscrapers
+                <span class="count" id="skyscraper-count">0</span>
+            </h2>
+            <div class="ad-grid cols-4" id="skyscrapers-grid" role="list" aria-label="Skyscraper advertisements">
+                <!-- Cards injected by JavaScript -->
+            </div>
+        </section>
+
+        <!-- Wide Section -->
+        <section class="section" aria-labelledby="wide-title">
+            <h2 id="wide-title" class="section-title">
+                Wide
+                <span class="count" id="wide-count">0</span>
+            </h2>
+            <div class="ad-grid cols-2" id="wide-grid" role="list" aria-label="Wide advertisements">
+                <!-- Cards injected by JavaScript -->
+            </div>
+        </section>
+
+        <footer class="footer">
+            <p>&copy; 2025 Ruflo. All rights reserved. v3.11.0</p>
+        </footer>
+    </div>
+
+    <script>
+        (function() {
+            'use strict';
+
+            /**
+             * @module AdDashboard
+             * @description Main module for Ruflo Ad Creatives Dashboard.
+             * Handles data fetching, rendering, error handling, and logging.
+             */
+
+            /* ── Logger ──────────────────────────────────────────────── */
+
+            /**
+             * Simple structured logger.
+             * @param {string} level - Log level (debug, info, warn, error).
+             * @param {string} message - Log message.
+             * @param {object} [context] - Additional context data.
+             */
+            function log(level, message, context) {
+                const timestamp = new Date().toISOString();
+                const entry = { timestamp, level, message, context };
+                // In production, send to remote logging endpoint
+                switch (level) {
+                    case 'error':
+                        console.error('[Ruflo Dashboard]', message, context || '');
+                        break;
+                    case 'warn':
+                        console.warn('[Ruflo Dashboard]', message, context || '');
+                        break;
+                    case 'info':
+                        console.info('[Ruflo Dashboard]', message, context || '');
+                        break;
+                    default:
+                        console.debug('[Ruflo Dashboard]', message, context || '');
+                }
+                // Store last 100 entries for diagnostics
+                const logHistory = window.__rufloLogHistory || [];
+                logHistory.push(entry);
+                if (logHistory.length > 100) logHistory.shift();
+                window.__rufloLogHistory = logHistory;
+            }
+
+            /* ── Configuration ─────────────────────────────────────────── */
+
+            /**
+             * @constant {string} DATA_ENDPOINT - URL for ad data JSON.
+             * In production, replace with actual API endpoint.
+             */
+            const DATA_ENDPOINT = '/api/ad-creatives'; // Placeholder — adjust for your deployment
+
+            /**
+             * @constant {number} MAX_RETRIES - Number of fetch retries on failure.
+             */
+            const MAX_RETRIES = 3;
+
+            /**
+             * @constant {number} RETRY_DELAY_MS - Delay between retries (ms).
+             */
+            const RETRY_DELAY_MS = 1000;
+
+            /* ── State ─────────────────────────────────────────────────── */
+
+            /** @type {object|null} */
+            let cachedData = null;
+
+            /** @type {AbortController|null} */
+            let currentFetchController = null;
+
+            /* ── Mock Data (fallback if endpoint unavailable) ──────────── */
+
+            /**
+             * Generates mock ad data for development/demo.
+             * @returns {object[]} Array of ad objects.
+             */
+            function generateMockAds() {
+                const mockData = [];
+                const types = ['banner', 'square', 'skyscraper', 'wide'];
+                const headlines = [
+                    'Boost Your ROI Today',
+                    'Next-Gen Analytics',
+                    'Scale Without Limits',
+                    'AI-Powered Insights',
+                    'Real-Time Optimization',
+                    'Enterprise Security',
+                    'Seamless Integration',
+                    'Zero Downtime Guarantee'
+                ];
+                const subheads = [
+                    'From $99/mo',
+                    'Start free trial',
+                    'Trusted by 10k+ teams',
+                    '99.9% uptime SLA',
+                    'No credit card required'
+                ];
+
+                for (let i = 0; i < 12; i++) {
+                    const type = types[i % types.length];
+                    const headline = headlines[i % headlines.length];
+                    const subhead = subheads[i % subheads.length];
+                    const cta = 'Learn More';
+                    const logo = `Ruflo${String.fromCharCode(65 + i)}`;
+                    mockData.push({
+                        id: `mock-${i + 1}`,
+                        type,
+                        headline,
+                        subhead,
+                        cta,
+                        logo,
+                        impressions: Math.floor(Math.random() * 50000) + 1000,
+                        clicks: Math.floor(Math.random() * 3000) + 50,
+                        ctr: 0 // computed later
+                    });
+                }
+                return mockData;
+            }
+
+            /* ── Data Fetching ─────────────────────────────────────────── */
+
+            /**
+             * Fetches ad creative data from the API with retry logic.
+             * @param {number} [attempt=1] - Current retry attempt.
+             * @returns {Promise<object[]>} Array of ad objects.
+             * @throws {Error} If all retries fail.
+             */
+            async function fetchAdData(attempt = 1) {
+                if (currentFetchController) {
+                    currentFetchController.abort();
+                }
+                currentFetchController = new AbortController();
+                const { signal } = currentFetchController;
+
+                try {
+                    log('info', 'Fetching ad data', { endpoint: DATA_ENDPOINT, attempt });
+                    const response = await fetch(DATA_ENDPOINT, {
+                        signal,
+                        headers: {
+                            'Accept': 'application/json',
+                            'X-Requested-With': 'XMLHttpRequest' // CSRF protection hint
+                        }
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+
+                    /** @type {object[]} */
+                    const data = await response.json();
+                    if (!Array.isArray(data)) {
+                        throw new Error('Response is not an array');
+                    }
+
+                    // Validate each item has required fields
+                    for (const item of data) {
+                        if (!item.id || !item.type) {
+                            throw new Error('Invalid ad data: missing id or type');
+                        }
+                    }
+
+                    log('info', 'Ad data fetched successfully', { count: data.length });
+                    return data;
+                } catch (err) {
+                    if (err.name === 'AbortError') {
+                        log('warn', 'Fetch aborted');
+                        throw err;
+                    }
+
+                    log('error', 'Fetch failed', { message: err.message, attempt });
+
+                    if (attempt < MAX_RETRIES) {
+                        log('info', `Retrying in ${RETRY_DELAY_MS}ms...`);
+                        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+                        return fetchAdData(attempt + 1);
+                    }
+
+                    // Fallback to mock data
+                    log('warn', 'All retries exhausted, using mock data');
+                    const mockData = generateMockAds();
+                    // Also store mock data in cachedData for persistence
+                    cachedData = mockData;
+                    return mockData;
+                } finally {
+                    currentFetchController = null;
+                }
+            }
+
+            /* ── Rendering ─────────────────────────────────────────────── */
+
+            /**
+             * Renders an array of ad objects into the appropriate grids.
+             * @param {object[]} ads - Array of ad creative objects.
+             * @returns {void}
+             */
+            function renderAds(ads) {
+                // Validate input
+                if (!Array.isArray(ads)) {
+                    log('error', 'Invalid ads data passed to renderAds', { type: typeof ads });
+                    return;
+                }
+
+                // Clear existing content
+                const grids = {
+                    banner: document.getElementById('banners-grid'),
+                    square: document.getElementById('squares-grid'),
+                    skyscraper: document.getElementById('skyscrapers-grid'),
+                    wide: document.getElementById('wide-grid')
+                };
+
+                // Verify all grid elements exist
+                for (const [type, grid] of Object.entries(grids)) {
+                    if (!grid) {
+                        log('error', `Grid element missing for ${type}`);
+                        return;
+                    }
+                }
+
+                // Clear each grid
+                Object.values(grids).forEach(grid => { grid.innerHTML = ''; });
+
+                // Group ads by type
+                const grouped = { banner: [], square: [], skyscraper: [], wide: [] };
+                let totalImpressions = 0;
+                let totalClicks = 0;
+
+                ads.forEach(ad => {
+                    const type = ad.type ? ad.type.toLowerCase() : '';
+                    if (grouped[type]) {
+                        grouped[type].push(ad);
+                        totalImpressions += ad.impressions || 0;
+                        totalClicks += ad.clicks || 0;
+                    } else {
+                        log('warn', 'Unknown ad type', { type, id: ad.id });
+                    }
+                });
+
+                // Render each type
+                for (const [type, items] of Object.entries(grouped)) {
+                    const grid = grids[type];
+                    if (!grid) continue;
+
+                    // Update count badge
+                    const countEl = document.getElementById(`${type}-count`);
+                    if (countEl) countEl.textContent = items.length;
+
+                    if (items.length === 0) {
+                        // Optionally show empty state
+                        const emptyMsg = document.createElement('p');
+                        emptyMsg.className = 'empty-state';
+                        emptyMsg.textContent = `No ${type} ads found.`;
+                        emptyMsg.style.color = 'var(--text-secondary)';
+                        grid.appendChild(emptyMsg);
+                        continue;
+                    }
+
+                    // Create document fragment for performance
+                    const fragment = document.createDocumentFragment();
+                    items.forEach(ad => {
+                        const card = createAdCard(ad, type);
+                        if (card) fragment.appendChild(card);
+                    });
+                    grid.appendChild(fragment);
+                }
+
+                // Update header metrics
+                const impressionsEl = document.getElementById('impressions');
+                const ctrEl = document.getElementById('ctr');
+                if (impressionsEl) impressionsEl.textContent = totalImpressions.toLocaleString();
+                if (ctrEl) {
+                    const ctr = totalImpressions > 0 ? ((totalClicks / totalImpressions) * 100).toFixed(2) : '0.00';
+                    ctrEl.textContent = `${ctr}%`;
+                }
+
+                log('info', 'Dashboard rendered', { totalAds: ads.length, totalImpressions, totalClicks });
+            }
+
+            /**
+             * Creates a single ad card DOM element.
+             * @param {object} ad - Ad object with id, type, headline, subhead, cta, logo.
+             * @param {string} type - The ad type (banner, square, skyscraper, wide).
+             * @returns {HTMLElement|null} The card element, or null on failure.
+             */
+            function createAdCard(ad, type) {
+                try {
+                    // Validate required fields
+                    if (!ad || typeof ad !== 'object' || !ad.id) {
+                        log('error', 'Invalid ad object', { ad });
+                        return null;
+                    }
+
+                    const card = document.createElement('article');
+                    card.className = 'ad-card';
+                    card.setAttribute('role', 'listitem');
+                    card.setAttribute('aria-label', `${type} ad: ${ad.headline || 'Untitled'}`);
+                    card.dataset.adId = ad.id;
+
+                    // Preview container
+                    const preview = document.createElement('div');
+                    preview.className = `preview ${type}`;
+                    preview.setAttribute('aria-hidden', 'true'); // decorative
+
+                    // Create mockup based on type
+                    const mockup = createMockup(ad, type);
+                    if (mockup) {
+                        const unit = document.createElement('div');
+                        unit.className = 'ad-unit';
+                        unit.appendChild(mockup);
+                        preview.appendChild(unit);
+                    }
+
+                    // Info section (headline, subhead, cta extracted from mockup)
+                    // For simplicity, mockup already contains the info.
+                    // You could add additional metadata below preview.
+
+                    card.appendChild(preview);
+
+                    // Optional: Add a caption area with ad details
+                    const caption = document.createElement('div');
+                    caption.style.padding = '16px';
+                    caption.style.display = 'flex';
+                    caption.style.flexDirection = 'column';
+                    caption.style.gap = '4px';
+
+                    const headlineEl = document.createElement('span');
+                    headlineEl.className = 'tag';
+                    headlineEl.textContent = ad.headline || type;
+                    caption.appendChild(headlineEl);
+
+                    if (ad.subhead) {
+                        const subEl = document.createElement('p');
+                        subEl.style.fontSize = '0.8rem';
+                        subEl.style.color = 'var(--text-secondary)';
+                        subEl.textContent = ad.subhead;
+                        caption.appendChild(subEl);
+                    }
+
+                    // Performance metrics
+                    if (ad.impressions !== undefined) {
+                        const stats = document.createElement('div');
+                        stats.style.display = 'flex';
+                        stats.style.gap = '12px';
+                        stats.style.fontSize = '0.75rem';
+                        stats.style.color = 'var(--text-secondary)';
+                        stats.innerHTML = `
+                            <span>👁️ ${ad.impressions.toLocaleString()}</span>
+                            <span>🖱️ ${ad.clicks ? ad.clicks.toLocaleString() : '0'}</span>
+                            ${ad.ctr !== undefined ? `<span>📈 ${ad.ctr}%</span>` : ''}
+                        `;
+                        caption.appendChild(stats);
+                    }
+
+                    card.appendChild(caption);
+
+                    return card;
+                } catch (err) {
+                    log('error', 'Failed to create card', { error: err.message, ad });
+                    return null;
+                }
+            }
+
+            /**
+             * Creates a mockup DOM structure based on ad type.
+             * @param {object} ad - Ad data.
+             * @param {string} type - Ad type.
+             * @returns {HTMLElement|null} Mockup element.
+             */
+            function createMockup(ad, type) {
+                const headline = ad.headline || 'Headline';
+                const subhead = ad.subhead || '';
+                const cta = ad.cta || 'Learn More';
+                const logo = ad.logo || 'Ruflo';
+
+                switch (type) {
+                    case 'banner': {
+                        const el = document.createElement('div');
+                        el.className = 'ad-banner';
+                        el.innerHTML = `
+                            <div class="logo">${escapeHtml(logo)}<span>●</span></div>
+                            <div class="headline">${escapeHtml(headline)}</div>
+                            <button class="cta" type="button">${escapeHtml(cta)}</button>
+                        `;
+                        return el;
+                    }
+                    case 'square': {
+                        const el = document.createElement('div');
+                        el.className = 'ad-square';
+                        el.innerHTML = `
+                            <div class="icon">📊</div>
+                            <div class="headline">${escapeHtml(headline)}</div>
+                            <div class="subhead">${escapeHtml(subhead)}</div>
+                        `;
+                        return el;
+                    }
+                    case 'skyscraper': {
+                        const el = document.createElement('div');
+                        el.className = 'ad-skyscraper';
+                        el.innerHTML = `
+                            <div class="icon">📈</div>
+                            <div class="headline">${escapeHtml(headline)}</div>
+                            <div class="subhead">${escapeHtml(subhead)}</div>
+                            <button class="cta" type="button">${escapeHtml(cta)}</button>
+                        `;
+                        return el;
+                    }
+                    case 'wide': {
+                        const el = document.createElement('div');
+                        el.className = 'ad-wide';
+                        el.innerHTML = `
+                            <div class="logo">${escapeHtml(logo)}</div>
+                            <div class="headline">${escapeHtml(headline)}</div>
+                            <button class="cta" type="button">${escapeHtml(cta)}</button>
+                        `;
+                        return el;
+                    }
+                    default:
+                        log('warn', 'Unknown type for mockup', { type });
+                        return null;
+                }
+            }
+
+            /**
+             * Escapes HTML to prevent XSS.
+             * @param {string} unsafe - Raw string.
+             * @returns {string} Escaped string.
+             */
+            function escapeHtml(unsafe) {
+                if (typeof unsafe !== 'string') return String(unsafe);
+                const map = {
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#039;'
+                };
+                return unsafe.replace(/[&<>"']/g, m => map[m]);
+            }
+
+            /* ── Initialization ────────────────────────────────────────── */
+
+            /**
+             * Shows a loading indicator in each grid.
+             * @returns {void}
+             */
+            function showLoading() {
+                const grids = ['banners-grid', 'squares-grid', 'skyscrapers-grid', 'wide-grid'];
+                grids.forEach(id => {
+                    const grid = document.getElementById(id);
+                    if (grid) {
+                        grid.innerHTML = `
+                            <div class="loading-indicator">
+                                <div class="spinner" aria-hidden="true"></div>
+                                <span>Loading ads...</span>
+                            </div>
+                        `;
+                    }
+                });
+            }
+
+            /**
+             * Shows error state across all grids.
+             * @param {string} message - Error message.
+             * @returns {void}
+             */
+            function showError(message) {
+                const grids = ['banners-grid', 'squares-grid', 'skyscrapers-grid', 'wide-grid'];
+                grids.forEach(id => {
+                    const grid = document.getElementById(id);
+                    if (grid) {
+                        grid.innerHTML = `
+                            <div class="error-message" role="alert">
+                                <p>${escapeHtml(message)}</p>
+                                <button class="retry-btn" type="button" onclick="window.__rufloRetry()">Retry</button>
+                            </div>
+                        `;
+                    }
+                });
+            }
+
+            /**
+             * Main initialization function.
+             * @returns {Promise<void>}
+             */
+            async function initDashboard() {
+                log('info', 'Dashboard initializing');
+
+                showLoading();
+
+                try {
+                    // Use cached data if available and fresh (within 5 minutes)
+                    if (cachedData) {
+                        const cacheAge = Date.now() - (cachedData._timestamp || 0);
+                        if (cacheAge < 5 * 60 * 1000) {
+                            log('info', 'Using cached data', { age: cacheAge });
+                            renderAds(cachedData);
+                            return;
+                        }
+                    }
+
+                    const data = await fetchAdData();
+                    // Attach timestamp for cache freshness
+                    data._timestamp = Date.now();
+                    cachedData = data;
+                    renderAds(data);
+                } catch (err) {
+                    if (err.name === 'AbortError') {
+                        log('info', 'Initialization aborted');
+                        return;
+                    }
+                    log('error', 'Dashboard init failed', { error: err.message });
+                    showError('Failed to load ad data. Please try again.');
+                }
+            }
+
+            /**
+             * Retry loading after error.
+             * @global
+             */
+            window.__rufloRetry = function() {
+                log('info', 'Retry triggered by user');
+                // Clear cache to force fresh fetch
+                cachedData = null;
+                initDashboard();
+            };
+
+            // Start the dashboard when DOM is ready
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initDashboard);
+            } else {
+                // DOM already loaded
+                initDashboard().catch(err => {
+                    log('error', 'Unexpected initialization error', { error: err.message });
+                });
+            }
+
+            // Expose for debugging and testing
+            window.__rufloDashboard = {
+                fetchAdData,
+                renderAds,
+                log,
+                escapeHtml,
+                cachedData,
+                generateMockAds
+            };
+
+        })();
+    </script>
+</body>
+</html>
