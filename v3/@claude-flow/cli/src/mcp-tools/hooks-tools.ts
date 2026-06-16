@@ -3337,6 +3337,54 @@ export const hooksIntelligenceStats: MCPTool = {
       }
     } catch { /* trajectory parse failed — leave costSavings null */ }
 
+    // ADR-149 iter 51 — surface forward projection to MCP, mirroring iter 41
+    // (CLI cost-projection) but as an additive field. Linear extrapolation
+    // from the same 7d measurement window the costSavings block used. JSON
+    // shape lets Claude Code sessions answer "what will routing cost over
+    // the next 30 days?" in-conversation.
+    let costProjection: {
+      windowDays: number;
+      callsPerDay: number;
+      avgActualPerCall: number;
+      avgCounterfactualPerCall: number;
+      horizons: Record<string, {
+        projectedCalls: number;
+        projectedActualUsd: number;
+        projectedCounterfactualUsd: number;
+        projectedSavingsUsd: number;
+        projectedSavingsPct: number;
+      }>;
+    } | null = null;
+    if (costSavings && costSavings.pairs > 0) {
+      const windowSeconds = 7 * 86400;
+      const callsPerSecond = costSavings.pairs / windowSeconds;
+      const callsPerDay = callsPerSecond * 86400;
+      const avgActualPerCall = costSavings.actualUsd / costSavings.pairs;
+      const avgCfPerCall = costSavings.counterfactualUsd / costSavings.pairs;
+      const horizonDays = { '30d': 30, '90d': 90, '365d': 365 };
+      const horizons: Record<string, { projectedCalls: number; projectedActualUsd: number; projectedCounterfactualUsd: number; projectedSavingsUsd: number; projectedSavingsPct: number }> = {};
+      for (const [label, days] of Object.entries(horizonDays)) {
+        const projectedCalls = Math.round(callsPerDay * days);
+        const projActual = avgActualPerCall * projectedCalls;
+        const projCf = avgCfPerCall * projectedCalls;
+        const projSavings = projCf - projActual;
+        horizons[label] = {
+          projectedCalls,
+          projectedActualUsd: Math.round(projActual * 1_000_000) / 1_000_000,
+          projectedCounterfactualUsd: Math.round(projCf * 1_000_000) / 1_000_000,
+          projectedSavingsUsd: Math.round(projSavings * 1_000_000) / 1_000_000,
+          projectedSavingsPct: projCf > 0 ? Math.round((projSavings / projCf) * 10000) / 100 : 0,
+        };
+      }
+      costProjection = {
+        windowDays: 7,
+        callsPerDay: Math.round(callsPerDay * 100) / 100,
+        avgActualPerCall: Math.round(avgActualPerCall * 1_000_000) / 1_000_000,
+        avgCounterfactualPerCall: Math.round(avgCfPerCall * 1_000_000) / 1_000_000,
+        horizons,
+      };
+    }
+
     const stats = {
       sona: sonaStats,
       moe: moeStats,
@@ -3366,6 +3414,10 @@ export const hooksIntelligenceStats: MCPTool = {
       // ADR-149 iter 42 — cost-savings surface for MCP consumers (matches
       // `claude-flow neural router cost-savings --since 7d` shape).
       costSavings,
+      // ADR-149 iter 51 — forward budget projection (matches `cost-projection`
+      // CLI shape). Pairs with costSavings: one says how much we saved, the
+      // other extrapolates that savings forward to operational horizons.
+      costProjection,
       dataSource: sona ? 'real-implementations' : 'memory-fallback',
       lastUpdated: new Date().toISOString(),
     };
