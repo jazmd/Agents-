@@ -2555,6 +2555,7 @@ const routerCostSavingsCommand: Command = {
     { name: 'top-n', type: 'number', description: 'Show top-N largest individual savings (default 5)', default: '5' },
     { name: 'baseline', short: 'b', type: 'string', description: 'Counterfactual baseline: heuristic | always-haiku | always-sonnet | always-opus | always-gpt-4.1 | all (default: all)', default: 'all' },
     { name: 'window', short: 'w', type: 'string', description: 'Bin decisions into successive windows of this duration (e.g. 1h, 24h, 7d). Output adds a trend table — iter 34 drift detection.' },
+    { name: 'alert-on-drop-pct', type: 'number', description: 'Exit 1 if the most recent window\'s savings% falls > N points below the mean of prior windows. Requires --window. Default off. (ADR-149 iter 50)' },
   ],
   examples: [
     { command: 'claude-flow neural router cost-savings', description: 'All-time, all baselines (heuristic + Sonnet-always + Opus-always)' },
@@ -2819,9 +2820,46 @@ const routerCostSavingsCommand: Command = {
       (payload as typeof payload & { windowedTrend?: typeof windowedTrend; windowConfig?: { duration: string; primaryBaseline: string } }).windowConfig = { duration: windowArg, primaryBaseline };
     }
 
+    // iter 50 — drift alert. When --alert-on-drop-pct is set AND --window
+    // produced ≥ 2 windows, compare the most-recent window's savings% to
+    // the mean of prior windows'. If it dropped by > threshold, fail
+    // (exit 1) so monitoring catches it. Independent of fmt — alert
+    // state goes into the payload AND drives the exit code.
+    const alertDropPctArg = (ctx.flags['alert-on-drop-pct'] ?? ctx.flags.alertOnDropPct) as string | number | undefined;
+    let alertTriggered = false;
+    let alertReason: string | null = null;
+    if (alertDropPctArg !== undefined && alertDropPctArg !== null && alertDropPctArg !== '') {
+      const dropThreshold = typeof alertDropPctArg === 'string' ? parseFloat(alertDropPctArg) : alertDropPctArg;
+      if (!isFinite(dropThreshold) || dropThreshold <= 0) {
+        output.printError(`--alert-on-drop-pct must be a positive number (got ${alertDropPctArg})`);
+        return { success: false, exitCode: 1 };
+      }
+      if (!windowedTrend || windowedTrend.length < 2) {
+        alertReason = `not enough windows for drift detection (need ≥ 2, got ${windowedTrend?.length ?? 0}) — alert skipped`;
+      } else {
+        const latest = windowedTrend[windowedTrend.length - 1];
+        const prior = windowedTrend.slice(0, -1);
+        const priorMean = prior.reduce((s, w) => s + w.savingsPct, 0) / prior.length;
+        const dropPct = priorMean - latest.savingsPct;
+        if (dropPct > dropThreshold) {
+          alertTriggered = true;
+          alertReason = `latest window savings ${latest.savingsPct.toFixed(2)}% is ${dropPct.toFixed(2)} points BELOW prior windows' mean ${priorMean.toFixed(2)}% (threshold ${dropThreshold})`;
+        } else {
+          alertReason = `latest window savings ${latest.savingsPct.toFixed(2)}% within ${dropThreshold} points of prior mean ${priorMean.toFixed(2)}% — OK`;
+        }
+      }
+      (payload as typeof payload & { alert?: { triggered: boolean; reason: string | null; dropThreshold: number } }).alert = {
+        triggered: alertTriggered,
+        reason: alertReason,
+        dropThreshold,
+      };
+    }
+
     if (fmt === 'json') {
       output.writeln(JSON.stringify(payload, null, 2));
-      return { success: true, data: payload };
+      return alertTriggered
+        ? { success: false, exitCode: 1, data: payload }
+        : { success: true, data: payload };
     }
 
     output.writeln();
@@ -2880,7 +2918,18 @@ const routerCostSavingsCommand: Command = {
       output.writeln(output.dim('    deltas suggest router degradation, workload shift, or calibration drift.'));
       output.writeln('');
     }
-    return { success: true, data: payload };
+    // iter 50 — alert footer when --alert-on-drop-pct was used.
+    if (alertReason !== null) {
+      if (alertTriggered) {
+        output.writeln(output.warning(`  ⚠ ALERT: ${alertReason}`));
+      } else {
+        output.writeln(output.dim(`  ${alertReason}`));
+      }
+      output.writeln('');
+    }
+    return alertTriggered
+      ? { success: false, exitCode: 1, data: payload }
+      : { success: true, data: payload };
   },
 };
 
