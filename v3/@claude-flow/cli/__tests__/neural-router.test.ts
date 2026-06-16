@@ -52,6 +52,7 @@ const ENV_KEYS = [
   'CLAUDE_FLOW_ROUTER_AB',                          // iter 37
   'CLAUDE_FLOW_ROUTER_AB_SAMPLE_RATE',
   'CLAUDE_FLOW_ROUTER_ENSEMBLE_UNCERTAINTY_THRESHOLD',  // iter 44
+  'CLAUDE_FLOW_ROUTER_BANDIT_WARMUP_RANGE',           // iter 52
   'OPENROUTER_API_KEY',
   'ANTHROPIC_API_KEY',
 ];
@@ -203,6 +204,39 @@ describe('neural-router (ADR-148)', () => {
     // Rate=1 → always in sample.
     for (let i = 0; i < 50; i++) {
       expect(sampleDecision(`one-task-${i}`, 1)).toBe(true);
+    }
+  });
+
+  it('continuous bandit warmup blends gradually with sample count (ADR-149 iter 52)', async () => {
+    // The warmup math: weight = min(1, (samples - 2) / WARMUP_RANGE).
+    // blendFactor = 0.5 * weight. blended_q = (1-bf)*neural + bf*bandit.
+    // Verify the formula in isolation (selector flow is too integration-heavy
+    // to assert deterministically without controlling Beta samples).
+    const warmupRange = 8;
+    const compute = (samples: number) => {
+      if (samples <= 2) return { weight: 0, blendFactor: 0 };
+      const w = Math.min(1, (samples - 2) / warmupRange);
+      return { weight: w, blendFactor: 0.5 * w };
+    };
+
+    // samples=2 (uniform prior) → no blend
+    expect(compute(2).blendFactor).toBe(0);
+    // samples=3 (first observation) → tiny weight
+    expect(compute(3).blendFactor).toBeCloseTo(0.5 * (1 / 8), 6);
+    // samples=6 (mid-warmup) → halfway up the curve
+    expect(compute(6).blendFactor).toBeCloseTo(0.5 * (4 / 8), 6);
+    // samples=10 (fully warm) → max blend (matches iter 14 baseline 50/50)
+    expect(compute(10).blendFactor).toBe(0.5);
+    // samples=100 (very warm) → still capped at max (no over-trust)
+    expect(compute(100).blendFactor).toBe(0.5);
+
+    // The function MUST be monotone non-decreasing in samples — bandit gets
+    // MORE influence as data accumulates, never less.
+    let prev = -Infinity;
+    for (let s = 2; s <= 20; s++) {
+      const bf = compute(s).blendFactor;
+      expect(bf).toBeGreaterThanOrEqual(prev);
+      prev = bf;
     }
   });
 

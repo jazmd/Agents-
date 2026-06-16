@@ -636,9 +636,22 @@ export async function tryCostOptimalRoute(
               if (!found) return a;
             }
             const samples = alpha + beta;
-            if (samples <= 4) return a; // density guard
+            if (samples <= 2) return a;  // hard floor — uniform prior has no signal
+            // iter 52 — continuous warmup curve. Replaces iter 14's binary
+            // density guard (skip if ≤4, full blend if >4). Smoother handoff:
+            // weight = min(1, (samples - 2) / WARMUP_RANGE) where WARMUP_RANGE
+            // defaults to 8 (configurable via env). At samples=3, weight=0.125
+            // (mostly neural); at samples=10, weight=1.0 (full bandit influence).
+            // The neural prediction still contributes via the (1-w) term, so
+            // we never fully discard it even with abundant bandit data.
+            const warmupRange = Math.max(1, parseFloat(process.env.CLAUDE_FLOW_ROUTER_BANDIT_WARMUP_RANGE ?? '8') || 8);
+            const w = Math.min(1, (samples - 2) / warmupRange);
             const banditScore = sampleBeta(alpha, beta);
-            return { ...a, predictedQuality: 0.5 * a.predictedQuality + 0.5 * banditScore };
+            // Neural-bandit blend: when w=0 (cold), use pure neural; when w=1
+            // (warm), use a 50/50 blend (matches the original iter 14 behavior
+            // for fully-warmed cells, preserving back-compat at the asymptote).
+            const blendFactor = 0.5 * w;  // 0..0.5
+            return { ...a, predictedQuality: (1 - blendFactor) * a.predictedQuality + blendFactor * banditScore };
           });
         }
       } catch { /* best-effort */ }
