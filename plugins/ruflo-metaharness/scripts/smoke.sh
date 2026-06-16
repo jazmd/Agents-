@@ -170,6 +170,22 @@ if (!od.metaharness) { console.error('missing metaharness in optionalDependencie
 if (j.dependencies && j.dependencies.metaharness) { console.error('metaharness leaked into dependencies'); process.exit(1); }
 " 2>/dev/null && ok || bad "ruflo wrapper missing metaharness optionalDep"
 
+step "17h. doctor integration — checkMetaharness in standard health checks (iter 14)"
+F="$ROOT/../../v3/@claude-flow/cli/src/commands/doctor.ts"
+miss=""
+[[ -f "$F" ]] || miss="$miss missing-file"
+# The check function exists, with ADR-150 anchor
+grep -q "async function checkMetaharness" "$F" || miss="$miss no-check-function"
+grep -q "ADR-150" "$F" || miss="$miss no-adr-anchor"
+# Registered in BOTH the allChecks array AND the componentMap
+grep -q "checkMetaharness, // ADR-150" "$F" || miss="$miss not-in-allChecks"
+grep -q "'metaharness': checkMetaharness" "$F" || miss="$miss not-in-componentMap"
+# Help text mentions it
+grep -q "metaharness)" "$F" || miss="$miss not-in-help-text"
+# Graceful: never throws; returns warn (not fail) on missing
+grep -q "status: 'warn'" "$F" || miss="$miss no-graceful-warn"
+[[ -z "$miss" ]] && ok || bad "$miss"
+
 step "17g. parallel-pipeline e2e integration test (ADR-150 — iter 13)"
 F="$ROOT/scripts/test-parallel-pipeline.mjs"
 miss=""

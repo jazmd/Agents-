@@ -552,6 +552,37 @@ async function checkVersionFreshness(): Promise<HealthCheck> {
 }
 
 // Check Claude Code CLI (async with proper env inheritance)
+// ADR-150 — surface MetaHarness availability + harnessFit score in
+// the standard ruflo doctor flow. Graceful degradation: when metaharness
+// is not installed (no network, optionalDep skipped), the check returns
+// `warn` with a hint instead of `fail` — ruflo continues to function.
+async function checkMetaharness(): Promise<HealthCheck> {
+  try {
+    const version = await runCommand('npx -y metaharness@latest --version 2>&1', 15000);
+    // metaharness emits multi-line stdout; parse a version-shaped line.
+    const versionMatch = version.match(/(\d+\.\d+\.\d+)/);
+    if (!versionMatch) {
+      return {
+        name: 'MetaHarness (ADR-150)',
+        status: 'warn',
+        message: 'Installed but version-string not parseable; integration may still work',
+      };
+    }
+    return {
+      name: 'MetaHarness (ADR-150)',
+      status: 'pass',
+      message: `v${versionMatch[1]} — run \`npx ruflo metaharness score\` for the full scorecard`,
+    };
+  } catch {
+    return {
+      name: 'MetaHarness (ADR-150)',
+      status: 'warn',
+      message: 'Not installed — `npx ruflo metaharness *` commands will degrade gracefully',
+      fix: 'npm install --include=optional  # to enable the metaharness optional dep',
+    };
+  }
+}
+
 async function checkClaudeCode(): Promise<HealthCheck> {
   try {
     const version = await runCommand('claude --version');
@@ -741,7 +772,7 @@ export const doctorCommand: Command = {
     {
       name: 'component',
       short: 'c',
-      description: 'Check specific component (version, node, npm, config, daemon, memory, api, git, mcp, claude, disk, typescript)',
+      description: 'Check specific component (version, node, npm, config, daemon, memory, api, git, mcp, claude, disk, typescript, agentic-flow, encryption, federation, metaharness)',
       type: 'string'
     },
     {
@@ -789,6 +820,7 @@ export const doctorCommand: Command = {
       checkAgenticFlow,
       checkEncryptionAtRest, // ADR-096 Phase 5
       checkFederationBreaker, // ADR-097 Phase 4
+      checkMetaharness, // ADR-150 — MetaHarness optional integration
     ];
 
     const componentMap: Record<string, () => Promise<HealthCheck>> = {
@@ -809,6 +841,7 @@ export const doctorCommand: Command = {
       'agentic-flow': checkAgenticFlow,
       'encryption': checkEncryptionAtRest, // ADR-096 Phase 5
       'federation': checkFederationBreaker, // ADR-097 Phase 4
+      'metaharness': checkMetaharness, // ADR-150 — MetaHarness optional integration
     };
 
     let checksToRun = allChecks;
