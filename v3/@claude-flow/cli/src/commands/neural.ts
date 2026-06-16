@@ -2519,10 +2519,209 @@ const routerDecideCommand: Command = {
   },
 };
 
+// ADR-149 iter 32 — counterfactual cost-savings analysis. Iter 31 added
+// cost_usd to outcome rows; this subcommand consumes that and asks "what
+// would each decision have cost on the heuristic-only path?" — surfacing
+// the actual production savings the router delivers.
+const routerCostSavingsCommand: Command = {
+  name: 'cost-savings',
+  description: 'Compute actual vs heuristic-counterfactual cost from paired decision+outcome rows (ADR-149 iter 32)',
+  options: [
+    { name: 'in', short: 'i', type: 'string', description: 'Trajectory JSONL path (default: $CLAUDE_FLOW_ROUTER_TRAJECTORY_PATH or .swarm/...)' },
+    { name: 'since', short: 's', type: 'string', description: 'Time window suffix: 1h, 24h, 7d, 30d' },
+    { name: 'format', short: 'f', type: 'string', description: 'Output format: table, json', default: 'table' },
+    { name: 'top-n', type: 'number', description: 'Show top-N largest individual savings (default 5)', default: '5' },
+  ],
+  examples: [
+    { command: 'claude-flow neural router cost-savings', description: 'All-time actual vs counterfactual spend' },
+    { command: 'claude-flow neural router cost-savings --since 7d', description: 'Last 7 days only' },
+    { command: 'claude-flow neural router cost-savings --format json | jq .savings.totalUsd', description: 'Headline savings number for dashboards' },
+  ],
+  action: async (ctx: CommandContext): Promise<CommandResult> => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const { MODEL_PRICES } = await import('../ruvector/model-prices.js');
+
+    const inPath = (ctx.flags.in as string | undefined)
+      ?? process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY_PATH
+      ?? path.resolve(process.cwd(), '.swarm', 'model-router-trajectories.jsonl');
+    const since = ctx.flags.since as string | undefined;
+    const fmt = (ctx.flags.format as string) || 'table';
+    const topN = parseInt((ctx.flags['top-n'] ?? ctx.flags.topN) as string || '5', 10) || 5;
+
+    if (!fs.existsSync(inPath)) {
+      const msg = `Trajectory file not found at ${inPath}`;
+      if (fmt === 'json') {
+        output.writeln(JSON.stringify({ error: msg }, null, 2));
+      } else {
+        output.printError(msg);
+      }
+      return { success: false, exitCode: 1 };
+    }
+
+    interface DecisionRow {
+      type: 'decision'; ts: string; task_hash: string; task?: string;
+      model: string; complexity: number; openrouter_model?: string;
+      ab_pair?: { bandit_pick: string; hybrid_pick: string; disagree: boolean };
+    }
+    interface OutcomeRow {
+      type: 'outcome'; ts: string; task_hash: string;
+      cost_usd?: number; tokens?: { input: number; output: number }; model_id?: string;
+    }
+
+    const decisions = new Map<string, DecisionRow>();
+    const outcomes = new Map<string, OutcomeRow>();
+    let malformed = 0;
+    for (const l of fs.readFileSync(inPath, 'utf8').split('\n')) {
+      if (!l.trim()) continue;
+      try {
+        const r = JSON.parse(l);
+        if (r.type === 'decision') decisions.set(r.task_hash, r);
+        else if (r.type === 'outcome') outcomes.set(r.task_hash, r);
+      } catch { malformed++; }
+    }
+
+    // Time-window filter (on the OUTCOME ts, since that's when cost was incurred).
+    let cutoffMs: number | null = null;
+    if (since) {
+      const m = since.match(/^(\d+)([hdmw])$/);
+      if (m) {
+        const n = parseInt(m[1], 10);
+        const unitMs = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 7 * 86_400_000 }[m[2]] ?? 0;
+        cutoffMs = Date.now() - n * unitMs;
+      }
+    }
+
+    // For each outcome with cost_usd, compute the counterfactual cost.
+    interface PerCallSavings {
+      task_hash: string; ts: string;
+      actualModel: string; actualCost: number;
+      counterfactualModel: string; counterfactualCost: number;
+      savings: number; tokens: { input: number; output: number };
+      complexity: number; tier: 'cheap' | 'mid' | 'strong';
+    }
+    const perCall: PerCallSavings[] = [];
+    let droppedNoOutcomeCost = 0;
+    let droppedNoDecision = 0;
+    let droppedNoTokens = 0;
+
+    for (const [hash, out] of outcomes) {
+      if (cutoffMs !== null && Date.parse(out.ts) < cutoffMs) continue;
+      if (out.cost_usd == null) { droppedNoOutcomeCost++; continue; }
+      const dec = decisions.get(hash);
+      if (!dec) { droppedNoDecision++; continue; }
+      if (!out.tokens) { droppedNoTokens++; continue; }
+
+      // Counterfactual selection: prefer ab_pair.bandit_pick (exact heuristic
+      // pick recorded at decision time), else fall back to tier-by-complexity.
+      const tierByComplexity = dec.complexity < 0.34 ? 'haiku'
+        : dec.complexity < 0.67 ? 'sonnet' : 'opus';
+      const counterfactualModel = dec.ab_pair?.bandit_pick ?? tierByComplexity;
+      const p = MODEL_PRICES[counterfactualModel] ?? { in: 1, out: 1 };
+      const counterfactualCost = (out.tokens.input * p.in + out.tokens.output * p.out) / 1_000_000;
+      const actualCost = out.cost_usd;
+      const actualModel = out.model_id ?? dec.openrouter_model ?? dec.model;
+      const tier = dec.complexity < 0.34 ? 'cheap' : dec.complexity < 0.67 ? 'mid' : 'strong';
+
+      perCall.push({
+        task_hash: hash, ts: out.ts,
+        actualModel, actualCost,
+        counterfactualModel, counterfactualCost,
+        savings: counterfactualCost - actualCost,
+        tokens: out.tokens,
+        complexity: dec.complexity, tier,
+      });
+    }
+
+    const totalActual = perCall.reduce((s, p) => s + p.actualCost, 0);
+    const totalCounterfactual = perCall.reduce((s, p) => s + p.counterfactualCost, 0);
+    const totalSavings = totalCounterfactual - totalActual;
+    const savingsPct = totalCounterfactual > 0 ? (totalSavings / totalCounterfactual) * 100 : 0;
+
+    const byTier: Record<string, { actual: number; counterfactual: number; n: number }> = {
+      cheap: { actual: 0, counterfactual: 0, n: 0 },
+      mid: { actual: 0, counterfactual: 0, n: 0 },
+      strong: { actual: 0, counterfactual: 0, n: 0 },
+    };
+    for (const c of perCall) {
+      byTier[c.tier].actual += c.actualCost;
+      byTier[c.tier].counterfactual += c.counterfactualCost;
+      byTier[c.tier].n += 1;
+    }
+
+    const topSavings = [...perCall].sort((a, b) => b.savings - a.savings).slice(0, topN);
+
+    const payload = {
+      input: inPath,
+      filters: { since },
+      pairs: perCall.length,
+      dropped: { noOutcomeCost: droppedNoOutcomeCost, noDecision: droppedNoDecision, noTokens: droppedNoTokens },
+      savings: {
+        totalUsd: Math.round(totalSavings * 1000000) / 1000000,
+        savingsPct: Math.round(savingsPct * 100) / 100,
+        actualUsd: Math.round(totalActual * 1000000) / 1000000,
+        counterfactualUsd: Math.round(totalCounterfactual * 1000000) / 1000000,
+      },
+      byTier: Object.fromEntries(Object.entries(byTier).map(([k, v]) => [k, {
+        n: v.n,
+        actualUsd: Math.round(v.actual * 1000000) / 1000000,
+        counterfactualUsd: Math.round(v.counterfactual * 1000000) / 1000000,
+        savingsUsd: Math.round((v.counterfactual - v.actual) * 1000000) / 1000000,
+        savingsPct: v.counterfactual > 0 ? Math.round(((v.counterfactual - v.actual) / v.counterfactual) * 10000) / 100 : 0,
+      }])),
+      topSavings: topSavings.map(t => ({
+        ts: t.ts, actualModel: t.actualModel, counterfactualModel: t.counterfactualModel,
+        actualUsd: Math.round(t.actualCost * 1000000) / 1000000,
+        counterfactualUsd: Math.round(t.counterfactualCost * 1000000) / 1000000,
+        savingsUsd: Math.round(t.savings * 1000000) / 1000000,
+      })),
+    };
+
+    if (fmt === 'json') {
+      output.writeln(JSON.stringify(payload, null, 2));
+      return { success: true, data: payload };
+    }
+
+    output.writeln();
+    output.writeln(output.bold('Cost-savings analysis (ADR-149 iter 32)'));
+    output.writeln(output.dim('─'.repeat(72)));
+    output.writeln(`  Input:           ${inPath}`);
+    if (since) output.writeln(`  Time window:     since ${since}`);
+    output.writeln(`  Paired calls:    ${perCall.length}  (dropped: no-cost=${droppedNoOutcomeCost}, no-decision=${droppedNoDecision}, no-tokens=${droppedNoTokens})`);
+    output.writeln('');
+    if (perCall.length === 0) {
+      output.writeln(output.dim('  No cost-bearing paired rows. Enable trajectory recording AND make sure'));
+      output.writeln(output.dim('  outcome rows include `tokens` (iter 31 wired this through agent-execute-core).'));
+      output.writeln('');
+      return { success: true, data: payload };
+    }
+    output.writeln(output.bold('  Headline:'));
+    output.writeln(`    Actual spend:           $${totalActual.toFixed(6)}`);
+    output.writeln(`    Counterfactual spend:   $${totalCounterfactual.toFixed(6)}  (heuristic: cheap→haiku, mid→sonnet, strong→opus)`);
+    output.writeln(`    Savings:                ${totalSavings >= 0 ? output.success('$' + totalSavings.toFixed(6)) : output.warning('-$' + Math.abs(totalSavings).toFixed(6))}  (${savingsPct.toFixed(2)}% of counterfactual)`);
+    output.writeln('');
+    output.writeln(output.bold('  By tier:'));
+    output.writeln('    tier      n   actual          counterfactual  savings         %');
+    for (const [k, v] of Object.entries(payload.byTier)) {
+      output.writeln(`    ${k.padEnd(8)}  ${String(v.n).padStart(3)}  $${v.actualUsd.toFixed(6).padEnd(14)} $${v.counterfactualUsd.toFixed(6).padEnd(14)} $${v.savingsUsd.toFixed(6).padEnd(14)} ${v.savingsPct.toString().padStart(6)}%`);
+    }
+    output.writeln('');
+    if (topSavings.length > 0) {
+      output.writeln(output.bold(`  Top ${topSavings.length} largest individual savings:`));
+      output.writeln('    ts                  actual                                    → counterfactual                           saved');
+      for (const t of topSavings) {
+        output.writeln(`    ${t.ts.slice(0, 19)}  ${t.actualModel.padEnd(40)} → ${t.counterfactualModel.padEnd(40)}  $${t.savings.toFixed(6)}`);
+      }
+      output.writeln('');
+    }
+    return { success: true, data: payload };
+  },
+};
+
 const routerCommand: Command = {
   name: 'router',
-  description: 'Cost-optimal neural router lifecycle (ADR-148/149): status, models, train, train-from-trajectories, decide, decisions, reload',
-  subcommands: [routerStatusCommand, routerModelsCommand, routerTrainCommand, routerTrainFromTrajectoriesCommand, routerDecideCommand, routerDecisionsCommand, routerReloadCommand],
+  description: 'Cost-optimal neural router lifecycle (ADR-148/149): status, models, train, train-from-trajectories, decide, decisions, cost-savings, reload',
+  subcommands: [routerStatusCommand, routerModelsCommand, routerTrainCommand, routerTrainFromTrajectoriesCommand, routerDecideCommand, routerDecisionsCommand, routerCostSavingsCommand, routerReloadCommand],
   examples: [
     { command: 'claude-flow neural router status', description: 'Show router state, gate, counters' },
     { command: 'claude-flow neural router models', description: 'List candidate registry with measured stats (ADR-149)' },
@@ -2530,10 +2729,11 @@ const routerCommand: Command = {
     { command: 'claude-flow neural router train-from-trajectories -w production-rows.json', description: 'Pair production JSONL into a training corpus (iter 18)' },
     { command: 'claude-flow neural router decide "fix typo in cache.ts"', description: 'Inspect decision for a hypothetical task (iter 30)' },
     { command: 'claude-flow neural router decisions --since 24h', description: 'Query recorded decisions (iter 28)' },
+    { command: 'claude-flow neural router cost-savings --since 7d', description: 'Actual vs heuristic-counterfactual spend (iter 32)' },
     { command: 'claude-flow neural router reload', description: 'Clear in-process backend cache' },
   ],
   action: async (): Promise<CommandResult> => {
-    output.writeln('Use a subcommand: status | models | train | train-from-trajectories | decide | decisions | reload');
+    output.writeln('Use a subcommand: status | models | train | train-from-trajectories | decide | decisions | cost-savings | reload');
     return { success: true };
   },
 };
