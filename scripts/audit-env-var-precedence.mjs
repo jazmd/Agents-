@@ -56,6 +56,11 @@ const KNOWN_ESCAPE_HATCHES = new Set([
   'RUFLO_HOOK_SKIP_NPX',          // CI: suppress cold-install latency in smoke tests
   'RUFLO_SUBLINEAR_NATIVE',       // Manual override for native vs WASM sublinear — CI/perf knob
 
+  // ── Neural router opt-in gates (#2334 Phase 1) — feature flags, not user config ──
+  'CLAUDE_FLOW_ROUTER_NEURAL',     // gate: enable cost-optimal neural routing advice (default off)
+  'CLAUDE_FLOW_ROUTER_MODEL_PATH', // path to the operator-provided routing artifact
+  'CLAUDE_FLOW_ROUTER_TRAJECTORY', // gate: opt-in DRACO trajectory collection (default off)
+
   // ── Feature flags (set by init into settings.json, not user-typed CLI) ──────
   'CLAUDE_FLOW_V3_ENABLED',
   'CLAUDE_FLOW_HOOKS_ENABLED',

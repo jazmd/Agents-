@@ -34,6 +34,11 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
+// #2334 Phase 1: opt-in cost-optimal neural routing seam. All three modules are
+// no-ops on the default path (gates default OFF) — see neural-router.ts.
+import { neuralRoutingEnabled, tryCostOptimalRoute, type RoutedBy } from './neural-router.js';
+import { tryTaskEmbedding, embeddingNeeded } from './router-embedding.js';
+import { recordTrajectoryDecision } from './router-trajectory.js';
 
 // ============================================================================
 // Types & Constants
@@ -140,6 +145,12 @@ export interface ModelRoutingResult {
   inferenceTimeUs: number;
   /** Estimated cost multiplier */
   costMultiplier: number;
+  /**
+   * Observable provenance of this decision (#2334, ADR-074/086). `'heuristic'`
+   * on the default path; `'metaharness-*'` when the opt-in neural advisor decided;
+   * `'bandit-fallback'` when neural was enabled but unavailable/declined.
+   */
+  routedBy?: RoutedBy;
 }
 
 /**
@@ -395,7 +406,19 @@ export class ModelRouter {
   async route(task: string, embedding?: number[]): Promise<ModelRoutingResult> {
     const startTime = performance.now();
 
-    // Analyze task complexity
+    // #2334 Phase 1: when a gate is open and no embedding was supplied, lazily
+    // acquire a real (onnx, 384-dim) embedding — null otherwise, never fabricated.
+    // On the default path (both gates off) this is skipped.
+    let neuralEmb = embedding;
+    if (neuralEmb === undefined && embeddingNeeded()) {
+      neuralEmb = (await tryTaskEmbedding(task))?.vector;
+    }
+
+    // Analyze task complexity. The lazily-acquired neural embedding is deliberately
+    // NOT fed here — the heuristic+bandit path stays byte-identical whether the gate
+    // is on or off, so a 'bandit-fallback' decision equals the true default bandit.
+    // Only an embedding a caller passed EXPLICITLY feeds the heuristic (pre-#2334
+    // behaviour preserved); the neural embedding feeds only the advisor below.
     const complexity = this.analyzeComplexity(task, embedding);
 
     // Compute base model scores
@@ -404,8 +427,43 @@ export class ModelRouter {
     // Apply circuit breaker adjustments
     const adjustedScores = this.applyCircuitBreaker(scores);
 
-    // Select best model
-    const { model, confidence, uncertainty } = this.selectModel(adjustedScores, complexity.score);
+    // Select best model (heuristic + Thompson bandit — the default AND the fallback)
+    const selection = this.selectModel(adjustedScores, complexity.score);
+    let model = selection.model;
+    let confidence = selection.confidence;
+    let uncertainty = selection.uncertainty;
+
+    // #2334 Phase 1: cost-optimal neural advice. Opt-in; byte-identical when the
+    // gate is off. The bandit decision above stands UNLESS the neural backend
+    // clears its quality bar — then its pick is used and routedBy reflects it.
+    let routedBy: RoutedBy = 'heuristic';
+    let neuralPredictedQuality: number | undefined;
+    let neuralMetBar: boolean | undefined;
+    if (neuralRoutingEnabled()) {
+      const rec = await tryCostOptimalRoute(neuralEmb, {
+        prices: {
+          haiku: MODEL_CAPABILITIES.haiku.costMultiplier,
+          sonnet: MODEL_CAPABILITIES.sonnet.costMultiplier,
+          opus: MODEL_CAPABILITIES.opus.costMultiplier,
+        },
+        knownModels: ['haiku', 'sonnet', 'opus'],
+      });
+      if (rec) {
+        neuralPredictedQuality = rec.predictedQuality;
+        neuralMetBar = rec.metBar;
+      }
+      if (rec && rec.metBar) {
+        // Neural pick stands — make confidence/uncertainty/reasoning coherent with
+        // THIS model's predicted quality, not the bandit's pick for another tier.
+        model = rec.model as ClaudeModel;
+        routedBy = rec.routedBy;
+        confidence = rec.predictedQuality;
+        uncertainty = Math.max(0, Math.min(1, 1 - rec.predictedQuality));
+      } else {
+        // gate on, but neural unavailable/declined → bandit decided (honest)
+        routedBy = 'bandit-fallback';
+      }
+    }
 
     const inferenceTimeUs = (performance.now() - startTime) * 1000;
 
@@ -422,10 +480,24 @@ export class ModelRouter {
         .sort((a, b) => b.score - a.score),
       inferenceTimeUs,
       costMultiplier: MODEL_CAPABILITIES[model].costMultiplier,
+      routedBy,
     };
 
     // Track decision
     this.trackDecision(task, result);
+
+    // #2334 Phase 1: opt-in DRACO trajectory collection (best-effort, never throws).
+    recordTrajectoryDecision({
+      task,
+      model,
+      routedBy,
+      confidence,
+      complexity: complexity.score,
+      embedding: neuralEmb,
+      embeddingSource: neuralEmb ? 'minilm' : undefined,
+      predictedQuality: neuralPredictedQuality,
+      metBar: neuralMetBar,
+    });
 
     return result;
   }

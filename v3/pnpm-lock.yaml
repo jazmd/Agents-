@@ -146,6 +146,9 @@ importers:
       '@claude-flow/security':
         specifier: ^3.0.0-alpha.10
         version: link:../security
+      '@metaharness/router':
+        specifier: 0.3.2
+        version: 0.3.2
       '@ruvector/attention':
         specifier: ^0.1.32
         version: 0.1.32
@@ -1692,6 +1695,18 @@ packages:
   /@leichtgewicht/ip-codec@2.0.5:
     resolution: {integrity: sha512-Vo+PSpZG2/fmgmiNzYK9qWRh8h/CHrwD0mo1h1DzL4yzHNSfWYujGTYsWGreD000gcgmZ7K4Ys6Tx9TxtsKdDw==}
     dev: false
+
+  /@metaharness/router@0.3.2:
+    resolution: {integrity: sha512-LQElU6mUrWd3ffJ5bwoonEIgw7oFQZpwZaehffyl/Pg+iozpRjIBPEXdb4uTOBnKH+yPiTEWKc+h9AiZr9Os9w==}
+    engines: {node: '>=20.0.0'}
+    requiresBuild: true
+    peerDependencies:
+      '@ruvector/tiny-dancer': ^0.1.21
+    peerDependenciesMeta:
+      '@ruvector/tiny-dancer':
+        optional: true
+    dev: false
+    optional: true
 
   /@modelcontextprotocol/sdk@1.25.1(hono@4.12.11)(zod@3.25.76):
     resolution: {integrity: sha512-yO28oVFFC7EBoiKdAn+VqRm+plcfv4v0xp6osG/VsCB0NlPZWi87ajbCZZ8f/RvOFLEu7//rSRmuZZ7lMoe3gQ==}
