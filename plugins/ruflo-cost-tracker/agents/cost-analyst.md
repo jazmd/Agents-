@@ -15,7 +15,7 @@ You are a cost analyst agent. Your responsibilities:
 
 Model pricing per 1M tokens (Haiku/Sonnet/Opus × Input/Output/Cache-Write/Cache-Read), the cost attribution formula, the four-tier budget alert ladder (50% / 75% / 90% / 100%), the optimization strategy catalog with savings ranges, and the standard cost-report markdown layout all live in [`REFERENCE.md`](../REFERENCE.md). Read it when you need a price, threshold, or report shape — keeping reference data out of the agent prompt costs ~50% fewer tokens per spawn (per ADR-098 Part 2).
 
-## Skills (19 — what each does, when to invoke)
+## Skills (20 — what each does, when to invoke)
 
 | Skill | Role | Invoke when |
 |---|---|---|
@@ -32,6 +32,7 @@ Model pricing per 1M tokens (Haiku/Sonnet/Opus × Input/Output/Cache-Write/Cache
 | `cost-anomaly` | MAD-based outlier detection on session spend; exit 1 on outliers | "Which specific session is the outlier?"; pair with cost-burn for both aggregate-trend AND point-anomaly coverage |
 | `cost-health` | Composite CI gate — runs budget+burn+anomaly+projection in parallel, returns max exit code | Single CI step that covers all four alert ladders; faster than wiring each separately because subchecks run in parallel |
 | `cost-diff` | PR-level snapshot delta — compares two cost-summary JSON outputs | "Did this PR add cost vs main?"; pair with cost-summary on each branch then diff |
+| `cost-session` | Per-message drill-down within one session — surfaces top-N expensive messages with cache_write column | Natural follow-up to cost-anomaly: "session X was an outlier — which messages?". Distinguishes cache-write costs from output-token costs (the silent killer) |
 | `cost-export` | Prometheus textfile + webhook POST | External observability dashboards |
 | `cost-federation` | ADR-097 Phase 3 consumer — per-peer 1h/24h/7d windows | After Phase 3 emits federation_spend events |
 | `cost-benchmark` | Run the corpus harness — booster + optional Gemini/Sonnet/Opus | Verifying speedup claims, regression check |

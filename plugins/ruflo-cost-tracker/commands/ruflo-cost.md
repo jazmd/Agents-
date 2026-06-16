@@ -116,6 +116,14 @@ Cost tracking commands:
 6. MAD beats mean+sigma because outliers themselves can't inflate it — robust on n=10. Sessions table labels `high` (over-spending) vs `low` (crash/drop) direction.
 7. Edge cases: n<3 → "insufficient data" exit 0. MAD=0 (half the sessions share exact spend) → explainer exit 0.
 
+**`cost session [--session-id <id>] [--top 20] [--since <iso-ts>] [--format table|json]`** -- Per-message cost breakdown within ONE session. Drill-down companion to cost-anomaly.
+1. Run `node plugins/ruflo-cost-tracker/scripts/session.mjs`
+2. Resolves session jsonl via `--session-id` (scans `~/.claude/projects/*/`) or `--latest` (default)
+3. Lists top-N most expensive messages with full token breakdown (input / output / cache_write / cache_read)
+4. Surfaces p50/p90/p99 message-cost percentiles so operators can judge "is this top message a 2× or 380× outlier?"
+5. Flags the top message as in-session outlier when cost > 2× the p99
+6. The Cache W column is critical: a 569-token output message at $16 looks insane until you see "881898 cache writes" beside it.
+
 **`cost diff --baseline <path> --current <path> [--alert-on-pct N] [--alert-on-usd N] [--format table|json]`** -- Snapshot delta between two cost-summary JSON outputs. PR-level regression detection.
 1. Run `node plugins/ruflo-cost-tracker/scripts/diff.mjs --baseline <path> --current <path>`
 2. Both files must be cost-summary JSON shape (validated: total_cost_usd + sessionCount required)

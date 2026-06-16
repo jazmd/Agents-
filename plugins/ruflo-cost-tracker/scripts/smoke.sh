@@ -8,21 +8,21 @@ step() { printf "→ %s ... " "$1"; }
 ok()   { printf "PASS\n"; PASS=$((PASS+1)); }
 bad()  { printf "FAIL: %s\n" "$1"; FAIL=$((FAIL+1)); }
 
-step "1. plugin.json declares 0.24.0 with new keywords"
+step "1. plugin.json declares 0.25.0 with new keywords"
 v=$(grep -E '"version"' "$ROOT/.claude-plugin/plugin.json" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-if [[ "$v" != "0.24.0" ]]; then
-  bad "expected 0.24.0, got '$v'"
+if [[ "$v" != "0.25.0" ]]; then
+  bad "expected 0.25.0, got '$v'"
 else
   miss=""
-  for k in namespace-routing mcp agentic-flow agent-booster tier1-routing model-routing benchmarking verified telemetry budget projection forecast counterfactual drift-detection trend-alert anomaly-detection outlier-detection health-check composite-gate auto-track stop-hook snapshot-diff pr-regression git-context traceability; do
+  for k in namespace-routing mcp agentic-flow agent-booster tier1-routing model-routing benchmarking verified telemetry budget projection forecast counterfactual drift-detection trend-alert anomaly-detection outlier-detection health-check composite-gate auto-track stop-hook snapshot-diff pr-regression git-context traceability drill-down per-message; do
     grep -q "\"$k\"" "$ROOT/.claude-plugin/plugin.json" || miss="$miss $k"
   done
   [[ -z "$miss" ]] && ok || bad "missing keywords:$miss"
 fi
 
-step "2. all nineteen skills present with valid frontmatter"
+step "2. all twenty skills present with valid frontmatter"
 miss=""
-for s in cost-report cost-optimize cost-booster-route cost-booster-edit cost-compact-context cost-benchmark cost-track cost-budget-check cost-trend cost-conversation cost-export cost-federation cost-summary cost-projection cost-counterfactual cost-burn cost-anomaly cost-health cost-diff; do
+for s in cost-report cost-optimize cost-booster-route cost-booster-edit cost-compact-context cost-benchmark cost-track cost-budget-check cost-trend cost-conversation cost-export cost-federation cost-summary cost-projection cost-counterfactual cost-burn cost-anomaly cost-health cost-diff cost-session; do
   f="$ROOT/skills/$s/SKILL.md"
   [[ -f "$f" ]] || { miss="$miss missing-$s"; continue; }
   for k in 'name:' 'description:' 'allowed-tools:'; do
@@ -487,6 +487,31 @@ grep -q "diff\.mjs" "$F2" || miss="$miss skill-no-script-ref"
 grep -qE "PR.level|snapshot.delta|regression" "$F2" || miss="$miss no-concept"
 grep -q "alert-on-pct" "$F2" || miss="$miss skill-no-pct-flag"
 grep -q '^allowed-tools:[[:space:]]*\*' "$F2" && miss="$miss wildcard"
+[[ -z "$miss" ]] && ok || bad "$miss"
+
+step "39l. cost-session skill + session.mjs (per-message drill-down)"
+F1="$ROOT/scripts/session.mjs"
+F2="$ROOT/skills/cost-session/SKILL.md"
+miss=""
+[[ -x "$F1" ]] || miss="$miss session-not-executable"
+node --check "$F1" 2>/dev/null || miss="$miss syntax-error"
+grep -q "findSessionJsonl" "$F1" || miss="$miss no-resolver"
+grep -q "summarizeMessages" "$F1" || miss="$miss no-aggregator"
+grep -q "cache_creation_input_tokens" "$F1" || miss="$miss no-cache-write-column"
+grep -qE "p50_cost_usd|p99_cost_usd" "$F1" || miss="$miss no-percentile-context"
+grep -q "process.exit(2)" "$F1" || miss="$miss no-config-exit"
+[[ -f "$F2" ]] || miss="$miss skill-missing"
+grep -q "session\.mjs" "$F2" || miss="$miss skill-no-script-ref"
+grep -qE "drill.down|cache_write|per-message" "$F2" || miss="$miss no-concept"
+grep -qE "cache_creation_input_tokens|Cache W" "$F2" || miss="$miss no-cache-write-doc"
+grep -q '^allowed-tools:[[:space:]]*\*' "$F2" && miss="$miss wildcard"
+[[ -z "$miss" ]] && ok || bad "$miss"
+
+step "39m. ruflo-cost.md documents 'cost session' subcommand"
+F="$ROOT/commands/ruflo-cost.md"
+miss=""
+grep -q "cost session" "$F" || miss="$miss subcommand"
+grep -qE "session-id|drill.down|per-message" "$F" || miss="$miss no-concept"
 [[ -z "$miss" ]] && ok || bad "$miss"
 
 step "39k. ruflo-cost.md documents 'cost diff' subcommand"
