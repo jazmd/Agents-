@@ -586,7 +586,10 @@ export class ModelRouter {
     if (embedding && embedding.length > 0 && process.env.CLAUDE_FLOW_ROUTER_NEURAL === '1') {
       try {
         const { tryCostOptimalRoute } = await loadNeuralRouter();
-        const nr = await tryCostOptimalRoute(embedding);
+        // ADR-149 iter 15 — pass the task's complexity bucket through so
+        // the neural-router's per-modelId Thompson (when gated on) can
+        // use the bucket-specific prior instead of marginalising.
+        const nr = await tryCostOptimalRoute(embedding, { complexityBucket: complexityBucket(complexity.score) });
         if (nr) {
           // ADR-149: capture the concrete picked model id (the cost-optimal
           // pick across all candidates, not just within a tier).

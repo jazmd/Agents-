@@ -394,7 +394,10 @@ async function getBackend(): Promise<ResolvedBackend> {
  * @param embedding 384-dim (or matching corpus dim) query embedding
  * @returns NeuralRouteResult on success, or `null` when the path is inactive
  */
-export async function tryCostOptimalRoute(embedding: number[]): Promise<NeuralRouteResult | null> {
+export async function tryCostOptimalRoute(
+  embedding: number[],
+  opts?: { complexityBucket?: 'low' | 'med' | 'high' }
+): Promise<NeuralRouteResult | null> {
   const cfg = getConfig();
   if (!cfg.enabled) return null;
   if (!Array.isArray(embedding) || embedding.length === 0) return null;
@@ -448,29 +451,37 @@ export async function tryCostOptimalRoute(embedding: number[]): Promise<NeuralRo
       try {
         const { getModelRouterPriorsById, sampleBeta } = await import('./model-router.js');
         const priorsById = getModelRouterPriorsById();
-        // We don't have task text here, so we can't compute the exact
-        // complexity bucket the outcomes accumulated in. Aggregate ACROSS
-        // all three buckets for the modelId — that's a marginal prior
-        // ("is this model good in general?"). A future iter passes the
-        // bucket through tryCostOptimalRoute for bucket-aware adjustment.
+        const bucket = opts?.complexityBucket;   // ADR-149 iter 15
         if (priorsById) {
           all = allRaw.map(a => {
-            let alpha = 1, beta = 1, found = false;
-            for (const b of ['low', 'med', 'high'] as const) {
-              const p = priorsById[b]?.[a.id];
-              if (p) {
-                alpha += p.alpha - 1;   // subtract the Beta(1,1) base from each bucket
-                beta += p.beta - 1;
-                found = true;
+            let alpha: number, beta: number;
+            if (bucket && priorsById[bucket]?.[a.id]) {
+              // Bucket-aware (iter 15) — use the prior for the EXACT
+              // complexity bucket the task lives in. Sharper signal than
+              // the marginal because it isolates "is this model good for
+              // THIS kind of task" from "is this model good in general".
+              const p = priorsById[bucket][a.id];
+              alpha = p.alpha;
+              beta = p.beta;
+            } else {
+              // Marginal fallback (iter 14) — sum the per-bucket priors
+              // for this modelId. Used when the caller doesn't supply a
+              // bucket OR when no bucket-specific prior exists yet.
+              alpha = 1; beta = 1;
+              let found = false;
+              for (const b of ['low', 'med', 'high'] as const) {
+                const p = priorsById[b]?.[a.id];
+                if (p) {
+                  alpha += p.alpha - 1;
+                  beta += p.beta - 1;
+                  found = true;
+                }
               }
+              if (!found) return a;
             }
-            if (!found) return a;
             const samples = alpha + beta;
-            if (samples <= 4) return a; // density guard: need ≥2 effective outcomes
+            if (samples <= 4) return a; // density guard
             const banditScore = sampleBeta(alpha, beta);
-            // Blend: 50% predicted quality, 50% bandit-sampled belief.
-            // Keeps cold-start neural prediction dominant; once outcomes
-            // accumulate the bandit's belief gets equal weight.
             return { ...a, predictedQuality: 0.5 * a.predictedQuality + 0.5 * banditScore };
           });
         }
