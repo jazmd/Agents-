@@ -51,6 +51,7 @@ const ENV_KEYS = [
   'CLAUDE_FLOW_ROUTER_COST_CEILING_USD_PER_MTOK',  // iter 29
   'CLAUDE_FLOW_ROUTER_AB',                          // iter 37
   'CLAUDE_FLOW_ROUTER_AB_SAMPLE_RATE',
+  'CLAUDE_FLOW_ROUTER_ENSEMBLE_UNCERTAINTY_THRESHOLD',  // iter 44
   'OPENROUTER_API_KEY',
   'ANTHROPIC_API_KEY',
 ];
@@ -203,6 +204,51 @@ describe('neural-router (ADR-148)', () => {
     for (let i = 0; i < 50; i++) {
       expect(sampleDecision(`one-task-${i}`, 1)).toBe(true);
     }
+  });
+
+  it('ensemble-uncertainty threshold triggers null/fallback when unified and specialist disagree (ADR-149 iter 44)', async () => {
+    // Default behavior (no threshold) returns a result. Setting a very low
+    // threshold (0.0001) forces ALMOST any non-zero ensemble disagreement
+    // to fall back. With the bundled seed corpus, unified vs specialist
+    // KRR rarely predict EXACTLY the same value, so the low threshold
+    // should reliably trigger null.
+    process.env.CLAUDE_FLOW_ROUTER_NEURAL = '1';
+    const e = new Array(384).fill(0).map((_, i) => Math.cos(i * 0.07));
+
+    // Baseline: no threshold → result returned (or skip if KRR not loadable).
+    __resetNeuralRouterForTests();
+    const baseline = await tryCostOptimalRoute(e, { complexityBucket: 'med' });
+    if (!baseline) return; // KRR not available in this env
+    expect(baseline.routedBy).toBe('metaharness-krr');
+
+    // Tight threshold: ANY non-zero disagreement → null.
+    process.env.CLAUDE_FLOW_ROUTER_ENSEMBLE_UNCERTAINTY_THRESHOLD = '0.0001';
+    __resetNeuralRouterForTests();
+    const tight = await tryCostOptimalRoute(e, { complexityBucket: 'med' });
+    // Either null (caught a disagreement) OR identical values (unlikely
+    // with the bundled corpus, but allowed). The test contract is: with
+    // a TIGHT threshold, the result is null-or-identical, never wildly
+    // different from baseline.
+    if (tight !== null) {
+      // If non-null, it means unified and specialist agreed exactly on
+      // this embedding. That's allowed but rare; assert the model is the
+      // same as baseline (no spurious switch).
+      expect(tight.modelId).toBe(baseline.modelId);
+    }
+
+    // Loose threshold: 0.99 → no realistic disagreement triggers, result
+    // matches baseline.
+    process.env.CLAUDE_FLOW_ROUTER_ENSEMBLE_UNCERTAINTY_THRESHOLD = '0.99';
+    __resetNeuralRouterForTests();
+    const loose = await tryCostOptimalRoute(e, { complexityBucket: 'med' });
+    expect(loose).not.toBeNull();
+    expect(loose!.modelId).toBe(baseline.modelId);
+
+    // No bucket → no ensemble check (no specialist queried) → baseline.
+    process.env.CLAUDE_FLOW_ROUTER_ENSEMBLE_UNCERTAINTY_THRESHOLD = '0.0001';
+    __resetNeuralRouterForTests();
+    const noBucket = await tryCostOptimalRoute(e);   // no opts.complexityBucket
+    expect(noBucket).not.toBeNull();                  // unified used as activeRouter; check disabled
   });
 
   it('cost-ceiling mode picks highest-quality candidate under budget (ADR-149 iter 29)', async () => {

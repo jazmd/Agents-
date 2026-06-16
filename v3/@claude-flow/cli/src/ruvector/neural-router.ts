@@ -102,6 +102,19 @@ interface NeuralRouterConfig {
    * 0 (disabled) preserves iter 0-28 cost-optimal-above-bar semantics.
    */
   costCeilingPerMTok: number;
+  /**
+   * ADR-149 iter 44 — ensemble-uncertainty-aware fallback. When > 0, the
+   * selector queries BOTH the unified KRR and the bucket specialist for
+   * the same query, then computes |unified_q - specialist_q| for the
+   * picked model. If the disagreement exceeds this threshold, returns null
+   * so the caller falls back to the bandit — same path as a 429/5xx API
+   * error today, but triggered by prediction uncertainty instead.
+   *
+   * Typical values: 0.10 (mild — only the most uncertain predictions
+   * fall back), 0.20 (aggressive — any meaningful ensemble disagreement
+   * triggers fallback). 0 disables (default — preserves iter 0-43 behavior).
+   */
+  ensembleUncertaintyThreshold: number;
 }
 
 // ============================================================================
@@ -258,6 +271,8 @@ function getConfig(): NeuralRouterConfig {
     //   $20   → exclude Sonnet ($48 blended) and Opus ($240)
     //   $50   → exclude Opus only
     costCeilingPerMTok: Math.max(0, parseFloat(process.env.CLAUDE_FLOW_ROUTER_COST_CEILING_USD_PER_MTOK ?? '0') || 0),
+    // iter 44 — ensemble disagreement threshold; 0 disables.
+    ensembleUncertaintyThreshold: Math.max(0, parseFloat(process.env.CLAUDE_FLOW_ROUTER_ENSEMBLE_UNCERTAINTY_THRESHOLD ?? '0') || 0),
     calibratorPath: process.env.CLAUDE_FLOW_ROUTER_CALIBRATOR_PATH
       ?? join(assetsDir, 'seed-router.calibrator.json'),
   };
@@ -674,6 +689,29 @@ export async function tryCostOptimalRoute(
           costPerMTok: pick.costPerMTok,
           metBar: pick.predictedQuality >= cfg.qualityBar,
         };
+      }
+    }
+
+    // ADR-149 iter 44 — ensemble-uncertainty-aware fallback. If both the
+    // unified router and a bucket specialist are loaded AND the threshold
+    // is configured, compare the picked model's predicted quality across
+    // both. Large disagreement → the prediction is uncertain → return null
+    // so the caller falls back to the pure bandit path (same as the 429/5xx
+    // error path — uncertainty IS a kind of soft failure).
+    if (
+      cfg.ensembleUncertaintyThreshold > 0
+      && opts?.complexityBucket
+      && backend.routerByBucket?.[opts.complexityBucket]
+      && backend.router
+      && activeRouter !== backend.router            // we used the specialist; cross-check vs unified
+    ) {
+      const unifiedAlts = backend.router.predictAll(embedding);
+      const specialistQ = main.predictedQuality;
+      const unifiedQ = unifiedAlts.find(a => a.id === main.id)?.predictedQuality ?? specialistQ;
+      const disagreement = Math.abs(unifiedQ - specialistQ);
+      if (disagreement > cfg.ensembleUncertaintyThreshold) {
+        // Caller's bandit-fallback engages — same return path as 429/5xx.
+        return null;
       }
     }
 
