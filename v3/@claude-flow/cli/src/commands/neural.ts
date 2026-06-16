@@ -2175,6 +2175,7 @@ const routerDecisionsCommand: Command = {
     { name: 'routed-by', type: 'string', description: 'Filter by decision mechanism: hybrid | bandit-fallback | heuristic' },
     { name: 'model', short: 'm', type: 'string', description: 'Filter by chosen model id (substring match, e.g. haiku, gpt-4)' },
     { name: 'bucket', type: 'string', description: 'Filter by complexity bucket: cheap (< 0.34) | mid (< 0.67) | strong (≥ 0.67) — iter 58' },
+    { name: 'task-hash', type: 'string', description: 'Filter by exact task_hash (FNV-1a-32). Use for incident investigation — iter 59' },
     { name: 'limit', short: 'l', type: 'number', description: 'Max recent decisions to list (default 20)', default: '20' },
     { name: 'format', short: 'f', type: 'string', description: 'Output format: table, json', default: 'table' },
   ],
@@ -2200,6 +2201,13 @@ const routerDecisionsCommand: Command = {
         ? bucketFilterRaw : undefined;
     if (bucketFilterRaw && !bucketFilter) {
       output.printError(`--bucket must be one of: cheap | mid | strong (got "${bucketFilterRaw}")`);
+      return { success: false, exitCode: 1 };
+    }
+    // iter 59 — task_hash filter for incident investigation. Accepts the 8-char
+    // FNV-1a-32 hex format the trajectory recorder uses.
+    const taskHashFilter = ((ctx.flags['task-hash'] ?? ctx.flags.taskHash) as string | undefined)?.toLowerCase();
+    if (taskHashFilter && !/^[0-9a-f]{8}$/.test(taskHashFilter)) {
+      output.printError(`--task-hash must be an 8-char hex string (got "${taskHashFilter}")`);
       return { success: false, exitCode: 1 };
     }
     const limit = parseInt(ctx.flags.limit as string || '20', 10) || 20;
@@ -2269,6 +2277,9 @@ const routerDecisionsCommand: Command = {
         return bucket === bucketFilter;
       });
     }
+    if (taskHashFilter) {
+      filtered = filtered.filter(d => d.task_hash === taskHashFilter);
+    }
     if (modelFilter) {
       const needle = modelFilter.toLowerCase();
       filtered = filtered.filter(d => {
@@ -2317,7 +2328,7 @@ const routerDecisionsCommand: Command = {
       decisionRows: decisions.length,
       malformed,
       filtered: filtered.length,
-      filters: { since, routedBy: routedByFilter, model: modelFilter, bucket: bucketFilter },
+      filters: { since, routedBy: routedByFilter, model: modelFilter, bucket: bucketFilter, taskHash: taskHashFilter },
       aggregates: {
         byRoutedBy, byModel, byTier,
         fallbackRatePct: Math.round(fallbackRate * 100) / 100,
@@ -2344,8 +2355,8 @@ const routerDecisionsCommand: Command = {
     output.writeln(output.dim('─'.repeat(72)));
     output.writeln(`  Input:           ${inPath}`);
     output.writeln(`  JSONL rows:      ${lines.length}  (${decisions.length} decision, ${malformed} malformed)`);
-    if (since || routedByFilter || modelFilter || bucketFilter) {
-      output.writeln(`  Filters:         ${[since && `since=${since}`, routedByFilter && `routed-by=${routedByFilter}`, modelFilter && `model~${modelFilter}`, bucketFilter && `bucket=${bucketFilter}`].filter(Boolean).join(', ')}`);
+    if (since || routedByFilter || modelFilter || bucketFilter || taskHashFilter) {
+      output.writeln(`  Filters:         ${[since && `since=${since}`, routedByFilter && `routed-by=${routedByFilter}`, modelFilter && `model~${modelFilter}`, bucketFilter && `bucket=${bucketFilter}`, taskHashFilter && `task_hash=${taskHashFilter}`].filter(Boolean).join(', ')}`);
     }
     output.writeln(`  After filters:   ${filtered.length}`);
     output.writeln('');
@@ -2390,6 +2401,39 @@ const routerDecisionsCommand: Command = {
         output.writeln(`      ${k.padEnd(8)}  $${v.toFixed(4)}`);
       }
       output.writeln('');
+    }
+    // iter 59 — incident detail mode. When --task-hash is set, render each
+    // matching decision with FULL task text, paired outcome, complexity,
+    // ab_pair, ensemble_disagreement. Operators investigating "why was
+    // THIS task routed to X?" want maximum context per decision.
+    if (taskHashFilter && filtered.length > 0) {
+      output.writeln(output.bold(`  Incident detail for task_hash=${taskHashFilter} (${filtered.length} occurrence(s)):`));
+      for (const d of filtered) {
+        const out = outcomesByHash.get(d.task_hash);
+        const bucket = d.complexity < 0.34 ? 'cheap' : d.complexity < 0.67 ? 'mid' : 'strong';
+        output.writeln('');
+        output.writeln(`    ts:                  ${d.ts}`);
+        output.writeln(`    task:                "${(d as unknown as { task?: string }).task ?? '<task text not stored>'}"`);
+        output.writeln(`    complexity:          ${d.complexity.toFixed(3)} (bucket: ${bucket})`);
+        output.writeln(`    picked model:        ${d.openrouter_model ?? d.model}`);
+        output.writeln(`    routed_by:           ${d.routed_by}${(d as unknown as { neural_backend?: string }).neural_backend ? `  via ${(d as unknown as { neural_backend: string }).neural_backend}` : ''}`);
+        output.writeln(`    confidence:          ${d.confidence.toFixed(3)}   uncertainty: ${d.uncertainty.toFixed(3)}`);
+        const apd = (d as unknown as { ab_pair?: { bandit_pick: string; hybrid_pick: string; disagree: boolean } }).ab_pair;
+        if (apd) {
+          output.writeln(`    ab_pair:             bandit=${apd.bandit_pick}  hybrid=${apd.hybrid_pick}  disagree=${apd.disagree}`);
+        }
+        const ed = (d as unknown as { ensemble_disagreement?: number }).ensemble_disagreement;
+        if (typeof ed === 'number') {
+          output.writeln(`    ensemble disagree:   ${ed.toFixed(4)}`);
+        }
+        if (out) {
+          output.writeln(`    outcome:             quality=${out.quality ?? '—'}  cost_usd=${out.cost_usd != null ? '$' + out.cost_usd.toFixed(6) : '—'}  source=${(out as unknown as { source?: string }).source ?? '—'}`);
+        } else {
+          output.writeln(`    outcome:             ${output.warning('(no paired outcome row)')}`);
+        }
+      }
+      output.writeln('');
+      return { success: true, data: payload };
     }
     output.writeln(`  ${Math.min(limit, recent.length)} most-recent decisions (newest first):`);
     output.writeln('    ' + 'ts'.padEnd(20) + 'routed_by'.padEnd(18) + 'model'.padEnd(34) + 'conf');
