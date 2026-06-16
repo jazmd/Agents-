@@ -4079,8 +4079,13 @@ const routerCostProjectionCommand: Command = {
       cost_usd?: number; tokens?: { input: number; output: number }; model_id?: string;
     }
 
+    // iter 66 — outcomes now ARRAY (was Map). Same fix as iter 62/63/65:
+    // a Map keyed by task_hash collapses multiple runs of the same task to
+    // the LATEST outcome only, biasing the rate downward (pairCount =
+    // unique-tasks, not unique-calls). Production projections were
+    // systematically too small for any workload with recurring tasks.
     const decisions = new Map<string, DecisionRow>();
-    const outcomes = new Map<string, OutcomeRow>();
+    const outcomes: OutcomeRow[] = [];
     let malformed = 0;
     const cutoffMs = Date.now() - windowMs;
     for (const l of fs.readFileSync(inPath, 'utf8').split('\n')) {
@@ -4089,19 +4094,21 @@ const routerCostProjectionCommand: Command = {
         const r = JSON.parse(l);
         if (Date.parse(r.ts) < cutoffMs) continue;
         if (r.type === 'decision') decisions.set(r.task_hash, r);
-        else if (r.type === 'outcome') outcomes.set(r.task_hash, r);
+        else if (r.type === 'outcome') outcomes.push(r);
       } catch { malformed++; }
     }
 
-    // Pair + compute window totals.
+    // Pair + compute window totals. Iterate OUTCOMES (not deduped decisions);
+    // each outcome row contributes its own cost + tokens to the rate.
     let pairCount = 0;
     let actualUsd = 0;
     let counterfactualUsd = 0;     // heuristic = tier-by-complexity baseline (iter 32 default)
     let totalInputTokens = 0;
     let totalOutputTokens = 0;
-    for (const [hash, dec] of decisions) {
-      const out = outcomes.get(hash);
+    for (const out of outcomes) {
       if (!out?.cost_usd || !out.tokens) continue;
+      const dec = decisions.get(out.task_hash);
+      if (!dec) continue;
       pairCount++;
       actualUsd += out.cost_usd;
       totalInputTokens += out.tokens.input;
