@@ -83,6 +83,14 @@ Cost tracking commands:
 2. Optional `TREND_FORMAT=json` for machine-readable output, `TREND_LIMIT=N` to truncate
 3. Reports: first→last deltas + per-run series + regression flags (win rate drop or ≥1.5× latency rise)
 
+**`cost projection [--window 7d] [--horizons 7d,30d,90d,365d] [--format table|json]`** -- Forward-looking spend extrapolation. Predictive counterpart to `cost budget check` (reactive).
+1. Run `node plugins/ruflo-cost-tracker/scripts/projection.mjs`
+2. Compute USD-per-day from sessions in the measurement window (default last 7d)
+3. Linear-extrapolate to 7d/30d/90d/365d horizons (configurable via `--horizons`)
+4. If `cost budget set` has run: surface "days until 75%/90%/100% consumed" tables
+5. JSON output for dashboards / CI gates (e.g. `jq '.budget.exhaustion[2].daysUntilReached < 7'` to fail builds when 100% exhaustion is < 1 week away)
+6. Env: `PROJECTION_NAMESPACE`, `PROJECTION_QUIET=1`
+
 **`cost benchmark [--llm] [--anthropic]`** -- Run the corpus benchmark to verify booster claims with measured numbers.
 1. Without flags: booster-only (free, ~85 ms wall-time, no API keys needed)
 2. `--llm`: also run Gemini 2.0 Flash baseline (uses GCP `GOOGLE_AI_API_KEY` secret)

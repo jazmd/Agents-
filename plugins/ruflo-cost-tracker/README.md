@@ -30,6 +30,7 @@ claude --plugin-dir plugins/ruflo-cost-tracker
 | `cost-booster-edit` | `/cost-booster-edit <intent> <file>` | **Apply** a Tier 1 transform via `agent-booster.apply()` (sub-millisecond, $0, deterministic) |
 | `cost-benchmark` | `/cost-benchmark [--llm] [--anthropic]` | Run the corpus benchmark and persist measured-vs-claimed table to `docs/benchmarks/runs/` |
 | `cost-trend` | `/cost-trend` | Read all bench runs and surface drift (win rate, latency, speedup) — flags regressions the smoke gate misses |
+| `cost-projection` | `/cost-projection [--window 7d]` | **Forward** spend extrapolation: USD/day rate × 7d/30d/90d/365d horizons + days-until-budget-exhausted (predictive counterpart to `cost-budget-check`) |
 | `cost-conversation` | `/cost-conversation` | Per-conversation cost view (different lens from cost-report's per-agent / per-model) |
 | `cost-export` | `/cost-export [--prometheus <path>] [--webhook <url>]` | Emit cost data as Prometheus textfile or POST to a webhook |
 | `cost-federation` | `/cost-federation` | ADR-097 Phase 3 consumer — per-peer 1h/24h/7d federation_spend rolling windows |
@@ -49,6 +50,7 @@ cost budget get                           # Show current budget config
 cost budget check [--period ...]          # Compute utilization + alert; exit 1 on HARD_STOP
 cost benchmark [--llm] [--anthropic]      # Run measured benchmark — booster + optional Gemini/Sonnet/Opus baselines
 cost trend                                # Drift across bench runs (win rate, latency, regressions)
+cost projection [--window 7d]             # Forward USD/day extrapolation + days-until-budget-exhausted
 cost conversation                         # Per-conversation cost view
 cost summary [--format json|markdown]     # Programmatic JSON contract for inter-plugin consumption
 cost export [--prometheus] [--webhook]    # External observability — Prometheus textfile + webhook POST
