@@ -2407,8 +2407,11 @@ const routerDecisionsCommand: Command = {
     // ab_pair, ensemble_disagreement. Operators investigating "why was
     // THIS task routed to X?" want maximum context per decision.
     if (taskHashFilter && filtered.length > 0) {
-      output.writeln(output.bold(`  Incident detail for task_hash=${taskHashFilter} (${filtered.length} occurrence(s)):`));
-      for (const d of filtered) {
+      // iter 64 — sort occurrences newest-first by ts. JSONL insertion order
+      // may not match chronological order after rotation or out-of-order writes.
+      const incidentSorted = [...filtered].sort((a, b) => b.ts.localeCompare(a.ts));
+      output.writeln(output.bold(`  Incident detail for task_hash=${taskHashFilter} (${filtered.length} occurrence(s), newest first):`));
+      for (const d of incidentSorted) {
         const out = outcomesByHash.get(d.task_hash);
         const bucket = d.complexity < 0.34 ? 'cheap' : d.complexity < 0.67 ? 'mid' : 'strong';
         output.writeln('');
