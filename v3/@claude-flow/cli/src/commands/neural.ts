@@ -2174,6 +2174,7 @@ const routerDecisionsCommand: Command = {
     { name: 'since', short: 's', type: 'string', description: 'Time window suffix: 1h, 24h, 7d, 30d (default: all)' },
     { name: 'routed-by', type: 'string', description: 'Filter by decision mechanism: hybrid | bandit-fallback | heuristic' },
     { name: 'model', short: 'm', type: 'string', description: 'Filter by chosen model id (substring match, e.g. haiku, gpt-4)' },
+    { name: 'bucket', type: 'string', description: 'Filter by complexity bucket: cheap (< 0.34) | mid (< 0.67) | strong (≥ 0.67) — iter 58' },
     { name: 'limit', short: 'l', type: 'number', description: 'Max recent decisions to list (default 20)', default: '20' },
     { name: 'format', short: 'f', type: 'string', description: 'Output format: table, json', default: 'table' },
   ],
@@ -2193,6 +2194,14 @@ const routerDecisionsCommand: Command = {
     const since = ctx.flags.since as string | undefined;
     const routedByFilter = (ctx.flags['routed-by'] ?? ctx.flags.routedBy) as string | undefined;
     const modelFilter = ctx.flags.model as string | undefined;
+    const bucketFilterRaw = (ctx.flags.bucket as string | undefined)?.toLowerCase();
+    const bucketFilter: 'cheap' | 'mid' | 'strong' | undefined =
+      bucketFilterRaw === 'cheap' || bucketFilterRaw === 'mid' || bucketFilterRaw === 'strong'
+        ? bucketFilterRaw : undefined;
+    if (bucketFilterRaw && !bucketFilter) {
+      output.printError(`--bucket must be one of: cheap | mid | strong (got "${bucketFilterRaw}")`);
+      return { success: false, exitCode: 1 };
+    }
     const limit = parseInt(ctx.flags.limit as string || '20', 10) || 20;
     const fmt = (ctx.flags.format as string) || 'table';
 
@@ -2254,6 +2263,12 @@ const routerDecisionsCommand: Command = {
     if (routedByFilter) {
       filtered = filtered.filter(d => d.routed_by === routedByFilter);
     }
+    if (bucketFilter) {
+      filtered = filtered.filter(d => {
+        const bucket = d.complexity < 0.34 ? 'cheap' : d.complexity < 0.67 ? 'mid' : 'strong';
+        return bucket === bucketFilter;
+      });
+    }
     if (modelFilter) {
       const needle = modelFilter.toLowerCase();
       filtered = filtered.filter(d => {
@@ -2302,7 +2317,7 @@ const routerDecisionsCommand: Command = {
       decisionRows: decisions.length,
       malformed,
       filtered: filtered.length,
-      filters: { since, routedBy: routedByFilter, model: modelFilter },
+      filters: { since, routedBy: routedByFilter, model: modelFilter, bucket: bucketFilter },
       aggregates: {
         byRoutedBy, byModel, byTier,
         fallbackRatePct: Math.round(fallbackRate * 100) / 100,
@@ -2329,8 +2344,8 @@ const routerDecisionsCommand: Command = {
     output.writeln(output.dim('─'.repeat(72)));
     output.writeln(`  Input:           ${inPath}`);
     output.writeln(`  JSONL rows:      ${lines.length}  (${decisions.length} decision, ${malformed} malformed)`);
-    if (since || routedByFilter || modelFilter) {
-      output.writeln(`  Filters:         ${[since && `since=${since}`, routedByFilter && `routed-by=${routedByFilter}`, modelFilter && `model~${modelFilter}`].filter(Boolean).join(', ')}`);
+    if (since || routedByFilter || modelFilter || bucketFilter) {
+      output.writeln(`  Filters:         ${[since && `since=${since}`, routedByFilter && `routed-by=${routedByFilter}`, modelFilter && `model~${modelFilter}`, bucketFilter && `bucket=${bucketFilter}`].filter(Boolean).join(', ')}`);
     }
     output.writeln(`  After filters:   ${filtered.length}`);
     output.writeln('');
