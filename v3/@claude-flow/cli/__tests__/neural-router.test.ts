@@ -53,6 +53,7 @@ const ENV_KEYS = [
   'CLAUDE_FLOW_ROUTER_AB_SAMPLE_RATE',
   'CLAUDE_FLOW_ROUTER_ENSEMBLE_UNCERTAINTY_THRESHOLD',  // iter 44
   'CLAUDE_FLOW_ROUTER_BANDIT_WARMUP_RANGE',           // iter 52
+  'CLAUDE_FLOW_ROUTER_BANDIT_FULL_INFLUENCE',         // iter 53
   'OPENROUTER_API_KEY',
   'ANTHROPIC_API_KEY',
 ];
@@ -237,6 +238,37 @@ describe('neural-router (ADR-148)', () => {
       const bf = compute(s).blendFactor;
       expect(bf).toBeGreaterThanOrEqual(prev);
       prev = bf;
+    }
+  });
+
+  it('iter 53 full-influence curve asymptotes to 1.0 as samples grow (ADR-149 iter 53)', async () => {
+    // Verify the alternate curve math: blendFactor = (s-2) / (s + WARMUP).
+    // At s=10 with WARMUP=8: 8/18 ≈ 0.444 (slightly less aggressive than iter 52).
+    // At s=100: 98/108 ≈ 0.907 (bandit dominates).
+    // At s=1000: 998/1008 ≈ 0.990 (effectively pure bandit).
+    // Monotone non-decreasing always.
+    const W = 8;
+    const fullInfluence = (s: number) => (s - 2) / (s + W);
+    const capped       = (s: number) => 0.5 * Math.min(1, (s - 2) / W);
+
+    expect(fullInfluence(3)).toBeCloseTo(1 / 11, 6);     // 0.091 — very modest at first observation
+    expect(fullInfluence(10)).toBeCloseTo(8 / 18, 6);    // 0.444
+    expect(fullInfluence(100)).toBeCloseTo(98 / 108, 4); // 0.907
+    expect(fullInfluence(1000)).toBeCloseTo(998 / 1008, 4); // 0.990
+    expect(fullInfluence(1000)).toBeGreaterThan(0.95);   // dominates at scale
+    expect(fullInfluence(1000)).toBeLessThan(1);         // never quite reaches 1
+
+    // The capped curve plateaus at 0.5 — full-influence overtakes it at s=10.
+    expect(fullInfluence(10)).toBeLessThan(capped(10));
+    expect(fullInfluence(20)).toBeGreaterThan(capped(20));
+    expect(fullInfluence(100)).toBeGreaterThan(capped(100) + 0.4); // huge gap
+
+    // Monotone non-decreasing.
+    let prev = -Infinity;
+    for (let s = 3; s <= 100; s += 5) {
+      const v = fullInfluence(s);
+      expect(v).toBeGreaterThanOrEqual(prev);
+      prev = v;
     }
   });
 
