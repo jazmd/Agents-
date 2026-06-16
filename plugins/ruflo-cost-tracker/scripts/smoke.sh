@@ -8,10 +8,10 @@ step() { printf "→ %s ... " "$1"; }
 ok()   { printf "PASS\n"; PASS=$((PASS+1)); }
 bad()  { printf "FAIL: %s\n" "$1"; FAIL=$((FAIL+1)); }
 
-step "1. plugin.json declares 0.21.0 with new keywords"
+step "1. plugin.json declares 0.21.1 with new keywords"
 v=$(grep -E '"version"' "$ROOT/.claude-plugin/plugin.json" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-if [[ "$v" != "0.21.0" ]]; then
-  bad "expected 0.21.0, got '$v'"
+if [[ "$v" != "0.21.1" ]]; then
+  bad "expected 0.21.1, got '$v'"
 else
   miss=""
   for k in namespace-routing mcp agentic-flow agent-booster tier1-routing model-routing benchmarking verified telemetry budget projection forecast counterfactual drift-detection trend-alert anomaly-detection outlier-detection health-check composite-gate; do
@@ -387,7 +387,9 @@ F2="$ROOT/skills/cost-burn/SKILL.md"
 miss=""
 [[ -x "$F1" ]] || miss="$miss burn-not-executable"
 node --check "$F1" 2>/dev/null || miss="$miss syntax-error"
-grep -q "spawnSync" "$F1" || miss="$miss no-spawnSync"
+# After iter 73 consolidation, scripts can satisfy the "safe shell-out"
+# invariant via the vetted _sessions.mjs helper instead of direct spawnSync.
+grep -qE "spawnSync|_sessions\.mjs" "$F1" || miss="$miss no-safe-exec"
 grep -q "bucket" "$F1" || miss="$miss no-bucket-arg"
 grep -q "lookback" "$F1" || miss="$miss no-lookback-arg"
 grep -q "alert-on-acceleration-pct" "$F1" || miss="$miss no-alert-flag"
@@ -407,7 +409,9 @@ F2="$ROOT/skills/cost-anomaly/SKILL.md"
 miss=""
 [[ -x "$F1" ]] || miss="$miss anomaly-not-executable"
 node --check "$F1" 2>/dev/null || miss="$miss syntax-error"
-grep -q "spawnSync" "$F1" || miss="$miss no-spawnSync"
+# After iter 73 consolidation, scripts can satisfy the "safe shell-out"
+# invariant via the vetted _sessions.mjs helper instead of direct spawnSync.
+grep -qE "spawnSync|_sessions\.mjs" "$F1" || miss="$miss no-safe-exec"
 grep -qE "MAD|median absolute deviation" "$F1" || miss="$miss no-mad-concept"
 grep -qE "0\.6745|Iglewicz" "$F1" || miss="$miss no-modified-z-constant"
 grep -q "alert-on-outliers" "$F1" || miss="$miss no-alert-flag"
@@ -506,6 +510,25 @@ for d in "$ROOT"/skills/*/; do
   grep -qE "\\| \`$name\`" "$F" 2>/dev/null || miss="$miss $name"
 done
 [[ -z "$miss" ]] && ok || bad "README skills table missing:$miss"
+
+step "42b. _sessions.mjs shared loader is the single source of truth"
+F="$ROOT/scripts/_sessions.mjs"
+miss=""
+[[ -f "$F" ]] || miss="$miss missing"
+node --check "$F" 2>/dev/null || miss="$miss syntax-error"
+grep -q "spawnSync" "$F" || miss="$miss no-spawnSync"
+grep -q "memoryListAllKeys" "$F" || miss="$miss no-list-all-export"
+grep -q "memoryListSessionKeys" "$F" || miss="$miss no-list-session-export"
+grep -q "memoryRetrieve" "$F" || miss="$miss no-retrieve-export"
+grep -q "loadSessions" "$F" || miss="$miss no-load-sessions-export"
+grep -q "parseDurationMs" "$F" || miss="$miss no-duration-parser-export"
+grep -q "sessionTs" "$F" || miss="$miss no-session-ts-export"
+# Verify consumers actually use the shared loader (anomaly/burn/projection/counterfactual/conversation/budget/summary)
+consumers="anomaly burn projection counterfactual conversation budget summary"
+for c in $consumers; do
+  grep -q "from './_sessions" "$ROOT/scripts/$c.mjs" 2>/dev/null || miss="$miss $c-not-importing"
+done
+[[ -z "$miss" ]] && ok || bad "$miss"
 
 step "43. every script in scripts/*.mjs parses cleanly"
 miss=""

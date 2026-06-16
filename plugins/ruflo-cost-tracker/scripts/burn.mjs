@@ -33,12 +33,10 @@
 //
 // Env: BURN_NAMESPACE (default cost-tracking), BURN_QUIET=1.
 
-import { spawnSync } from 'node:child_process';
+// iter 73 — shared session-loader (was duplicated across 6 scripts).
+import { loadSessions, sessionTs, parseDurationMs } from './_sessions.mjs';
 
 const NS = process.env.BURN_NAMESPACE || 'cost-tracking';
-const CLI_PKG = process.env.CLI_CORE === '1'
-  ? '@claude-flow/cli-core@alpha'
-  : '@claude-flow/cli@latest';
 
 const ARGS = (() => {
   const a = { bucket: '1d', lookback: '14d', alertPct: null, format: 'table' };
@@ -52,40 +50,6 @@ const ARGS = (() => {
   }
   return a;
 })();
-
-function parseDurationMs(spec) {
-  const m = /^(\d+)([hdwm])$/.exec(spec);
-  if (!m) return null;
-  const n = parseInt(m[1], 10);
-  const unit = { h: 3600_000, d: 86400_000, w: 7 * 86400_000, m: 30 * 86400_000 }[m[2]];
-  return unit ? n * unit : null;
-}
-
-function memoryListSessionRecords() {
-  const r = spawnSync('npx', [
-    CLI_PKG, 'memory', 'list',
-    '--namespace', NS, '--format', 'json',
-  ], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf-8', shell: process.platform === 'win32' });
-  if (r.status !== 0) return [];
-  const m = /\[[\s\S]*\]/.exec(r.stdout || '');
-  if (!m) return [];
-  let entries;
-  try { entries = JSON.parse(m[0]); } catch { return []; }
-  return entries
-    .map((e) => e.key)
-    .filter((k) => typeof k === 'string' && k.startsWith('session-'));
-}
-
-function memoryRetrieve(key) {
-  const r = spawnSync('npx', [
-    CLI_PKG, 'memory', 'retrieve',
-    '--namespace', NS, '--key', key,
-  ], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf-8', shell: process.platform === 'win32' });
-  if (r.status !== 0) return null;
-  const m = /\{[\s\S]*\}/.exec(r.stdout || '');
-  if (!m) return null;
-  try { return JSON.parse(m[0]); } catch { return null; }
-}
 
 function main() {
   const bucketMs = parseDurationMs(ARGS.bucket);
@@ -106,17 +70,8 @@ function main() {
   const now = Date.now();
   const cutoffMs = now - lookbackMs;
 
-  // Read + filter sessions.
-  const sessionKeys = memoryListSessionRecords();
-  const records = [];
-  for (const k of sessionKeys) {
-    const rec = memoryRetrieve(k);
-    if (rec) records.push(rec);
-  }
-  const sessionTs = (r) => {
-    const t = r.capturedAt || r.endedAt || r.startedAt;
-    return t ? new Date(t).getTime() : 0;
-  };
+  // Read + filter sessions (shared loader, iter 73).
+  const records = loadSessions(NS);
   const windowed = records.filter((r) => sessionTs(r) >= cutoffMs);
 
   // Bin: bucket index counts BACKWARDS from now, so the LAST bucket is

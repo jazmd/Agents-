@@ -20,38 +20,12 @@
 //
 // Markdown form is also available (--format markdown, the default).
 
-import { spawnSync } from 'node:child_process';
-
+// iter 73 — shared session-loader + memoryRetrieve (was duplicated across 7 scripts).
 // ADR-100 / #1748 Issue 3 — CLI_CORE=1 routes to lite cli-core (~2s cold-cache).
-// summary only does list/retrieve across cost-tracking + federation-spend
-// namespaces; substring search is unused so the JSON backend is sufficient.
-const CLI_PKG = process.env.CLI_CORE === '1'
-  ? '@claude-flow/cli-core@alpha'
-  : '@claude-flow/cli@latest';
+import { memoryListAllKeys, memoryRetrieve } from './_sessions.mjs';
 
 const NS = process.env.SUMMARY_NAMESPACE || 'cost-tracking';
 const FED_NS = process.env.SUMMARY_FED_NAMESPACE || 'federation-spend';
-
-function memoryListKeys(ns) {
-  const r = spawnSync('npx', [
-    CLI_PKG, 'memory', 'list',
-    '--namespace', ns, '--format', 'json',
-  ], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf-8', shell: process.platform === 'win32' });
-  if (r.status !== 0) return [];
-  const m = /\[[\s\S]*\]/.exec(r.stdout || '');
-  if (!m) return [];
-  try { return JSON.parse(m[0]).map((e) => e.key).filter(Boolean); } catch { return []; }
-}
-function memoryRetrieve(ns, key) {
-  const r = spawnSync('npx', [
-    CLI_PKG, 'memory', 'retrieve',
-    '--namespace', ns, '--key', key,
-  ], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf-8', shell: process.platform === 'win32' });
-  if (r.status !== 0) return null;
-  const m = /\{[\s\S]*\}/.exec(r.stdout || '');
-  if (!m) return null;
-  try { return JSON.parse(m[0]); } catch { return null; }
-}
 
 function alertLevel(util) {
   if (util >= 1.00) return 'HARD_STOP';
@@ -62,7 +36,7 @@ function alertLevel(util) {
 }
 
 function gather() {
-  const ctKeys = memoryListKeys(NS);
+  const ctKeys = memoryListAllKeys(NS);
   const sessions = ctKeys.filter((k) => k.startsWith('session-'))
     .map((k) => memoryRetrieve(NS, k)).filter(Boolean);
 
@@ -100,7 +74,7 @@ function gather() {
   } : null;
 
   // Federation aggregate
-  const fedKeys = memoryListKeys(FED_NS);
+  const fedKeys = memoryListAllKeys(FED_NS);
   const fedEvents = fedKeys.filter((k) => k.startsWith('fed-spend-'))
     .map((k) => memoryRetrieve(FED_NS, k)).filter(Boolean);
   const peers = new Set(fedEvents.map((e) => e.peerId).filter(Boolean));

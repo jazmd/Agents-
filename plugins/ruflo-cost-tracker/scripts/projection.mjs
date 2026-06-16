@@ -24,12 +24,16 @@
 // Env: PROJECTION_NAMESPACE (default cost-tracking)
 //      PROJECTION_QUIET=1 → JSON only (alias for --format json)
 
-import { spawnSync } from 'node:child_process';
+// iter 73 — shared session-loader + memoryRetrieve (was duplicated across 6 scripts).
+import {
+  loadSessions,
+  memoryRetrieve,
+  memoryListAllKeys,
+  sessionTs,
+  parseDurationMs,
+} from './_sessions.mjs';
 
 const NS = process.env.PROJECTION_NAMESPACE || 'cost-tracking';
-const CLI_PKG = process.env.CLI_CORE === '1'
-  ? '@claude-flow/cli-core@alpha'
-  : '@claude-flow/cli@latest';
 
 const ARGS = (() => {
   const a = { window: '7d', horizons: '7d,30d,90d,365d', format: 'table' };
@@ -44,66 +48,21 @@ const ARGS = (() => {
 })();
 
 // ----------------------------------------------------------------------------
-// Memory shell-out (same pattern as budget.mjs)
+// Budget config — mirror budget.mjs latest-stamp resolution.
 // ----------------------------------------------------------------------------
-function memoryListSessionRecords() {
-  const r = spawnSync('npx', [
-    CLI_PKG, 'memory', 'list',
-    '--namespace', NS, '--format', 'json',
-  ], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf-8', shell: process.platform === 'win32' });
-  if (r.status !== 0) return [];
-  const m = /\[[\s\S]*\]/.exec(r.stdout || '');
-  if (!m) return [];
-  let entries;
-  try { entries = JSON.parse(m[0]); } catch { return []; }
-  return entries
-    .map((e) => e.key)
-    .filter((k) => typeof k === 'string' && k.startsWith('session-'));
-}
-
-function memoryRetrieve(key) {
-  const r = spawnSync('npx', [
-    CLI_PKG, 'memory', 'retrieve',
-    '--namespace', NS, '--key', key,
-  ], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf-8', shell: process.platform === 'win32' });
-  if (r.status !== 0) return null;
-  const m = /\{[\s\S]*\}/.exec(r.stdout || '');
-  if (!m) return null;
-  try { return JSON.parse(m[0]); } catch { return null; }
-}
-
 function getBudgetConfig() {
-  // Mirror budget.mjs latest-stamp resolution.
-  const list = spawnSync('npx', [
-    CLI_PKG, 'memory', 'list',
-    '--namespace', NS, '--format', 'json',
-  ], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf-8', shell: process.platform === 'win32' });
-  if (list.status !== 0) return null;
-  const m = /\[[\s\S]*\]/.exec(list.stdout || '');
-  if (!m) return null;
-  let entries;
-  try { entries = JSON.parse(m[0]); } catch { return null; }
-  const stamped = entries
-    .map((e) => e.key)
-    .filter((k) => typeof k === 'string' && /^budget-config-\d+$/.test(k))
+  const stamped = memoryListAllKeys(NS)
+    .filter((k) => /^budget-config-\d+$/.test(k))
     .sort();
   const latest = stamped[stamped.length - 1];
-  if (latest) return memoryRetrieve(latest);
+  if (latest) return memoryRetrieve(NS, latest);
   // Fallback: plain budget-config key (legacy / pre-stamping)
-  return memoryRetrieve('budget-config');
+  return memoryRetrieve(NS, 'budget-config');
 }
 
 // ----------------------------------------------------------------------------
 // Time math
 // ----------------------------------------------------------------------------
-function parseDurationMs(spec) {
-  const m = /^(\d+)([hdwm])$/.exec(spec);
-  if (!m) return null;
-  const n = parseInt(m[1], 10);
-  const unit = { h: 3600_000, d: 86400_000, w: 7 * 86400_000, m: 30 * 86400_000 }[m[2]];
-  return unit ? n * unit : null;
-}
-
 function formatDays(ms) {
   if (!Number.isFinite(ms) || ms <= 0) return 'never';
   const days = ms / 86400_000;
@@ -130,20 +89,11 @@ function main() {
     }
   }
 
-  // Read all sessions.
-  const sessionKeys = memoryListSessionRecords();
-  const records = [];
-  for (const k of sessionKeys) {
-    const rec = memoryRetrieve(k);
-    if (rec) records.push(rec);
-  }
+  // Read all sessions (shared loader, iter 73).
+  const records = loadSessions(NS);
 
   // Filter by measurement window — use capturedAt if present, else startedAt.
   const cutoffMs = Date.now() - windowMs;
-  const sessionTs = (r) => {
-    const t = r.capturedAt || r.endedAt || r.startedAt;
-    return t ? new Date(t).getTime() : 0;
-  };
   const windowed = records.filter((r) => sessionTs(r) >= cutoffMs);
   const windowSpend = windowed.reduce((s, r) => s + (r.total_cost_usd || 0), 0);
   const windowDays = windowMs / 86400_000;

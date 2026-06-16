@@ -32,14 +32,12 @@
 //
 // Env: COUNTERFACTUAL_NAMESPACE (default cost-tracking), COUNTERFACTUAL_QUIET=1.
 
-import { spawnSync } from 'node:child_process';
-// iter 68 — shared PRICING + cost helpers (consolidated from per-script copies).
+// iter 68 — shared PRICING + cost helpers.
 import { costAtTier } from './_prices.mjs';
+// iter 73 — shared session-loader.
+import { loadSessions, sessionTs, parseDurationMs } from './_sessions.mjs';
 
 const NS = process.env.COUNTERFACTUAL_NAMESPACE || 'cost-tracking';
-const CLI_PKG = process.env.CLI_CORE === '1'
-  ? '@claude-flow/cli-core@alpha'
-  : '@claude-flow/cli@latest';
 
 const ALL_BASELINES = ['always-haiku', 'always-sonnet', 'always-opus'];
 
@@ -55,14 +53,6 @@ const ARGS = (() => {
   return a;
 })();
 
-function parseDurationMs(spec) {
-  const m = /^(\d+)([hdwm])$/.exec(spec);
-  if (!m) return null;
-  const n = parseInt(m[1], 10);
-  const unit = { h: 3600_000, d: 86400_000, w: 7 * 86400_000, m: 30 * 86400_000 }[m[2]];
-  return unit ? n * unit : null;
-}
-
 function tierFromBaseline(baseline) {
   switch (baseline) {
     case 'always-haiku':  return 'haiku';
@@ -70,32 +60,6 @@ function tierFromBaseline(baseline) {
     case 'always-opus':   return 'opus';
     default: return null;
   }
-}
-
-function memoryListSessionRecords() {
-  const r = spawnSync('npx', [
-    CLI_PKG, 'memory', 'list',
-    '--namespace', NS, '--format', 'json',
-  ], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf-8', shell: process.platform === 'win32' });
-  if (r.status !== 0) return [];
-  const m = /\[[\s\S]*\]/.exec(r.stdout || '');
-  if (!m) return [];
-  let entries;
-  try { entries = JSON.parse(m[0]); } catch { return []; }
-  return entries
-    .map((e) => e.key)
-    .filter((k) => typeof k === 'string' && k.startsWith('session-'));
-}
-
-function memoryRetrieve(key) {
-  const r = spawnSync('npx', [
-    CLI_PKG, 'memory', 'retrieve',
-    '--namespace', NS, '--key', key,
-  ], { stdio: ['ignore', 'pipe', 'pipe'], encoding: 'utf-8', shell: process.platform === 'win32' });
-  if (r.status !== 0) return null;
-  const m = /\{[\s\S]*\}/.exec(r.stdout || '');
-  if (!m) return null;
-  try { return JSON.parse(m[0]); } catch { return null; }
 }
 
 function sumSessionTokens(rec) {
@@ -122,13 +86,8 @@ function main() {
     }
   }
 
-  // Read + filter sessions.
-  const sessionKeys = memoryListSessionRecords();
-  const records = [];
-  for (const k of sessionKeys) {
-    const rec = memoryRetrieve(k);
-    if (rec) records.push(rec);
-  }
+  // Read + filter sessions (shared loader, iter 73).
+  const records = loadSessions(NS);
 
   let cutoffMs = null;
   if (ARGS.since) {
@@ -139,10 +98,6 @@ function main() {
     }
     cutoffMs = Date.now() - ms;
   }
-  const sessionTs = (r) => {
-    const t = r.capturedAt || r.endedAt || r.startedAt;
-    return t ? new Date(t).getTime() : 0;
-  };
   const filtered = cutoffMs === null
     ? records
     : records.filter((r) => sessionTs(r) >= cutoffMs);
