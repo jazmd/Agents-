@@ -37,7 +37,11 @@ jobs:
           node-version: '20'
 
       - name: Discover and run every plugin smoke contract (parallel)
-        run: node scripts/smoke-all-plugins.mjs
+        # --timeout 60 caps each individual plugin smoke at 60s. The whole
+        # fleet currently completes in ~6s wall on a 14-core machine; 60s
+        # per plugin gives ample headroom while protecting against a hung
+        # smoke from deadlocking the CI run.
+        run: node scripts/smoke-all-plugins.mjs --timeout 60
 
       - name: Fleet-wide exit-bypass antipattern lint (iter-75 bug class)
         run: node scripts/audit-exit-bypass-antipattern.mjs
