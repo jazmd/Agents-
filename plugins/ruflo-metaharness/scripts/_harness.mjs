@@ -20,15 +20,26 @@ import { spawnSync } from 'node:child_process';
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
-function execCli(bin, args, opts = {}) {
+// ITER 27 — npx invocation hardening.
+// The pre-iter-27 implementation passed `'-y metaharness@latest'` as a
+// SINGLE argv element to npx (`spawnSync('npx', [bin, ...argv])` where
+// bin contained two whitespace-separated tokens). spawnSync with
+// shell:false does no word-splitting, so npx received a literal string
+// with an embedded space and either failed silently or treated the
+// whole thing as a package name. The graceful-degradation path then
+// reported `degraded: true` for every skill — masking the bug. Every
+// argv token must now be its own array element.
+function execCli(npxArgs, opts = {}) {
   const start = Date.now();
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const wantJson = opts.json !== false;
-  const argv = wantJson && !args.includes('--json') ? [...args, '--json'] : [...args];
-  const r = spawnSync('npx', [bin, ...argv], {
+  const argv = wantJson && !npxArgs.includes('--json') ? [...npxArgs, '--json'] : [...npxArgs];
+  const r = spawnSync('npx', argv, {
     stdio: ['ignore', 'pipe', 'pipe'],
     encoding: 'utf-8',
     timeout: timeoutMs,
+    cwd: opts.cwd,  // iter 27 — let callers redirect $CWD (mint.mjs needs this)
+    env: { ...process.env, ...(opts.env || {}) },
     shell: process.platform === 'win32',
   });
   const durationMs = Date.now() - start;
@@ -54,7 +65,9 @@ function execCli(bin, args, opts = {}) {
 }
 
 export function runMetaharness(args, opts) {
-  return execCli('-y metaharness@latest', args, opts);
+  // iter 27 — explicit argv tokens (was: '-y metaharness@latest' as one
+  // string, which silently degraded every skill).
+  return execCli(['-y', 'metaharness@latest', ...args], opts);
 }
 
 export function runHarness(args, opts) {
@@ -69,6 +82,8 @@ export function runHarness(args, opts) {
     stdio: ['ignore', 'pipe', 'pipe'],
     encoding: 'utf-8',
     timeout: timeoutMs,
+    cwd: opts?.cwd,  // iter 27 — same cwd-redirect support as runMetaharness
+    env: { ...process.env, ...(opts?.env || {}) },
     shell: process.platform === 'win32',
   });
   const durationMs = Date.now() - start;

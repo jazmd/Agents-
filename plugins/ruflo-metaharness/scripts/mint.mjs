@@ -16,8 +16,8 @@
 //     # → actually scaffolds
 
 import { runMetaharness, emitDegradedJsonAndExit } from './_harness.mjs';
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, mkdirSync } from 'node:fs';
+import { resolve, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const ARGS = (() => {
@@ -84,7 +84,20 @@ function main() {
     console.error(`mint: target ${ARGS.target} already exists`);
     process.exit(2);
   }
-  const r = runMetaharness(['new', ARGS.name, '--template', ARGS.template, '--host', ARGS.host, '--target', ARGS.target, '--yes'], { json: false });
+  // ITER 27 FIX — the metaharness CLI's --target flag is ignored at
+  // runtime: `metaharness new <name>` writes to $CWD/<name> regardless
+  // of --target (verified against metaharness@0.1.12, 2026-06-16). The
+  // safety check above resolves ARGS.target outside the calling repo;
+  // we now point the subprocess CWD at target's parent + pass
+  // basename(target) as the CLI-side name, so the scaffold lands at
+  // exactly ARGS.target.
+  const parentDir = dirname(ARGS.target);
+  const cliName = basename(ARGS.target);
+  mkdirSync(parentDir, { recursive: true });
+  const r = runMetaharness(
+    ['new', cliName, '--template', ARGS.template, '--host', ARGS.host],
+    { json: false, cwd: parentDir, timeoutMs: 180_000 },
+  );
   if (r.degraded) { emitDegradedJsonAndExit(r.reason); return; }
   if (r.exitCode !== 0) {
     console.error(`mint: metaharness exited ${r.exitCode}`);
