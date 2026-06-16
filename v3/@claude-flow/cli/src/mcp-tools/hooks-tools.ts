@@ -3275,6 +3275,68 @@ export const hooksIntelligenceStats: MCPTool = {
       neuralRouter = { enabled: s.enabled, available: s.available, routedBy: s.routedBy, reason: s.reason };
     } catch { /* neural-router module not loaded */ }
 
+    // ADR-149 iter 42 — surface cost-savings to MCP consumers. Iter 31-34
+    // shipped the CLI. This computes the headline numbers (last 7d actual
+    // vs heuristic counterfactual) from the trajectory JSONL so Claude Code
+    // sessions can ask "is the router saving money?" without shelling out
+    // to bash. Best-effort: returns null when trajectory missing/empty.
+    let costSavings: {
+      windowDays: number;
+      pairs: number;
+      actualUsd: number;
+      counterfactualUsd: number;
+      savingsUsd: number;
+      savingsPct: number;
+    } | null = null;
+    try {
+      const fs = await import('node:fs');
+      const pathMod = await import('node:path');
+      const trajectoryPath = process.env.CLAUDE_FLOW_ROUTER_TRAJECTORY_PATH
+        ?? pathMod.resolve(process.cwd(), '.swarm', 'model-router-trajectories.jsonl');
+      if (fs.existsSync(trajectoryPath)) {
+        const { MODEL_PRICES } = await import('../ruvector/model-prices.js');
+        const windowMs = 7 * 86_400_000;          // 7-day window — matches iter 41 default
+        const cutoffMs = Date.now() - windowMs;
+        interface DecisionLite { ts: string; task_hash: string; complexity: number; ab_pair?: { bandit_pick: string } }
+        interface OutcomeLite { ts: string; task_hash: string; cost_usd?: number; tokens?: { input: number; output: number } }
+        const decisions = new Map<string, DecisionLite>();
+        const outcomes = new Map<string, OutcomeLite>();
+        for (const l of fs.readFileSync(trajectoryPath, 'utf8').split('\n')) {
+          if (!l.trim()) continue;
+          try {
+            const r = JSON.parse(l);
+            if (Date.parse(r.ts) < cutoffMs) continue;
+            if (r.type === 'decision') decisions.set(r.task_hash, r);
+            else if (r.type === 'outcome') outcomes.set(r.task_hash, r);
+          } catch { /* malformed */ }
+        }
+        let pairs = 0, actual = 0, cf = 0;
+        for (const [hash, dec] of decisions) {
+          const out = outcomes.get(hash);
+          if (!out?.cost_usd || !out.tokens) continue;
+          pairs++;
+          actual += out.cost_usd;
+          // Same heuristic counterfactual as iter 32 default.
+          const tierModel = dec.complexity < 0.34 ? 'haiku'
+            : dec.complexity < 0.67 ? 'sonnet' : 'opus';
+          const cfModel = dec.ab_pair?.bandit_pick ?? tierModel;
+          const p = MODEL_PRICES[cfModel] ?? { in: 1, out: 1 };
+          cf += (out.tokens.input * p.in + out.tokens.output * p.out) / 1_000_000;
+        }
+        if (pairs > 0) {
+          const savings = cf - actual;
+          costSavings = {
+            windowDays: 7,
+            pairs,
+            actualUsd: Math.round(actual * 1_000_000) / 1_000_000,
+            counterfactualUsd: Math.round(cf * 1_000_000) / 1_000_000,
+            savingsUsd: Math.round(savings * 1_000_000) / 1_000_000,
+            savingsPct: cf > 0 ? Math.round((savings / cf) * 10000) / 100 : 0,
+          };
+        }
+      }
+    } catch { /* trajectory parse failed — leave costSavings null */ }
+
     const stats = {
       sona: sonaStats,
       moe: moeStats,
@@ -3301,6 +3363,9 @@ export const hooksIntelligenceStats: MCPTool = {
         avgConfidence: routerStats.avgConfidence,
       } : null,
       neuralRouter,
+      // ADR-149 iter 42 — cost-savings surface for MCP consumers (matches
+      // `claude-flow neural router cost-savings --since 7d` shape).
+      costSavings,
       dataSource: sona ? 'real-implementations' : 'memory-fallback',
       lastUpdated: new Date().toISOString(),
     };
