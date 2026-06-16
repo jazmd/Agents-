@@ -181,19 +181,24 @@ function cmdCheck() {
     recommended_action: recommendedAction(alert.level),
     sessionCount: filtered.length,
   };
-  if (process.env.BUDGET_QUIET === '1') return console.log(JSON.stringify(out));
-  console.log(`# Budget check (period: ${period})`);
-  console.log('');
-  console.log(`| Metric | Value |`);
-  console.log(`|---|---:|`);
-  console.log(`| Budget | $${cfg.budget_usd.toFixed(2)} |`);
-  console.log(`| Spent | $${totalSpend.toFixed(2)} |`);
-  console.log(`| Remaining | $${out.remaining_usd.toFixed(2)} |`);
-  console.log(`| Utilization | ${out.utilization_pct.toFixed(1)}% |`);
-  console.log(`| Sessions counted | ${filtered.length} |`);
-  console.log(`| **Alert** | **${alert.emoji} ${alert.level}** |`);
-  console.log('');
-  console.log(`Action: ${out.recommended_action}`);
+  if (process.env.BUDGET_QUIET === '1') {
+    console.log(JSON.stringify(out));
+  } else {
+    console.log(`# Budget check (period: ${period})`);
+    console.log('');
+    console.log(`| Metric | Value |`);
+    console.log(`|---|---:|`);
+    console.log(`| Budget | $${cfg.budget_usd.toFixed(2)} |`);
+    console.log(`| Spent | $${totalSpend.toFixed(2)} |`);
+    console.log(`| Remaining | $${out.remaining_usd.toFixed(2)} |`);
+    console.log(`| Utilization | ${out.utilization_pct.toFixed(1)}% |`);
+    console.log(`| Sessions counted | ${filtered.length} |`);
+    console.log(`| **Alert** | **${alert.emoji} ${alert.level}** |`);
+    console.log('');
+    console.log(`Action: ${out.recommended_action}`);
+  }
+  // CRITICAL: must run in BOTH branches — otherwise BUDGET_QUIET=1 silently
+  // swallowed HARD_STOP, breaking cost-health composite gate (iter 75 fix).
   if (alert.level === 'HARD_STOP') process.exit(1);
 }
 

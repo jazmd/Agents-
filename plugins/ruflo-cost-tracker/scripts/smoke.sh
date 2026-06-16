@@ -8,10 +8,10 @@ step() { printf "→ %s ... " "$1"; }
 ok()   { printf "PASS\n"; PASS=$((PASS+1)); }
 bad()  { printf "FAIL: %s\n" "$1"; FAIL=$((FAIL+1)); }
 
-step "1. plugin.json declares 0.21.1 with new keywords"
+step "1. plugin.json declares 0.21.2 with new keywords"
 v=$(grep -E '"version"' "$ROOT/.claude-plugin/plugin.json" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
-if [[ "$v" != "0.21.1" ]]; then
-  bad "expected 0.21.1, got '$v'"
+if [[ "$v" != "0.21.2" ]]; then
+  bad "expected 0.21.2, got '$v'"
 else
   miss=""
   for k in namespace-routing mcp agentic-flow agent-booster tier1-routing model-routing benchmarking verified telemetry budget projection forecast counterfactual drift-detection trend-alert anomaly-detection outlier-detection health-check composite-gate; do
@@ -278,9 +278,20 @@ F="$ROOT/scripts/budget.mjs"
 miss=""
 [[ -x "$F" ]] || miss="$miss not-executable"
 node --check "$F" 2>/dev/null || miss="$miss syntax-error"
-grep -q "spawnSync" "$F" || miss="$miss no-spawnSync"
+grep -qE "spawnSync|_sessions\.mjs" "$F" || miss="$miss no-safe-exec"
 grep -qE "HARD_STOP|alertLevel" "$F" || miss="$miss no-alert-impl"
 grep -q "process.exit(1)" "$F" || miss="$miss no-fail-closed"
+# iter 75 regression guard: in the WITH-BUDGET branch (after `const alert =
+# alertLevel(...)` is computed), the HARD_STOP exit must follow the
+# JSON/markdown output, not be skipped by an early return. The previous bug
+# was `if (BUDGET_QUIET) return console.log(...)` placed AFTER alert was
+# computed but BEFORE the exit check, silently swallowing the alert for
+# cost-health. Detect via: in lines AFTER `const alert =`, there must be no
+# `return console.log(JSON.stringify(out))` pattern.
+post_alert_lines=$(awk '/const alert = alertLevel/,/^}/' "$F")
+if printf '%s\n' "$post_alert_lines" | grep -qE "return console\.log\(JSON\.stringify\(out\)\)"; then
+  miss="$miss budget-quiet-early-return-after-alert"
+fi
 [[ -z "$miss" ]] && ok || bad "$miss"
 
 step "33. ruflo-cost.md documents 'cost budget set/get/check' subcommands"

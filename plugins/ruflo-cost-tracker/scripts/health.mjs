@@ -186,9 +186,16 @@ function summarize(r) {
   const j = r.json;
   switch (r.name) {
     case 'budget': {
-      const al = j.alertLevel || 'unknown';
-      const util = (j.utilizationPct !== undefined) ? `${j.utilizationPct.toFixed(1)}%` : '—';
-      return `${al} — ${util} of budget consumed`;
+      // budget.mjs returns { error: 'no budget configured', totalSpend, recordCount }
+      // when no budget is set; otherwise { level, utilization_pct, budget_usd, spent_usd }.
+      if (j.error === 'no budget configured') {
+        const spend = typeof j.totalSpend === 'number' ? `$${j.totalSpend.toFixed(2)}` : '—';
+        return `no budget set (${spend} measured spend; run \`cost budget set <usd>\` to enable)`;
+      }
+      const level = j.level || 'OK';
+      const util = (typeof j.utilization_pct === 'number') ? `${j.utilization_pct.toFixed(1)}%` : '—';
+      const budget = (typeof j.budget_usd === 'number') ? `$${j.budget_usd.toFixed(2)}` : '—';
+      return `${level} — ${util} of ${budget} budget consumed`;
     }
     case 'burn': {
       const d = j.delta?.deltaPct;
