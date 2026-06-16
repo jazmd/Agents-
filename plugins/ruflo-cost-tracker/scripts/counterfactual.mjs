@@ -33,19 +33,13 @@
 // Env: COUNTERFACTUAL_NAMESPACE (default cost-tracking), COUNTERFACTUAL_QUIET=1.
 
 import { spawnSync } from 'node:child_process';
+// iter 68 — shared PRICING + cost helpers (consolidated from per-script copies).
+import { costAtTier } from './_prices.mjs';
 
 const NS = process.env.COUNTERFACTUAL_NAMESPACE || 'cost-tracking';
 const CLI_PKG = process.env.CLI_CORE === '1'
   ? '@claude-flow/cli-core@alpha'
   : '@claude-flow/cli@latest';
-
-// Kept identical to track.mjs PRICING — single source of truth would be
-// nicer (iter 31 router pattern); deferred until a third script needs it.
-const PRICING = {
-  haiku:  { input: 0.25,  output: 1.25,  cache_write: 0.30,  cache_read: 0.03 },
-  sonnet: { input: 3.00,  output: 15.00, cache_write: 3.75,  cache_read: 0.30 },
-  opus:   { input: 15.00, output: 75.00, cache_write: 18.75, cache_read: 1.50 },
-};
 
 const ALL_BASELINES = ['always-haiku', 'always-sonnet', 'always-opus'];
 
@@ -76,15 +70,6 @@ function tierFromBaseline(baseline) {
     case 'always-opus':   return 'opus';
     default: return null;
   }
-}
-
-function costAtTier(tokens, tier) {
-  const p = PRICING[tier];
-  if (!p) return 0;
-  return (tokens.input / 1e6) * p.input
-       + (tokens.output / 1e6) * p.output
-       + (tokens.cache_write / 1e6) * p.cache_write
-       + (tokens.cache_read / 1e6) * p.cache_read;
 }
 
 function memoryListSessionRecords() {
