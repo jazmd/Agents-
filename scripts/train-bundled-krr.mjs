@@ -17,6 +17,9 @@
 import { readFileSync, writeFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import * as mh from '@metaharness/router';
+// iter 35 — single source of truth for prices; replaces the duplicated
+// BLENDED_PRICES table that lived here pre-iter-31.
+import { blendedPrice } from '../v3/@claude-flow/cli/dist/src/ruvector/model-prices.js';
 
 const ARGS = (() => {
   const a = { perBucket: false };
@@ -26,17 +29,6 @@ const ARGS = (() => {
   return a;
 })();
 
-// Per-model blended price ($/Mtok). Blended = input + 3×output (rough mix
-// since responses are 3-5x longer than prompts on average for these tasks).
-const BLENDED_PRICES = {
-  'inclusionai/ling-2.6-flash':         (0.01 + 3 * 0.03),       // $0.10
-  'google/gemini-2.5-flash-lite':       (0.10 + 3 * 0.40),       // $1.30
-  'anthropic/claude-haiku-4.5':         (1.00 + 3 * 5.00),       // $16.00
-  'openai/gpt-4.1':                     (2.00 + 3 * 8.00),       // $26.00
-  'meta-llama/llama-3.3-70b-instruct':  (0.13 + 3 * 0.40),       // $1.33
-  'anthropic/claude-sonnet-4-6':        (3.00 + 3 * 15.00),      // $48.00
-  'anthropic/claude-opus-4':            (15.00 + 3 * 75.00),     // $240.00
-};
 const QUALITY_BAR = 0.25;
 
 const ASSETS_DIR = resolve('v3/@claude-flow/cli/assets/model-router');
@@ -48,10 +40,9 @@ const corpusModels = Object.keys(allRows[0].scores);
 console.log(`[train] ${allRows.length} rows, dim=${allRows[0].embedding.length}, candidates=${corpusModels.length}`);
 
 // Build the prices map for ONLY the candidates present in the corpus.
-const prices = {};
-for (const m of corpusModels) {
-  prices[m] = BLENDED_PRICES[m] ?? 1.00;
-}
+// blendedPrice() falls back to $1/Mtok blended for unknown ids — same
+// behaviour as the previous `?? 1.00`.
+const prices = Object.fromEntries(corpusModels.map(m => [m, blendedPrice(m)]));
 
 // Train ONE KRR over a row subset + write it to `outPath`.
 // Returns { lambda, looQuality, trainMs, size }.

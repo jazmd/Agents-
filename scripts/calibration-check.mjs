@@ -38,6 +38,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import * as mh from '@metaharness/router';
 import { IsotonicCalibrator } from '../v3/@claude-flow/cli/dist/src/ruvector/router-calibrator.js';
+// iter 35 — single source of truth for prices.
+import { blendedPrice } from '../v3/@claude-flow/cli/dist/src/ruvector/model-prices.js';
 
 const ARGS = (() => {
   const a = {
@@ -58,23 +60,13 @@ const ARGS = (() => {
   return a;
 })();
 
-const BLENDED_PRICES = {
-  'inclusionai/ling-2.6-flash':         (0.01 + 3 * 0.03),
-  'google/gemini-2.5-flash-lite':       (0.10 + 3 * 0.40),
-  'anthropic/claude-haiku-4.5':         (1.00 + 3 * 5.00),
-  'openai/gpt-4.1':                     (2.00 + 3 * 8.00),
-  'meta-llama/llama-3.3-70b-instruct':  (0.13 + 3 * 0.40),
-  'anthropic/claude-sonnet-4-6':        (3.00 + 3 * 15.00),
-  'anthropic/claude-opus-4':            (15.00 + 3 * 75.00),
-};
-
 if (!existsSync(ARGS.corpus)) {
   console.error(`[calibration] corpus not found at ${ARGS.corpus}`);
   process.exit(1);
 }
 const rows = JSON.parse(readFileSync(ARGS.corpus, 'utf8'));
 const candidates = Object.keys(rows[0].scores);
-const prices = Object.fromEntries(candidates.map(m => [m, BLENDED_PRICES[m] ?? 1.0]));
+const prices = Object.fromEntries(candidates.map(m => [m, blendedPrice(m)]));
 
 // --- LOO-CV: collect (predicted, observed, rowIdx, tier, model) tuples ---
 const t0 = performance.now();

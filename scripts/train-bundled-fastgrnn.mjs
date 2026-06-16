@@ -15,6 +15,8 @@
 import { readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import * as mh from '@metaharness/router';
+// iter 35 — single source of truth for prices.
+import { blendedPrice } from '../v3/@claude-flow/cli/dist/src/ruvector/model-prices.js';
 
 const args = (() => {
   const a = { out: resolve('v3/@claude-flow/cli/assets/model-router/seed-router.fastgrnn.safetensors'), epochs: 40, hiddenDim: 12, lr: 0.05 };
@@ -27,22 +29,14 @@ const args = (() => {
   return a;
 })();
 
-// Mirror BLENDED_PRICES from train-bundled-krr.mjs so the FastGRNN artifact
-// is trained against the same cost weighting.
-const PRICES = {
-  'inclusionai/ling-2.6-flash':         (0.01 + 3 * 0.03),
-  'google/gemini-2.5-flash-lite':       (0.10 + 3 * 0.40),
-  'anthropic/claude-haiku-4.5':         (1.00 + 3 * 5.00),
-  'openai/gpt-4.1':                     (2.00 + 3 * 8.00),
-  'meta-llama/llama-3.3-70b-instruct':  (0.13 + 3 * 0.40),
-  'anthropic/claude-sonnet-4-6':        (3.00 + 3 * 15.00),
-  'anthropic/claude-opus-4':            (15.00 + 3 * 75.00),
-};
-
 const seedPath = resolve('v3/@claude-flow/cli/assets/model-router/seed-rows.json');
 console.log(`[fastgrnn] reading measured seed corpus from ${seedPath}`);
 const rows = JSON.parse(readFileSync(seedPath, 'utf8'));
 console.log(`[fastgrnn] ${rows.length} rows, dim=${rows[0].embedding.length}, candidates=${Object.keys(rows[0].scores).length}`);
+
+// iter 35 — derive per-candidate blended price from the shared module
+// instead of inlining a table that drifts from train-bundled-krr.mjs.
+const PRICES = Object.fromEntries(Object.keys(rows[0].scores).map(m => [m, blendedPrice(m)]));
 
 console.log(`[fastgrnn] checking native backend availability...`);
 const nativeAvailable = await mh.isNativeRouterAvailable();
