@@ -2655,15 +2655,19 @@ const routerCostSavingsCommand: Command = {
       cost_usd?: number; tokens?: { input: number; output: number }; model_id?: string;
     }
 
+    // iter 62 — preserve ALL outcomes (don't dedup by task_hash). Decisions
+    // can still dedup because all occurrences of the same task have the
+    // same embedding/complexity (it's the same task!), but different runs
+    // produce different token counts and costs. The Array preserves those.
     const decisions = new Map<string, DecisionRow>();
-    const outcomes = new Map<string, OutcomeRow>();
+    const outcomes: OutcomeRow[] = [];
     let malformed = 0;
     for (const l of fs.readFileSync(inPath, 'utf8').split('\n')) {
       if (!l.trim()) continue;
       try {
         const r = JSON.parse(l);
         if (r.type === 'decision') decisions.set(r.task_hash, r);
-        else if (r.type === 'outcome') outcomes.set(r.task_hash, r);
+        else if (r.type === 'outcome') outcomes.push(r);
       } catch { malformed++; }
     }
 
@@ -2717,11 +2721,13 @@ const routerCostSavingsCommand: Command = {
       return { success: false, exitCode: 1 };
     }
 
-    for (const [hash, out] of outcomes) {
+    // iter 62 — iterate ALL outcomes (Array), not just one per hash. Multiple
+    // occurrences of the same task contribute separately to the aggregate.
+    for (const out of outcomes) {
       if (cutoffMs !== null && Date.parse(out.ts) < cutoffMs) continue;
-      if (taskHashFilter && hash !== taskHashFilter) continue;
+      if (taskHashFilter && out.task_hash !== taskHashFilter) continue;
       if (out.cost_usd == null) { droppedNoOutcomeCost++; continue; }
-      const dec = decisions.get(hash);
+      const dec = decisions.get(out.task_hash);
       if (!dec) { droppedNoDecision++; continue; }
       if (!out.tokens) { droppedNoTokens++; continue; }
 
@@ -2740,7 +2746,7 @@ const routerCostSavingsCommand: Command = {
       }
 
       perCall.push({
-        task_hash: hash, ts: out.ts,
+        task_hash: out.task_hash, ts: out.ts,
         actualModel, actualCost,
         counterfactuals,
         tokens: out.tokens,
