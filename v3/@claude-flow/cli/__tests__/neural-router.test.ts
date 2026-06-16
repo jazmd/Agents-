@@ -48,6 +48,7 @@ const ENV_KEYS = [
   'CLAUDE_FLOW_ROUTER_BANDIT_PER_MODEL',
   'CLAUDE_FLOW_ROUTER_CALIBRATE',           // iter 24 — default-on; tests should not leak overrides
   'CLAUDE_FLOW_ROUTER_CALIBRATOR_PATH',
+  'CLAUDE_FLOW_ROUTER_COST_CEILING_USD_PER_MTOK',  // iter 29
   'OPENROUTER_API_KEY',
   'ANTHROPIC_API_KEY',
 ];
@@ -161,6 +162,44 @@ describe('neural-router (ADR-148)', () => {
     __resetNeuralRouterForTests();
     const sOff = await neuralRouterStatus();
     expect(sOff.reason).not.toContain('calibrated');
+  });
+
+  it('cost-ceiling mode picks highest-quality candidate under budget (ADR-149 iter 29)', async () => {
+    // When CLAUDE_FLOW_ROUTER_COST_CEILING_USD_PER_MTOK is set, the selector
+    // changes from "cheapest above qualityBar" to "best quality under ceiling".
+    process.env.CLAUDE_FLOW_ROUTER_NEURAL = '1';
+
+    // Baseline (no ceiling) — pick is cost-optimal-above-bar.
+    __resetNeuralRouterForTests();
+    const e = new Array(384).fill(0).map((_, i) => Math.sin(i * 0.1));
+    const baseline = await tryCostOptimalRoute(e);
+    if (!baseline) return; // KRR not loadable in this env
+    expect(typeof baseline.modelId).toBe('string');
+
+    // Set a tight ceiling that excludes Sonnet ($48) and Opus ($240) but
+    // keeps Haiku ($16), GPT-4.1 ($26), Gemini-Flash-Lite ($1.30), Llama-3.3
+    // ($1.33), Ling-2.6 ($0.10). The selector should switch to picking the
+    // HIGHEST-quality candidate among those — which on the bundled corpus
+    // is typically GPT-4.1 or Haiku, not Ling (which is cheapest).
+    process.env.CLAUDE_FLOW_ROUTER_COST_CEILING_USD_PER_MTOK = '30';
+    __resetNeuralRouterForTests();
+    const ceiling = await tryCostOptimalRoute(e);
+    if (!ceiling) return;
+
+    // Pick must satisfy the ceiling AND be the max-quality candidate under it.
+    const picked = ceiling.alternatives.find(a => a.modelId === ceiling.modelId);
+    expect(picked).toBeDefined();
+    expect(picked!.costPerMTok).toBeLessThanOrEqual(30);
+
+    // Among all candidates ≤ ceiling, picked one must have the max
+    // predictedQuality (the new selection rule).
+    const affordable = ceiling.alternatives.filter(a => a.costPerMTok <= 30);
+    expect(affordable.length).toBeGreaterThan(0);
+    const maxQ = Math.max(...affordable.map(a => a.predictedQuality));
+    expect(picked!.predictedQuality).toBeCloseTo(maxQ, 6);
+
+    // Negative test: cost above ceiling should never be picked.
+    expect(ceiling.alternatives.some(a => a.modelId === ceiling.modelId && a.costPerMTok > 30)).toBe(false);
   });
 
   it('per-tier calibrators load when present and are reported in status reason (ADR-149 iter 25)', async () => {

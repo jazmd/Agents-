@@ -94,6 +94,14 @@ interface NeuralRouterConfig {
   calibrateEnabled: boolean;
   /** Path to the bundled calibrator JSON (iter 22). */
   calibratorPath: string;
+  /**
+   * ADR-149 iter 29 — orthogonal selector mode: when > 0, filter candidates
+   * by blended price ≤ ceiling, then pick the HIGHEST predicted quality
+   * (not cheapest-above-bar). Lets ops with a hard budget cap ask "best
+   * model under $X" instead of "cheapest above quality threshold". Default
+   * 0 (disabled) preserves iter 0-28 cost-optimal-above-bar semantics.
+   */
+  costCeilingPerMTok: number;
 }
 
 // ============================================================================
@@ -244,6 +252,12 @@ function getConfig(): NeuralRouterConfig {
     // ADR-149 iter 24 — DEFAULT ON. Opt out with `=0`. Iter 23 OOS
     // validation: ECE 0.1604 → 0.0335 (-79%), well-calibrated.
     calibrateEnabled: process.env.CLAUDE_FLOW_ROUTER_CALIBRATE !== '0',
+    // ADR-149 iter 29 — orthogonal selector mode. Blended $/Mtok ceiling;
+    // 0 disables (preserves cost-optimal-above-bar). Typical values:
+    //   $5    → cheap+mid tier only (Ling 2.6, Gemini Flash Lite, Llama 3.3, GPT-4.1)
+    //   $20   → exclude Sonnet ($48 blended) and Opus ($240)
+    //   $50   → exclude Opus only
+    costCeilingPerMTok: Math.max(0, parseFloat(process.env.CLAUDE_FLOW_ROUTER_COST_CEILING_USD_PER_MTOK ?? '0') || 0),
     calibratorPath: process.env.CLAUDE_FLOW_ROUTER_CALIBRATOR_PATH
       ?? join(assetsDir, 'seed-router.calibrator.json'),
   };
@@ -637,6 +651,30 @@ export async function tryCostOptimalRoute(
       }
       // else: every candidate exceeds the budget → fall back to the original pick
       //   (better to return a slow answer than no answer)
+    }
+
+    // ADR-149 iter 29 — quality-best-under-budget mode. When the cost
+    // ceiling is set, OVERRIDE the cost-optimal-above-bar pick:
+    //   1. filter candidates by costPerMTok ≤ ceiling
+    //   2. sort by predictedQuality DESC
+    //   3. pick the top one
+    // qualityBar still informs `metBar` on the result for observability,
+    // but does NOT filter the selection — the operator's hard constraint
+    // is cost, and they want the best quality they can get under it.
+    // If no candidate fits the ceiling, fall through to the existing pick
+    // (better to return something than nothing — same policy as the
+    // latency-budget fallback above).
+    if (cfg.costCeilingPerMTok > 0) {
+      const affordable = all.filter(a => a.costPerMTok <= cfg.costCeilingPerMTok);
+      if (affordable.length > 0) {
+        const pick = [...affordable].sort((a, b) => b.predictedQuality - a.predictedQuality)[0];
+        main = {
+          id: pick.id,
+          predictedQuality: pick.predictedQuality,
+          costPerMTok: pick.costPerMTok,
+          metBar: pick.predictedQuality >= cfg.qualityBar,
+        };
+      }
     }
 
     const t1 = Number(process.hrtime.bigint() / 1000n);
