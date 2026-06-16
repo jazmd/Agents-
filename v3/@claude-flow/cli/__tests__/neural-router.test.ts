@@ -54,6 +54,7 @@ const ENV_KEYS = [
   'CLAUDE_FLOW_ROUTER_ENSEMBLE_UNCERTAINTY_THRESHOLD',  // iter 44
   'CLAUDE_FLOW_ROUTER_BANDIT_WARMUP_RANGE',           // iter 52
   'CLAUDE_FLOW_ROUTER_BANDIT_FULL_INFLUENCE',         // iter 53
+  'CLAUDE_FLOW_ROUTER_BANDIT_SHRINKAGE_LAMBDA',       // iter 57
   'OPENROUTER_API_KEY',
   'ANTHROPIC_API_KEY',
 ];
@@ -239,6 +240,58 @@ describe('neural-router (ADR-148)', () => {
       expect(bf).toBeGreaterThanOrEqual(prev);
       prev = bf;
     }
+  });
+
+  it('iter 57 cross-bucket shrinkage blends specific prior toward marginal (ADR-149 iter 57)', async () => {
+    // Verify the shrinkage math in isolation. w_s = (n_s + 1) / (n_s + 1 + λ).
+    // Blended (α, β) = w_s * specific + (1 - w_s) * marginal.
+    //
+    // Scenario: med-bucket gpt-4.1 has 3 samples (α=3, β=2, n=3).
+    // Marginal across buckets has 50 samples (α=30, β=22, n=50).
+    // Lambda = 4.
+    const lambda = 4;
+    const specific = { alpha: 3, beta: 2 }; // n = 3
+    const marginal = { alpha: 30, beta: 22 }; // n = 50
+    const nSpecific = specific.alpha + specific.beta - 2;  // 3
+    const wSpecific = (nSpecific + 1) / (nSpecific + 1 + lambda);  // 4 / 8 = 0.5
+
+    expect(wSpecific).toBeCloseTo(0.5, 6);
+
+    const alphaBlended = wSpecific * specific.alpha + (1 - wSpecific) * marginal.alpha;
+    const betaBlended  = wSpecific * specific.beta  + (1 - wSpecific) * marginal.beta;
+
+    // With 50% specific + 50% marginal:
+    //   α = 0.5 * 3 + 0.5 * 30 = 16.5
+    //   β = 0.5 * 2 + 0.5 * 22 = 12
+    expect(alphaBlended).toBeCloseTo(16.5, 6);
+    expect(betaBlended).toBeCloseTo(12, 6);
+
+    // Rich-cell case: specific has 100 samples → w_s ≈ 96/100 → mostly specific.
+    const richSpec = { alpha: 60, beta: 42 }; // n = 100
+    const nRich = richSpec.alpha + richSpec.beta - 2;
+    const wRich = (nRich + 1) / (nRich + 1 + lambda);
+    expect(wRich).toBeGreaterThan(0.95);  // ≈ 0.962
+    expect(wRich).toBeLessThan(1);          // never quite 1
+
+    // Cold-cell case: specific has 0 samples → w_s = 1/5 = 0.2 → mostly marginal.
+    const cold = { alpha: 1, beta: 1 }; // n = 0
+    const nCold = cold.alpha + cold.beta - 2;
+    const wCold = (nCold + 1) / (nCold + 1 + lambda);
+    expect(wCold).toBe(0.2);
+    // Blended: 0.2 × (1,1) + 0.8 × (30, 22) = (24.2, 17.8)
+    expect(0.2 * 1 + 0.8 * 30).toBeCloseTo(24.2, 6);
+
+    // Monotone in n_s — more samples means more trust in specific.
+    let prev = -Infinity;
+    for (let n = 0; n <= 50; n += 5) {
+      const w = (n + 1) / (n + 1 + lambda);
+      expect(w).toBeGreaterThanOrEqual(prev);
+      prev = w;
+    }
+
+    // λ=0 disables shrinkage — w_s = 1.0 regardless of n.
+    expect((0 + 1) / (0 + 1 + 0)).toBe(1);
+    expect((100 + 1) / (100 + 1 + 0)).toBe(1);
   });
 
   it('iter 53 full-influence curve asymptotes to 1.0 as samples grow (ADR-149 iter 53)', async () => {

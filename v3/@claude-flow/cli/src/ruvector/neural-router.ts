@@ -609,31 +609,49 @@ export async function tryCostOptimalRoute(
         const priorsById = getModelRouterPriorsById();
         const bucket = opts?.complexityBucket;   // ADR-149 iter 15
         if (priorsById) {
+          // Cross-bucket shrinkage configuration (iter 57). When λ > 0,
+          // bucket-specific priors with few samples blend toward the
+          // marginal-across-buckets prior. Classic James-Stein-style
+          // shrinkage: rich cells trust themselves, thin cells borrow
+          // strength from neighbors. Default λ = 4 (set =0 to disable).
+          const shrinkageLambda = Math.max(0, parseFloat(process.env.CLAUDE_FLOW_ROUTER_BANDIT_SHRINKAGE_LAMBDA ?? '4') || 0);
           all = allRaw.map(a => {
+            // Compute marginal-across-buckets prior for this modelId ONCE
+            // (used either as the primary prior OR as the shrinkage anchor).
+            let alphaMarginal = 1, betaMarginal = 1;
+            let marginalFound = false;
+            for (const b of ['low', 'med', 'high'] as const) {
+              const p = priorsById[b]?.[a.id];
+              if (p) {
+                alphaMarginal += p.alpha - 1;
+                betaMarginal += p.beta - 1;
+                marginalFound = true;
+              }
+            }
+
             let alpha: number, beta: number;
             if (bucket && priorsById[bucket]?.[a.id]) {
-              // Bucket-aware (iter 15) — use the prior for the EXACT
-              // complexity bucket the task lives in. Sharper signal than
-              // the marginal because it isolates "is this model good for
-              // THIS kind of task" from "is this model good in general".
+              // Bucket-specific prior exists — use it as the primary signal
+              // (iter 15 sharpness). Iter 57: when shrinkage is enabled,
+              // blend toward the marginal anchor based on specific-cell
+              // sample richness. w_s = (n_s + 1) / (n_s + 1 + λ). At n_s=0
+              // → mostly marginal; at n_s=large → mostly specific.
               const p = priorsById[bucket][a.id];
-              alpha = p.alpha;
-              beta = p.beta;
-            } else {
-              // Marginal fallback (iter 14) — sum the per-bucket priors
-              // for this modelId. Used when the caller doesn't supply a
-              // bucket OR when no bucket-specific prior exists yet.
-              alpha = 1; beta = 1;
-              let found = false;
-              for (const b of ['low', 'med', 'high'] as const) {
-                const p = priorsById[b]?.[a.id];
-                if (p) {
-                  alpha += p.alpha - 1;
-                  beta += p.beta - 1;
-                  found = true;
-                }
+              const nSpecific = p.alpha + p.beta - 2;
+              if (shrinkageLambda > 0 && marginalFound) {
+                const wSpecific = (nSpecific + 1) / (nSpecific + 1 + shrinkageLambda);
+                alpha = wSpecific * p.alpha + (1 - wSpecific) * alphaMarginal;
+                beta  = wSpecific * p.beta  + (1 - wSpecific) * betaMarginal;
+              } else {
+                alpha = p.alpha;
+                beta = p.beta;
               }
-              if (!found) return a;
+            } else if (marginalFound) {
+              // Marginal fallback (iter 14) — no bucket-specific prior at all.
+              alpha = alphaMarginal;
+              beta = betaMarginal;
+            } else {
+              return a;
             }
             const samples = alpha + beta;
             if (samples <= 2) return a;  // hard floor — uniform prior has no signal

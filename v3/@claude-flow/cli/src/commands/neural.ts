@@ -3175,6 +3175,7 @@ const routerConfigCommand: Command = {
       // Bandit warmup (iter 52/53)
       { name: 'CLAUDE_FLOW_ROUTER_BANDIT_WARMUP_RANGE',          iter: 52, defaultValue: '8',           currentValue: process.env.CLAUDE_FLOW_ROUTER_BANDIT_WARMUP_RANGE ?? '', isOverride: !!process.env.CLAUDE_FLOW_ROUTER_BANDIT_WARMUP_RANGE, effect: 'Continuous warmup denominator. Smaller = bandit ramps faster; larger = more conservative.' },
       { name: 'CLAUDE_FLOW_ROUTER_BANDIT_FULL_INFLUENCE',        iter: 53, defaultValue: 'unset (0)',   currentValue: process.env.CLAUDE_FLOW_ROUTER_BANDIT_FULL_INFLUENCE ?? '', isOverride: !!process.env.CLAUDE_FLOW_ROUTER_BANDIT_FULL_INFLUENCE, effect: 'Gate. =1 uses asymptotic curve (samples-2)/(samples+WARMUP) — bandit dominates at scale.' },
+      { name: 'CLAUDE_FLOW_ROUTER_BANDIT_SHRINKAGE_LAMBDA',      iter: 57, defaultValue: '4',           currentValue: process.env.CLAUDE_FLOW_ROUTER_BANDIT_SHRINKAGE_LAMBDA ?? '', isOverride: !!process.env.CLAUDE_FLOW_ROUTER_BANDIT_SHRINKAGE_LAMBDA, effect: 'Cross-bucket shrinkage strength. λ=0 disables; higher λ = more bias toward marginal anchor for cold cells.' },
     ];
 
     const visible = onlyOverrides ? rows.filter(r => r.isOverride) : rows;
