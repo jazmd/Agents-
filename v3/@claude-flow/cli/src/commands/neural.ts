@@ -2413,7 +2413,7 @@ const routerDecideCommand: Command = {
 
     const { analyzeTaskComplexity, routeToModelFull } = await import('../ruvector/model-router.js');
     const { embedTaskWithCache } = await import('../ruvector/task-embedder.js');
-    const { neuralRouterStatus } = await import('../ruvector/neural-router.js');
+    const { neuralRouterStatus, tryCostOptimalRoute } = await import('../ruvector/neural-router.js');
 
     const t0 = performance.now();
     const complexity = analyzeTaskComplexity(task);
@@ -2421,6 +2421,16 @@ const routerDecideCommand: Command = {
     try { embedding = await embedTaskWithCache(task); } catch { /* embedder may be absent */ }
     const result = await routeToModelFull(task, embedding);
     const status = await neuralRouterStatus();
+    // iter 45 — also fetch the neural-layer result so we can surface the
+    // ensemble-disagreement diagnostic. Extra inference but `decide` is an
+    // operator inspection tool, not the hot path.
+    let neuralResult: Awaited<ReturnType<typeof tryCostOptimalRoute>> = null;
+    if (embedding) {
+      const bucket = complexity.score < 0.34 ? 'low' : complexity.score < 0.67 ? 'med' : 'high';
+      try {
+        neuralResult = await tryCostOptimalRoute(embedding, { complexityBucket: bucket });
+      } catch { /* gated off or backend absent */ }
+    }
     const ms = performance.now() - t0;
 
     const payload = {
@@ -2445,6 +2455,10 @@ const routerDecideCommand: Command = {
         neuralBackend: result.neuralBackend,
         costMultiplier: result.costMultiplier,
         reasoning: result.reasoning,
+        // iter 45 — ensemble disagreement diagnostic (always set when both
+        // unified KRR + bucket specialist are loaded; observable signal for
+        // tuning iter 44's threshold). null when not applicable.
+        ensembleDisagreement: neuralResult?.ensembleDisagreement ?? null,
       },
       alternatives: result.alternatives,
       backend: {
@@ -2460,6 +2474,7 @@ const routerDecideCommand: Command = {
         CLAUDE_FLOW_ROUTER_LATENCY_BUDGET_MS: process.env.CLAUDE_FLOW_ROUTER_LATENCY_BUDGET_MS ?? null,
         CLAUDE_FLOW_ROUTER_QUALITY_BAR: process.env.CLAUDE_FLOW_ROUTER_QUALITY_BAR ?? null,
         CLAUDE_FLOW_ROUTER_BANDIT_PER_MODEL: process.env.CLAUDE_FLOW_ROUTER_BANDIT_PER_MODEL ?? null,
+        CLAUDE_FLOW_ROUTER_ENSEMBLE_UNCERTAINTY_THRESHOLD: process.env.CLAUDE_FLOW_ROUTER_ENSEMBLE_UNCERTAINTY_THRESHOLD ?? null,
       },
       elapsedMs: Math.round(ms * 100) / 100,
     };
@@ -2493,6 +2508,13 @@ const routerDecideCommand: Command = {
       output.writeln(`    via:          openrouter → ${result.openrouterModel}`);
     }
     output.writeln(`    reasoning:    ${result.reasoning}`);
+    if (neuralResult?.ensembleDisagreement !== undefined) {
+      const d = neuralResult.ensembleDisagreement;
+      const annotation = d > 0.20 ? output.warning(' ⚠ high — consider tuning iter 44 threshold')
+        : d > 0.10 ? output.dim(' (moderate)')
+        : output.dim(' (low — predictions agree)');
+      output.writeln(`    ensemble disagreement: ${d.toFixed(4)}${annotation}`);
+    }
     output.writeln('');
     if (result.alternatives.length > 0) {
       output.writeln(output.bold('  Alternatives (model: score):'));

@@ -60,6 +60,15 @@ export interface NeuralRouteResult {
   routedBy: NeuralRoutedBy;
   /** Inference latency in microseconds. */
   inferenceTimeUs: number;
+  /**
+   * ADR-149 iter 45 — ensemble disagreement diagnostic. Absolute difference
+   * in predicted quality for the PICKED model between the unified KRR and
+   * the bucket specialist (iter 16). Set only when both are loaded AND a
+   * complexityBucket was supplied. Operators tuning iter 44's
+   * `CLAUDE_FLOW_ROUTER_ENSEMBLE_UNCERTAINTY_THRESHOLD` need to observe
+   * realistic disagreement values to pick a sensible cutoff.
+   */
+  ensembleDisagreement?: number;
 }
 
 /** Module-level configuration. Read once at first call from env. */
@@ -692,15 +701,17 @@ export async function tryCostOptimalRoute(
       }
     }
 
-    // ADR-149 iter 44 — ensemble-uncertainty-aware fallback. If both the
-    // unified router and a bucket specialist are loaded AND the threshold
-    // is configured, compare the picked model's predicted quality across
-    // both. Large disagreement → the prediction is uncertain → return null
-    // so the caller falls back to the pure bandit path (same as the 429/5xx
-    // error path — uncertainty IS a kind of soft failure).
+    // ADR-149 iter 44+45 — ensemble disagreement diagnostic + uncertainty-
+    // aware fallback. When both the unified router and a bucket specialist
+    // are loaded AND a bucket was supplied, compute the picked model's
+    // prediction disagreement across both backends. ALWAYS surface it on
+    // the result (iter 45 — observable signal for tuning the threshold).
+    // If iter 44's threshold is > 0 AND the disagreement exceeds it, return
+    // null so the caller falls back to the pure bandit path (same as 429/5xx
+    // — uncertainty is a kind of soft failure).
+    let ensembleDisagreement: number | undefined;
     if (
-      cfg.ensembleUncertaintyThreshold > 0
-      && opts?.complexityBucket
+      opts?.complexityBucket
       && backend.routerByBucket?.[opts.complexityBucket]
       && backend.router
       && activeRouter !== backend.router            // we used the specialist; cross-check vs unified
@@ -708,9 +719,8 @@ export async function tryCostOptimalRoute(
       const unifiedAlts = backend.router.predictAll(embedding);
       const specialistQ = main.predictedQuality;
       const unifiedQ = unifiedAlts.find(a => a.id === main.id)?.predictedQuality ?? specialistQ;
-      const disagreement = Math.abs(unifiedQ - specialistQ);
-      if (disagreement > cfg.ensembleUncertaintyThreshold) {
-        // Caller's bandit-fallback engages — same return path as 429/5xx.
+      ensembleDisagreement = Math.abs(unifiedQ - specialistQ);
+      if (cfg.ensembleUncertaintyThreshold > 0 && ensembleDisagreement > cfg.ensembleUncertaintyThreshold) {
         return null;
       }
     }
@@ -729,6 +739,7 @@ export async function tryCostOptimalRoute(
       })),
       routedBy: backend.routedBy,
       inferenceTimeUs: t1 - t0,
+      ...(ensembleDisagreement !== undefined ? { ensembleDisagreement } : {}),
     };
   } catch {
     // Any runtime failure is silently swallowed → caller's bandit-fallback engages.
