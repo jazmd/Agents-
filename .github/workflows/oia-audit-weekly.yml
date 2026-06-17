@@ -135,8 +135,17 @@ jobs:
             const j = JSON.parse(require('fs').readFileSync('/tmp/drift-trend.json'));
             console.log(j.alert?.triggered ? 'TRIGGERED' : 'OK');
           ")
+          # iter 97 — also surface the fast-path label so the Actions UI
+          # shows which iter-66/67 path executed. Confirms cron used the
+          # baseline-file path (expected ~1.4s) and not slow path (~26s).
+          PATH_TAKEN=$(node -e "
+            const j = JSON.parse(require('fs').readFileSync('/tmp/drift-trend.json'));
+            const t = j.timing || {};
+            console.log((t.path || 'unknown') + ' (wall ' + (t.parallelWallMs ?? '?') + 'ms)');
+          ")
           echo "## Drift vs prior week: \`$VERDICT\` (similarity=$OVERALL)" >> $GITHUB_STEP_SUMMARY
           echo "Alert status: \`$ALERT\`" >> $GITHUB_STEP_SUMMARY
+          echo "Path: \`$PATH_TAKEN\`" >> $GITHUB_STEP_SUMMARY
 
       - name: Upload drift trend artifact
         # iter 70 — same always() pattern; the trend artifact is most

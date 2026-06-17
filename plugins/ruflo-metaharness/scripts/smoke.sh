@@ -191,6 +191,15 @@ grep -q "execCli(\[\s*'-y'\s*,\s*'metaharness@latest'" "$F" 2>/dev/null || \
 grep -q "cwd: opts" "$F" || miss="$miss no-cwd-passthrough"
 [[ -z "$miss" ]] && ok || bad "$miss"
 
+step "17z60. weekly cron summary surfaces timing.path (iter 97)"
+miss=""
+W="$ROOT/../../.github/workflows/oia-audit-weekly.yml"
+grep -q "PATH_TAKEN" "$W" 2>/dev/null || miss="$miss no-path-taken-var"
+grep -q "t.path || 'unknown'" "$W" 2>/dev/null || miss="$miss no-path-extraction"
+grep -q "t.parallelWallMs" "$W" 2>/dev/null || miss="$miss no-wall-extraction"
+grep -q 'echo "Path: \\`\$PATH_TAKEN\\`"' "$W" 2>/dev/null || miss="$miss no-path-summary-line"
+[[ -z "$miss" ]] && ok || bad "$miss"
+
 step "17z59. drift-from-history table output shows path + wall (iter 96)"
 miss=""
 F="$ROOT/scripts/drift-from-history.mjs"
