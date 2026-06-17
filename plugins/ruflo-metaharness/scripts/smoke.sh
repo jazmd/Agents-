@@ -191,6 +191,36 @@ grep -q "execCli(\[\s*'-y'\s*,\s*'metaharness@latest'" "$F" 2>/dev/null || \
 grep -q "cwd: opts" "$F" || miss="$miss no-cwd-passthrough"
 [[ -z "$miss" ]] && ok || bad "$miss"
 
+step "17z70. ADR-152 cross-references resolve + ADR-151 scope-refs documented (iter 107)"
+miss=""
+ADR_DIR="$ROOT/../../v3/docs/adr"
+# ADR-152 (Genome Similarity Search) references only existing ADRs:
+# ADR-150, ADR-151. Both must resolve. Same gate as iter-106 but for
+# ADR-152's body.
+ADR_152="$ADR_DIR/ADR-152-genome-similarity-search.md"
+REFS=$(grep -oE "ADR-15[0-9]" "$ADR_152" 2>/dev/null | sort -u)
+COUNT=0
+for ref in $REFS; do
+  COUNT=$((COUNT + 1))
+  num=$(echo "$ref" | sed -E 's/ADR-//')
+  if ! ls "$ADR_DIR"/ADR-${num}-*.md 2>/dev/null | head -1 | grep -q . ; then
+    miss="$miss ADR-152-ref-${ref}-not-found"
+  fi
+done
+[[ "$COUNT" -ge 2 ]] || miss="$miss adr152-too-few-refs:$COUNT"
+
+# ADR-151 references ADR-153-156 (scope-only, to-be-created). Verify
+# these are explicitly documented as scope-only in ADR-151's body
+# (per the "each sub-capability gets its own ADR" pattern from iter 34).
+ADR_151="$ADR_DIR/ADR-151-harness-intelligence-layer.md"
+grep -q "scope-only\|scope only" "$ADR_151" 2>/dev/null || miss="$miss adr151-no-scope-only-marker"
+# ADR-151 must reference 153, 154, 155, 156 as the 4 future ADRs
+for n in 153 154 155 156; do
+  grep -q "ADR-${n}" "$ADR_151" 2>/dev/null || miss="$miss adr151-missing-ADR-${n}"
+done
+
+[[ -z "$miss" ]] && ok || bad "$miss"
+
 step "17z69. ADR-150 cross-references resolve to existing files (iter 106)"
 miss=""
 # ADR-150's body references ADR-151 and ADR-152 (the Phase-3 scope shell
