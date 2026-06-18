@@ -70,5 +70,7 @@ All ADRs are located in [`/v3/implementation/adrs/`](../../implementation/adrs/)
 
 ---
 
-**Last Updated:** 2026-01-14
-**CLI Version:** @claude-flow/cli@3.0.0-alpha.104
+| [ADR-147](ADR-147-retrospective-harness-optimization.md) | Retrospective Harness Optimization (RHO) for SONA | Proposed |
+
+**Last Updated:** 2026-06-07
+**CLI Version:** @claude-flow/cli@3.6.10
