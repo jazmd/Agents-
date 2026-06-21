@@ -133,6 +133,44 @@ This adds slash commands and agent definitions only. The Ruflo MCP server is NOT
 | [**ruflo-sparc**](plugins/ruflo-sparc/README.md) | Guided 5-phase development methodology with quality gates |
 | [**ruflo-metaharness**](plugins/ruflo-metaharness/README.md) | Grade your agent setup, scan tool configs for security risks, and track changes over time ([guide](docs/metaharness-user-guide.md)) |
 
+## AgentDB / RAG behavior
+
+### Automatic ingestion
+Agents automatically ingest project context into AgentDB through:
+
+- SessionStart hooks
+- auto-memory import
+- post-task trajectory capture
+
+This keeps AgentDB updated without requiring manual vector-store prompts.
+
+### Retrieval flow
+Agents retrieve context through:
+
+- `memory_search_unified`
+- AgentDB vector search
+- Claude memory + AgentDB merged retrieval
+
+This allows semantic retrieval before file search or edit decisions.
+
+### Tracking / audit
+RAG usage can be inspected through:
+
+- `memory_bridge_status`
+- statusline memory indicators
+- auto-memory hook status output
+
+This makes AgentDB usage visible and debuggable.
+
+### What gets stored
+AgentDB stores:
+
+- Claude auto-memory entries
+- task trajectories
+- routing decisions
+- learned execution patterns
+- ONNX vector embeddings for semantic search
+
 #### DevOps & Observability
 
 | Plugin | What it does |
