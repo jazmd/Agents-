@@ -23,6 +23,7 @@ claude --plugin-dir plugins/ruflo-market-data
 | Skill | Usage | Description |
 |-------|-------|-------------|
 | `market-ingest` | `/market-ingest <symbol> [--source api]` | Ingest and normalize market data into OHLCV vectors with HNSW indexing |
+| `xquik-social-signals` | `/xquik-social-signals <query-or-symbol> [limit]` | Ingest bounded X social signals from Xquik into market-data memory |
 | `market-pattern` | `/market-pattern <symbol> [--period 1D]` | Detect and classify candlestick patterns from ingested data |
 
 ## Commands (5 subcommands)
